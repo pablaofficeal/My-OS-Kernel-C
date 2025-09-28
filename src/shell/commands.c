@@ -441,8 +441,13 @@ void cmd_snake(char *args) {
     printf("Returning to shell...\n");
 }
 
+// В НАЧАЛО src/shell/commands.c добавить:
 #include "../drivers/wifi/wifi.h"
 
+// ПЕРЕД функциями wifi добавить:
+void cmd_wifi(char* args);
+
+// ЗАТЕМ функции wifi:
 void cmd_wifi_scan(char* args) {
     printf("WiFi: Starting network scan...\n");
     int networks = wifi_scan_networks();

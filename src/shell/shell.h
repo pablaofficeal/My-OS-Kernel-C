@@ -25,6 +25,13 @@ void cmd_format(char *args);
 void cmd_create_test_files();
 void cmd_snake(char *args);
 
+// src/shell/shell.h - ДОБАВИТЬ В КОНЕЦ:
+void cmd_wifi(char* args);
+void cmd_wifi_scan(char* args);
+void cmd_wifi_connect(char* args);
+void cmd_wifi_status(char* args);
+void cmd_wifi_disconnect(char* args);
+
 // НОВЫЕ КОМАНДЫ - ДОБАВИТЬ ЭТИ СТРОКИ:
 void cmd_write(char *args);
 void cmd_info(char *filename);
