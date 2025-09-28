@@ -38,4 +38,7 @@ void cmd_info(char *filename);
 void cmd_rename(char *args);
 void cmd_space();
 
+// Добавить объявление:
+void cmd_tetris(char *args);
+
 #endif
