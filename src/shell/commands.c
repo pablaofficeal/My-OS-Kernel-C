@@ -543,3 +543,24 @@ void cmd_wifi(char* args) {
         printf("Unknown WiFi command: %s\n", args);
     }
 }
+
+// В начало добавить:
+#include "../game/tetris/tetris.h"
+
+// Добавить функцию:
+void cmd_tetris(char *args) {
+    printf("Starting Tetris...\n");
+    printf("Controls: WASD to move, Space to drop, P to pause, ESC to quit\n");
+    printf("Press any key to start...\n");
+    
+    // Ждем нажатия любой клавиши
+    while (!keyboard_has_data()) {
+        for (volatile int i = 0; i < 10000; i++);
+    }
+    keyboard_read_scancode(); // Очищаем буфер
+    
+    // Запускаем игру
+    tetris_game_loop();
+    
+    printf("Returning to shell...\n");
+}
