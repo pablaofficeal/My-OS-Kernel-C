@@ -49,7 +49,7 @@ static void filename_to_83(const char *filename, char *name83) {
     }
 }
 
-static void name83_to_filename(const char *name83, char *filename) {
+void name83_to_filename(const char *name83, char *filename) {
     int pos = 0;
     
     // Копируем имя
