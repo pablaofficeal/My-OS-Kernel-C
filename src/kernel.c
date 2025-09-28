@@ -16,7 +16,6 @@ const unsigned int multiboot_header[] = {
 #include "fs/fat16.h"
 #include "fs/disk.h"
 
-// ОБЪЯВЛЯЕМ ФУНКЦИЮ ПЕРЕД ИСПОЛЬЗОВАНИЕМ
 void kernel_main(void);
 
 // Точка входа
