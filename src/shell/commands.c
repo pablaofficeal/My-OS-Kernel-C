@@ -440,3 +440,97 @@ void cmd_snake(char *args) {
     
     printf("Returning to shell...\n");
 }
+
+#include "../drivers/wifi/wifi.h"
+
+void cmd_wifi_scan(char* args) {
+    printf("WiFi: Starting network scan...\n");
+    int networks = wifi_scan_networks();
+    if (networks > 0) {
+        wifi_print_networks();
+    } else {
+        printf("WiFi: No networks found\n");
+    }
+}
+
+void cmd_wifi_connect(char* args) {
+    char ssid[32];
+    char password[64];
+    
+    // Простой парсер аргументов
+    char* space = strchr(args, ' ');
+    if (!space) {
+        printf("Usage: wifi connect <SSID> <password>\n");
+        return;
+    }
+    
+    *space = '\0';
+    strcpy(ssid, args);
+    strcpy(password, space + 1);
+    
+    if (wifi_connect(ssid, password) == 0) {
+        printf("WiFi: Connected successfully\n");
+    } else {
+        printf("WiFi: Connection failed\n");
+    }
+}
+
+void cmd_wifi_status(char* args) {
+    wifi_adapter_t status;
+    if (wifi_get_status(&status) == 0) {
+        printf("WiFi Status:\n");
+        printf("  State: ");
+        switch (status.state) {
+            case WIFI_STATE_DISABLED: printf("Disabled\n"); break;
+            case WIFI_STATE_SCANNING: printf("Scanning\n"); break;
+            case WIFI_STATE_CONNECTING: printf("Connecting\n"); break;
+            case WIFI_STATE_CONNECTED: printf("Connected\n"); break;
+            case WIFI_STATE_DISCONNECTED: printf("Disconnected\n"); break;
+            case WIFI_STATE_ERROR: printf("Error\n"); break;
+        }
+        
+        if (status.state == WIFI_STATE_CONNECTED) {
+            printf("  Connected to: %s\n", status.current_network.ssid);
+            printf("  Signal: %d dBm\n", status.current_network.signal_strength);
+            printf("  Channel: %d\n", status.current_network.channel);
+        }
+        
+        printf("  MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+               status.mac_address[0], status.mac_address[1],
+               status.mac_address[2], status.mac_address[3],
+               status.mac_address[4], status.mac_address[5]);
+    } else {
+        printf("WiFi: Not initialized\n");
+    }
+}
+
+void cmd_wifi_disconnect(char* args) {
+    if (wifi_disconnect() == 0) {
+        printf("WiFi: Disconnected\n");
+    } else {
+        printf("WiFi: Disconnect failed\n");
+    }
+}
+
+void cmd_wifi(char* args) {
+    if (strlen(args) == 0) {
+        printf("WiFi Commands:\n");
+        printf("  wifi scan      - Scan for networks\n");
+        printf("  wifi status    - Show WiFi status\n");
+        printf("  wifi connect   - Connect to network\n");
+        printf("  wifi disconnect- Disconnect from network\n");
+        return;
+    }
+    
+    if (strncmp(args, "scan", 4) == 0) {
+        cmd_wifi_scan(args + 4);
+    } else if (strncmp(args, "status", 6) == 0) {
+        cmd_wifi_status(args + 6);
+    } else if (strncmp(args, "connect", 7) == 0) {
+        cmd_wifi_connect(args + 7);
+    } else if (strncmp(args, "disconnect", 10) == 0) {
+        cmd_wifi_disconnect(args + 10);
+    } else {
+        printf("Unknown WiFi command: %s\n", args);
+    }
+}

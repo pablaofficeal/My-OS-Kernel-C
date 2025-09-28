@@ -53,6 +53,7 @@ void execute_command(char *input) {
     else if (strncmp(input, "rename ", 7) == 0) cmd_rename(input + 7);
     else if (strcmp(input, "space") == 0) cmd_space();
     else if (strcmp(input, "snake") == 0) cmd_snake("");
+    else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);
     
     else if (input[0] != '\0') printf("Unknown command: %s\n", input);
 }
