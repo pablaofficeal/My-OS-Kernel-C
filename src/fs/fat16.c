@@ -1,4 +1,4 @@
-// fs/fat16.c - УЛУЧШЕННАЯ ВЕРСИЯ С ПОСТОЯННЫМ ХРАНЕНИЕМ
+// fs/fat16.c - ПОЛНАЯ ВЕРСИЯ С СИНХРОНИЗАЦИЕЙ
 #include "fat16.h"
 #include "../drivers/screen.h"
 #include "../lib/string.h"
@@ -10,6 +10,7 @@ static unsigned char file_buffer[512];
 
 static unsigned int fat_start, root_start, data_start;
 static unsigned int total_clusters;
+static int needs_sync = 0;
 
 // Вспомогательные функции
 static int toupper(int c) {
@@ -30,7 +31,6 @@ static void filename_to_83(const char *filename, char *name83) {
         i++;
     }
     
-    // Имя файла
     int name_len = (dot_pos == -1) ? i : dot_pos;
     if (name_len > 8) name_len = 8;
     
@@ -38,7 +38,6 @@ static void filename_to_83(const char *filename, char *name83) {
         name83[j] = toupper(filename[j]);
     }
     
-    // Расширение
     if (dot_pos != -1) {
         int ext_start = dot_pos + 1;
         int ext_len = 0;
@@ -52,19 +51,16 @@ static void filename_to_83(const char *filename, char *name83) {
 void name83_to_filename(const char *name83, char *filename) {
     int pos = 0;
     
-    // Копируем имя
     for (int i = 0; i < 8; i++) {
         if (name83[i] != ' ') {
             filename[pos++] = name83[i];
         }
     }
     
-    // Добавляем точку если есть расширение
     if (name83[8] != ' ') {
         filename[pos++] = '.';
     }
     
-    // Копируем расширение
     for (int i = 8; i < 11; i++) {
         if (name83[i] != ' ') {
             filename[pos++] = name83[i];
@@ -72,6 +68,73 @@ void name83_to_filename(const char *name83, char *filename) {
     }
     
     filename[pos] = '\0';
+}
+
+// ФУНКЦИИ СИНХРОНИЗАЦИИ
+void fat16_sync_fat() {
+    for (int i = 0; i < boot_sector.sectors_per_fat; i++) {
+        unsigned char *sector_data = &fat_table[i * 512];
+        disk_write_sector(fat_start + i, sector_data);
+    }
+    
+    for (int i = 0; i < boot_sector.sectors_per_fat; i++) {
+        unsigned char *sector_data = &fat_table[i * 512];
+        disk_write_sector(fat_start + boot_sector.sectors_per_fat + i, sector_data);
+    }
+}
+
+void fat16_sync_root() {
+    int root_sectors = (boot_sector.root_entries * 32) / 512;
+    for (int i = 0; i < root_sectors; i++) {
+        unsigned char *sector_data = &root_dir[i * 512];
+        disk_write_sector(root_start + i, sector_data);
+    }
+}
+
+void fat16_sync() {
+    if (needs_sync) {
+        printf("FAT16: Syncing to disk...\n");
+        fat16_sync_fat();
+        fat16_sync_root();
+        needs_sync = 0;
+        printf("FAT16: Sync complete\n");
+    }
+}
+
+int fat16_load_from_disk() {
+    printf("FAT16: Loading from disk...\n");
+    
+    // Читаем загрузочный сектор
+    disk_read_sector(0, (unsigned char*)&boot_sector);
+    
+    // Проверяем сигнатуру
+    if (boot_sector.bytes_per_sector != 512) {
+        printf("FAT16: Invalid boot sector\n");
+        return 0;
+    }
+    
+    // Пересчитываем позиции
+    fat_start = boot_sector.reserved_sectors;
+    root_start = fat_start + (boot_sector.fat_copies * boot_sector.sectors_per_fat);
+    data_start = root_start + ((boot_sector.root_entries * 32) / boot_sector.bytes_per_sector);
+    
+    // Загружаем FAT таблицу
+    for (int i = 0; i < boot_sector.sectors_per_fat; i++) {
+        disk_read_sector(fat_start + i, &fat_table[i * 512]);
+    }
+    
+    // Загружаем корневой каталог
+    int root_sectors = (boot_sector.root_entries * 32) / 512;
+    for (int i = 0; i < root_sectors; i++) {
+        disk_read_sector(root_start + i, &root_dir[i * 512]);
+    }
+    
+    // Рассчитываем общее количество кластеров
+    unsigned int data_sectors = boot_sector.total_sectors_large - data_start;
+    total_clusters = data_sectors / boot_sector.sectors_per_cluster;
+    
+    printf("FAT16: Loaded from disk, %d clusters available\n", total_clusters - 2);
+    return 1;
 }
 
 static unsigned short fat16_read_fat_entry(unsigned short cluster) {
@@ -84,6 +147,7 @@ static void fat16_write_fat_entry(unsigned short cluster, unsigned short value) 
     if (cluster < total_clusters) {
         unsigned int fat_offset = cluster * 2;
         *(unsigned short*)&fat_table[fat_offset] = value;
+        needs_sync = 1;
     }
 }
 
@@ -101,13 +165,13 @@ static int fat16_allocate_cluster_chain(unsigned short start_cluster, unsigned i
     
     for (unsigned int i = 1; i < clusters_needed; i++) {
         unsigned short next = fat16_find_free_cluster();
-        if (!next) return 0;  // No free clusters
+        if (!next) return 0;
         
         fat16_write_fat_entry(current, next);
         current = next;
     }
     
-    fat16_write_fat_entry(current, 0xFFFF);  // EOF
+    fat16_write_fat_entry(current, 0xFFFF);
     return 1;
 }
 
@@ -116,7 +180,7 @@ static void fat16_free_cluster_chain(unsigned short start_cluster) {
     
     while (current < 0xFFF8) {
         unsigned short next = fat16_read_fat_entry(current);
-        fat16_write_fat_entry(current, 0);  // Mark as free
+        fat16_write_fat_entry(current, 0);
         if (next >= 0xFFF8) break;
         current = next;
     }
@@ -129,9 +193,9 @@ static fat16_dir_entry_t* fat16_find_file_entry(const char *filename) {
     for (int i = 0; i < boot_sector.root_entries; i++) {
         fat16_dir_entry_t *entry = (fat16_dir_entry_t*)&root_dir[i * 32];
         
-        if (entry->filename[0] == 0x00) break;  // End of directory
-        if (entry->filename[0] == 0xE5) continue;  // Deleted file
-        if (entry->attributes & 0x08 || entry->attributes & 0x10) continue;  // Volume label or directory
+        if (entry->filename[0] == 0x00) break;
+        if (entry->filename[0] == 0xE5) continue;
+        if (entry->attributes & 0x08 || entry->attributes & 0x10) continue;
         
         int match = 1;
         for (int j = 0; j < 11; j++) {
@@ -162,7 +226,14 @@ static fat16_dir_entry_t* fat16_find_free_entry() {
 int fat16_init() {
     printf("FAT16: Initializing %dMB file system...\n", DISK_SIZE_MB);
     
-    // Инициализируем загрузочный сектор
+    // Пытаемся загрузить существующую файловую систему
+    if (fat16_load_from_disk()) {
+        return 1;
+    }
+    
+    // Создаем новую файловую систему
+    printf("FAT16: Creating new file system...\n");
+    
     memset(&boot_sector, 0, sizeof(boot_sector));
     
     boot_sector.jmp[0] = 0xEB;
@@ -184,27 +255,23 @@ int fat16_init() {
     boot_sector.total_sectors_large = DISK_SIZE_SECTORS;
     memcpy(boot_sector.file_system, "FAT16   ", 8);
     
-    // Рассчитываем позиции
     fat_start = boot_sector.reserved_sectors;
     root_start = fat_start + (boot_sector.fat_copies * boot_sector.sectors_per_fat);
     data_start = root_start + ((boot_sector.root_entries * 32) / boot_sector.bytes_per_sector);
     
-    // Рассчитываем общее количество кластеров
     unsigned int data_sectors = DISK_SIZE_SECTORS - data_start;
     total_clusters = data_sectors / boot_sector.sectors_per_cluster;
     
     printf("FAT16: FAT at sector %d, Root at %d, Data at %d\n", fat_start, root_start, data_start);
     printf("FAT16: Total clusters: %d\n", total_clusters);
     
-    // Инициализируем FAT таблицу
     memset(fat_table, 0, sizeof(fat_table));
-    fat16_write_fat_entry(0, 0xFFF8);  // Media descriptor
-    fat16_write_fat_entry(1, 0xFFFF);  // EOF marker
+    fat16_write_fat_entry(0, 0xFFF8);
+    fat16_write_fat_entry(1, 0xFFFF);
     
-    // Инициализируем корневой каталог
     memset(root_dir, 0, sizeof(root_dir));
     
-    // Создаем тестовые файлы с реальными данными
+    // Создаем начальные файлы
     const char *readme_data = "Welcome to PureC OS with FAT16 file system!\n"
                              "This is a persistent file system.\n"
                              "Files will be preserved between reboots.\n";
@@ -212,7 +279,6 @@ int fat16_init() {
     const char *test_data = "This is a test file for FAT16 file system.\n"
                            "You can create, read, write and delete files.\n";
     
-    // Создаем README.TXT
     fat16_dir_entry_t *file1 = (fat16_dir_entry_t*)&root_dir[0];
     memcpy(file1->filename, "README  ", 8);
     memcpy(file1->extension, "TXT", 3);
@@ -222,14 +288,12 @@ int fat16_init() {
     file1->time = 0x8000;
     file1->date = 0x4A97;
     
-    // Записываем данные README.TXT
     unsigned int cluster2_sector = data_start + (2 - 2) * boot_sector.sectors_per_cluster;
     memset(file_buffer, 0, sizeof(file_buffer));
     memcpy(file_buffer, readme_data, strlen(readme_data));
     disk_write_sector(cluster2_sector, file_buffer);
     fat16_write_fat_entry(2, 0xFFFF);
     
-    // Создаем TEST.TXT
     fat16_dir_entry_t *file2 = (fat16_dir_entry_t*)&root_dir[32];
     memcpy(file2->filename, "TEST    ", 8);
     memcpy(file2->extension, "TXT", 3);
@@ -239,12 +303,14 @@ int fat16_init() {
     file2->time = 0x8000;
     file2->date = 0x4A97;
     
-    // Записываем данные TEST.TXT
     unsigned int cluster3_sector = data_start + (3 - 2) * boot_sector.sectors_per_cluster;
     memset(file_buffer, 0, sizeof(file_buffer));
     memcpy(file_buffer, test_data, strlen(test_data));
     disk_write_sector(cluster3_sector, file_buffer);
     fat16_write_fat_entry(3, 0xFFFF);
+    
+    // Синхронизируем начальное состояние на диск
+    fat16_sync();
     
     printf("FAT16: Ready! %dMB disk, %d clusters available\n", DISK_SIZE_MB, total_clusters - 4);
     return 1;
@@ -261,11 +327,14 @@ int fat16_format() {
     // Очищаем корневой каталог
     memset(root_dir, 0, sizeof(root_dir));
     
-    // Очищаем данные (первые несколько секторов)
+    // Очищаем данные
     memset(file_buffer, 0, sizeof(file_buffer));
     for (int i = 0; i < 100; i++) {
         disk_write_sector(data_start + i, file_buffer);
     }
+    
+    needs_sync = 1;
+    fat16_sync();
     
     printf("FAT16: Format complete\n");
     return 1;
@@ -289,7 +358,6 @@ int fat16_list_files() {
         char filename[13];
         name83_to_filename(entry->filename, filename);
         
-        // Разбираем дату (FAT16 format)
         int day = entry->date & 0x1F;
         int month = (entry->date >> 5) & 0x0F;
         int year = ((entry->date >> 9) & 0x7F) + 1980;
@@ -317,10 +385,9 @@ file_t *fat16_open(const char *filename, int mode) {
     fat16_dir_entry_t *entry = fat16_find_file_entry(filename);
     
     if (!entry) {
-        if (mode == 0) {  // Try to open for read, but file doesn't exist
+        if (mode == 0) {
             return 0;
         }
-        // For write/append, create the file if it doesn't exist
         if (!fat16_create(filename)) {
             return 0;
         }
@@ -336,7 +403,7 @@ file_t *fat16_open(const char *filename, int mode) {
     file.is_open = 1;
     file.mode = mode;
     
-    if (mode == 2) {  // Append mode
+    if (mode == 2) {
         file.current_position = file.size;
     }
     
@@ -392,12 +459,10 @@ int fat16_write(file_t *file, const char *buffer, unsigned int size) {
     unsigned int bytes_written = 0;
     unsigned int sectors_per_cluster = boot_sector.sectors_per_cluster;
     
-    // Calculate required clusters
     unsigned int required_space = file->current_position + size;
     unsigned int current_clusters = (file->size + FAT16_CLUSTER_SIZE - 1) / FAT16_CLUSTER_SIZE;
     unsigned int needed_clusters = (required_space + FAT16_CLUSTER_SIZE - 1) / FAT16_CLUSTER_SIZE;
     
-    // Allocate more clusters if needed
     if (needed_clusters > current_clusters) {
         if (!fat16_allocate_cluster_chain(file->first_cluster, needed_clusters)) {
             printf("FAT16: Not enough space for write\n");
@@ -409,7 +474,6 @@ int fat16_write(file_t *file, const char *buffer, unsigned int size) {
         unsigned int sector = data_start + (file->current_cluster - 2) * sectors_per_cluster;
         
         for (int s = 0; s < sectors_per_cluster; s++) {
-            // Read sector first (for partial writes)
             if (file->current_position % 512 != 0 || bytes_written + 512 > size) {
                 disk_read_sector(sector + s, file_buffer);
             } else {
@@ -434,7 +498,6 @@ int fat16_write(file_t *file, const char *buffer, unsigned int size) {
         if (bytes_written < size) {
             file->current_cluster = fat16_read_fat_entry(file->current_cluster);
             if (file->current_cluster >= 0xFFF8) {
-                // Need to allocate new cluster
                 unsigned short new_cluster = fat16_find_free_cluster();
                 if (!new_cluster) break;
                 fat16_write_fat_entry(file->current_cluster, new_cluster);
@@ -444,14 +507,13 @@ int fat16_write(file_t *file, const char *buffer, unsigned int size) {
         }
     }
     
-    // Update file size if we wrote beyond old size
     if (file->current_position > file->size) {
         file->size = file->current_position;
         
-        // Update directory entry
         fat16_dir_entry_t *entry = fat16_find_file_entry(file->filename);
         if (entry) {
             entry->file_size = file->size;
+            needs_sync = 1;
         }
     }
     
@@ -481,13 +543,14 @@ int fat16_create(const char *filename) {
     
     memset(entry, 0, sizeof(fat16_dir_entry_t));
     memcpy(entry->filename, name83, 11);
-    entry->attributes = 0x20;  // Archive
+    entry->attributes = 0x20;
     entry->starting_cluster = cluster;
     entry->file_size = 0;
-    entry->time = 0x8000;      // 16:00
-    entry->date = 0x4A97;      // 2023-01-01
+    entry->time = 0x8000;
+    entry->date = 0x4A97;
     
     fat16_write_fat_entry(cluster, 0xFFFF);
+    needs_sync = 1;
     
     printf("FAT16: Created '%s' at cluster %d\n", filename, cluster);
     return 1;
@@ -500,11 +563,9 @@ int fat16_delete(const char *filename) {
         return 0;
     }
     
-    // Free cluster chain
     fat16_free_cluster_chain(entry->starting_cluster);
-    
-    // Mark directory entry as deleted
     entry->filename[0] = 0xE5;
+    needs_sync = 1;
     
     printf("FAT16: Deleted '%s'\n", filename);
     return 1;
@@ -530,7 +591,7 @@ unsigned int fat16_get_free_space() {
 }
 
 unsigned int fat16_get_total_space() {
-    return (total_clusters - 2) * FAT16_CLUSTER_SIZE;  // Exclude reserved clusters
+    return (total_clusters - 2) * FAT16_CLUSTER_SIZE;
 }
 
 int fat16_rename(const char *oldname, const char *newname) {
@@ -548,6 +609,7 @@ int fat16_rename(const char *oldname, const char *newname) {
     char name83[11];
     filename_to_83(newname, name83);
     memcpy(entry->filename, name83, 11);
+    needs_sync = 1;
     
     printf("FAT16: Renamed '%s' to '%s'\n", oldname, newname);
     return 1;

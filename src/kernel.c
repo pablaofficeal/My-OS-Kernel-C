@@ -1,4 +1,4 @@
-// kernel.c
+// kernel.c - ИСПРАВЛЕННАЯ ВЕРСИЯ
 #define MULTIBOOT_HEADER_MAGIC 0x1BADB002
 #define MULTIBOOT_HEADER_FLAGS 0x00000003
 #define MULTIBOOT_HEADER_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
@@ -14,8 +14,13 @@ const unsigned int multiboot_header[] = {
 #include "drivers/screen.h"
 #include "shell/shell.h"
 #include "fs/fat16.h"
+#include "fs/disk.h"
 
-// kernel.c - ДОБАВИТЬ В kernel_main
+// Объявляем _start как точку входа
+void _start(void) {
+    kernel_main();
+}
+
 void kernel_main(void) {
     shell_init();
     
@@ -30,6 +35,7 @@ void kernel_main(void) {
     // Автоматическая синхронизация при запуске
     fat16_sync();
     
+    printf("Kernel ready! Starting shell...\n");
     shell_run();
     
     // Синхронизация при завершении
