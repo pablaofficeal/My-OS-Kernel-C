@@ -1,4 +1,4 @@
-// shell/commands.c - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// shell/commands.c - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 #include "../drivers/screen.h"
 #include "../fs/fat16.h"
 #include "../lib/string.h"
@@ -133,7 +133,7 @@ void cmd_cat(char *filename) {
         return;
     }
     
-    file_t *file = fat16_open(filename);
+    file_t *file = fat16_open(filename, 0);  // <-- ИСПРАВЛЕНО: добавить 0 для режима чтения
     if (!file) {
         printf("Error: File not found - %s\n", filename);
         return;
@@ -306,15 +306,28 @@ void cmd_shutdown() {
     }
 }
 
-// В commands.c ДОБАВИТЬ новые команды:
+// ============================================================================
+// НОВЫЕ КОМАНДЫ - ДОБАВИТЬ ОТСЮДА ДО КОНЦА ФАЙЛА
+// ============================================================================
 
 void cmd_write(char *args) {
-    char filename[32];
-    char text[256];
+    // Упрощенная версия без sscanf
+    char *filename = args;
+    char *text = args;
     
-    if (sscanf(args, "%31s %255[^\n]", filename, text) != 2) {
+    // Находим пробел между именем файла и текстом
+    while (*text != ' ' && *text != '\0') text++;
+    if (*text == ' ') {
+        *text = '\0';  // Разделяем строку
+        text++;        // Переходим к тексту
+    } else {
         printf("Usage: write <filename> <text>\n");
         printf("Example: write note.txt Hello World!\n");
+        return;
+    }
+    
+    if (strlen(text) == 0) {
+        printf("Error: No text provided\n");
         return;
     }
     
@@ -342,17 +355,27 @@ void cmd_info(char *filename) {
     
     fat16_dir_entry_t info;
     if (fat16_get_file_info(filename, &info)) {
-        char name83[13];
-        name83_to_filename(info.filename, name83);
+        // Упрощенная версия без name83_to_filename
+        printf("File: ");
+        for (int i = 0; i < 8; i++) {
+            if (info.filename[i] != ' ') putchar(info.filename[i]);
+        }
+        if (info.extension[0] != ' ') {
+            putchar('.');
+            for (int i = 0; i < 3; i++) {
+                if (info.extension[i] != ' ') putchar(info.extension[i]);
+            }
+        }
+        printf("\n");
         
-        int day = info.date & 0x1F;
-        int month = (info.date >> 5) & 0x0F;
-        int year = ((info.date >> 9) & 0x7F) + 1980;
-        
-        printf("File: %s\n", name83);
         printf("Size: %d bytes\n", info.file_size);
         printf("Cluster: %d\n", info.starting_cluster);
         printf("Attributes: 0x%02x\n", info.attributes);
+        
+        // Дата
+        int day = info.date & 0x1F;
+        int month = (info.date >> 5) & 0x0F;
+        int year = ((info.date >> 9) & 0x7F) + 1980;
         printf("Modified: %02d/%02d/%04d\n", day, month, year);
     } else {
         printf("File not found: %s\n", filename);
@@ -360,10 +383,22 @@ void cmd_info(char *filename) {
 }
 
 void cmd_rename(char *args) {
-    char oldname[32], newname[32];
+    // Упрощенная версия без sscanf
+    char *oldname = args;
+    char *newname = args;
     
-    if (sscanf(args, "%31s %31s", oldname, newname) != 2) {
+    // Находим пробел между старым и новым именем
+    while (*newname != ' ' && *newname != '\0') newname++;
+    if (*newname == ' ') {
+        *newname = '\0';  // Разделяем строку
+        newname++;        // Переходим к новому имени
+    } else {
         printf("Usage: rename <oldname> <newname>\n");
+        return;
+    }
+    
+    if (strlen(newname) == 0) {
+        printf("Error: No new filename provided\n");
         return;
     }
     
@@ -378,10 +413,11 @@ void cmd_space() {
     unsigned int total = fat16_get_total_space();
     unsigned int free = fat16_get_free_space();
     unsigned int used = total - free;
+    int percent = total > 0 ? (used * 100) / total : 0;
     
     printf("Disk Space Information:\n");
     printf("Total:  %10u bytes (%u MB)\n", total, total / (1024*1024));
     printf("Used:   %10u bytes (%u MB)\n", used, used / (1024*1024));
     printf("Free:   %10u bytes (%u MB)\n", free, free / (1024*1024));
-    printf("Usage:  %d%%\n", (used * 100) / total);
+    printf("Usage:  %d%%\n", percent);
 }
