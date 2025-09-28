@@ -51,4 +51,5 @@ echo "📁 Generated: myos.iso ($(du -h myos.iso | cut -f1))"
 echo ""
 echo "🎮 Available commands: snake, wifi"
 echo "🚀 Starting QEMU..."
+rm -f *.o*
 qemu-system-i386 -cdrom myos.iso -m 512M
