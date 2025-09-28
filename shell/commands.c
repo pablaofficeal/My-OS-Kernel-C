@@ -11,6 +11,7 @@ extern unsigned char keyboard_read_scancode();
 extern char scancode_to_char(unsigned char scancode);
 extern char getchar();
 extern void readline(char *buffer, int max_length);
+extern void name83_to_filename(const char *name83, char *filename);
 
 void cmd_help() {
     printf("=== PureC OS Commands (FAT16) ===\n");
