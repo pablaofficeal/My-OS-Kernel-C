@@ -18,7 +18,6 @@ const unsigned int multiboot_header[] = {
 
 void kernel_main(void);
 
-// Точка входа
 void _start(void) {
     kernel_main();
 }
