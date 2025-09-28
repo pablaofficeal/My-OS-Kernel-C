@@ -4,8 +4,11 @@
 
 #include "disk.h"
 
+#define DISK_SIZE_MB 500
+#define DISK_SIZE_SECTORS (DISK_SIZE_MB * 1024 * 1024 / 512)
 #define FAT16_SECTOR_SIZE 512
-#define FAT16_ROOT_ENTRIES 512  // Больше записей для большого диска
+#define FAT16_ROOT_ENTRIES 512
+#define FAT16_CLUSTER_SIZE 4096  // 8 sectors * 512 bytes
 
 // FAT16 Boot Sector
 typedef struct {
@@ -45,25 +48,31 @@ typedef struct {
     unsigned int file_size;
 } __attribute__((packed)) fat16_dir_entry_t;
 
-// File handle (остается таким же)
+// File handle
 typedef struct {
-    char filename[12];
+    char filename[13];  // 8.3 + null terminator
     unsigned int size;
     unsigned short first_cluster;
     unsigned int current_position;
     unsigned short current_cluster;
     int is_open;
+    int mode;  // 0=read, 1=write, 2=append
 } file_t;
 
 // FAT16 functions
 int fat16_init();
+int fat16_format();
 int fat16_list_files();
 int fat16_file_exists(const char *filename);
-file_t *fat16_open(const char *filename);
+file_t *fat16_open(const char *filename, int mode);
 int fat16_read(file_t *file, char *buffer, unsigned int size);
 int fat16_write(file_t *file, const char *buffer, unsigned int size);
 int fat16_create(const char *filename);
 int fat16_delete(const char *filename);
 void fat16_close(file_t *file);
+unsigned int fat16_get_free_space();
+unsigned int fat16_get_total_space();
+int fat16_rename(const char *oldname, const char *newname);
+int fat16_get_file_info(const char *filename, fat16_dir_entry_t *info);
 
 #endif
