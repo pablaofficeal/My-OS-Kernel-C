@@ -1,7 +1,9 @@
+// src/drivers/pci/pci.h
 #ifndef PCI_H
 #define PCI_H
 
 #include <stdint.h>
+#include "../../lib/stddef.h"
 
 typedef struct {
     uint16_t vendor_id;

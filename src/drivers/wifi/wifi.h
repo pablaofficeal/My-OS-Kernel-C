@@ -1,7 +1,9 @@
+// src/drivers/wifi/wifi.h
 #ifndef WIFI_H
 #define WIFI_H
 
 #include "../pci/pci.h"
+#include "../../lib/stddef.h"
 
 #define WIFI_DEBUG 1
 
@@ -41,7 +43,7 @@ typedef struct {
     uint16_t device_id;
     uint32_t base_addr;
     wifi_state_t state;
-    char mac_address[6];
+    uint8_t mac_address[6];
     wifi_network_t current_network;
     int networks_found;
     wifi_network_t networks[20];

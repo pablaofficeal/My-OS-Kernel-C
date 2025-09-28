@@ -1,7 +1,9 @@
+// src/drivers/wifi/intel_ax210.h
 #ifndef INTEL_AX210_H
 #define INTEL_AX210_H
 
 #include "../pci/pci.h"
+#include "../../lib/stddef.h"
 
 // Intel Vendor ID
 #define INTEL_VENDOR_ID 0x8086
