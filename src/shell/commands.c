@@ -30,7 +30,11 @@ void cmd_help() {
     printf("  space    - Show disk space\n");
     printf("  fsinfo   - File system info\n");
     printf("  df       - Show disk space\n");
-    printf("  snake     - Play Snake game\n");
+    printf("  snake    - Play Snake game\n");
+    printf("  wifi scan - Scan wifi interface\n");
+    printf("  wifi status - Get wifi status\n");
+    printf("  wifi connect name, and, password. - Connect to WiFi\n");
+    printf("  wifi disconnect - Disconnect from WiFi\n");
 }
 
 void cmd_clear() {
