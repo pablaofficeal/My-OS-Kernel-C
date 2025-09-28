@@ -23,6 +23,7 @@ void cmd_fsinfo();
 void cmd_df();
 void cmd_format(char *args);
 void cmd_create_test_files();
+void cmd_snake(char *args);
 
 // НОВЫЕ КОМАНДЫ - ДОБАВИТЬ ЭТИ СТРОКИ:
 void cmd_write(char *args);

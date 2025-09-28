@@ -3,6 +3,7 @@
 #include "../fs/fat16.h"
 #include "../lib/string.h"
 #include "../drivers/keyboard.h"
+#include "../game/snake.h"
 
 // Объявляем функции из keyboard.c
 extern int kbhit();
@@ -29,6 +30,7 @@ void cmd_help() {
     printf("  space    - Show disk space\n");
     printf("  fsinfo   - File system info\n");
     printf("  df       - Show disk space\n");
+    printf("  snake     - Play Snake game\n");
 }
 
 void cmd_clear() {
@@ -420,4 +422,21 @@ void cmd_space() {
     printf("Used:   %10u bytes (%u MB)\n", used, used / (1024*1024));
     printf("Free:   %10u bytes (%u MB)\n", free, free / (1024*1024));
     printf("Usage:  %d%%\n", percent);
+}
+
+void cmd_snake(char *args) {
+    printf("Starting Snake Game...\n");
+    printf("Controls: WASD to move, ESC to quit\n");
+    printf("Press any key to start...\n");
+    
+    // Ждем нажатия любой клавиши
+    while (!keyboard_has_data()) {
+        for (volatile int i = 0; i < 10000; i++);
+    }
+    keyboard_read_scancode(); // Очищаем буфер
+    
+    // Запускаем игру
+    snake_game_loop();
+    
+    printf("Returning to shell...\n");
 }

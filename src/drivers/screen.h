@@ -1,4 +1,4 @@
-// drivers/screen.h
+// src/drivers/screen.h
 #ifndef SCREEN_H
 #define SCREEN_H
 
