@@ -22,6 +22,10 @@ void cmd_rm(char *filename);
 void cmd_fsinfo();
 void cmd_df();
 void cmd_format(char *args);
+void cmd_write(char *args);
+void cmd_info(char *filename);
+void cmd_rename(char *args);
+void cmd_space();
 void cmd_create_test_files();
 
 #endif
