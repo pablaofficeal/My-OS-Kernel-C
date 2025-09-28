@@ -1,7 +1,9 @@
+// shell.c - ИСПРАВЛЕННАЯ ВЕРСИЯ
 #include "shell.h"
 #include "../drivers/screen.h"
 #include "../drivers/keyboard.h"
 #include "../lib/string.h"
+#include "../fs/fat16.h"  // <-- ДОБАВИТЬ ЭТУ СТРОКУ
 
 // Объявления всех команд
 extern void cmd_help();
@@ -9,6 +11,7 @@ extern void cmd_clear();
 extern void cmd_echo(char *args);
 extern void cmd_version();
 extern void cmd_reboot();
+extern void cmd_shutdown();
 extern void cmd_test(char *args);
 extern void cmd_keytest();
 extern void cmd_ls();
@@ -20,13 +23,18 @@ extern void cmd_df();
 extern void cmd_format(char *args);
 extern void cmd_create_test_files();
 
-// shell.c - ДОБАВИТЬ В execute_command
+// ДОБАВИТЬ ОБЪЯВЛЕНИЯ НОВЫХ КОМАНД:
+extern void cmd_write(char *args);
+extern void cmd_info(char *filename);
+extern void cmd_rename(char *args);
+extern void cmd_space();
+
 void execute_command(char *input) {
     if (strcmp(input, "help") == 0) cmd_help();
     else if (strcmp(input, "clear") == 0) cmd_clear();
     else if (strcmp(input, "version") == 0) cmd_version();
     else if (strcmp(input, "reboot") == 0) cmd_reboot();
-    else if (strcmp(input, "shutdown") == 0) cmd_shutdown();  // <-- ДОБАВИТЬ ЭТУ СТРОКУ
+    else if (strcmp(input, "shutdown") == 0) cmd_shutdown();
     else if (strcmp(input, "test") == 0) cmd_test("");
     else if (strcmp(input, "keytest") == 0) cmd_keytest();
     else if (strcmp(input, "ls") == 0) cmd_ls();
@@ -38,10 +46,13 @@ void execute_command(char *input) {
     else if (strcmp(input, "format") == 0) cmd_format("");
     else if (strcmp(input, "testfiles") == 0) cmd_create_test_files();
     else if (strncmp(input, "echo ", 5) == 0) cmd_echo(input + 5);
+    
+    // НОВЫЕ КОМАНДЫ:
     else if (strncmp(input, "write ", 6) == 0) cmd_write(input + 6);
     else if (strncmp(input, "info ", 5) == 0) cmd_info(input + 5);
     else if (strncmp(input, "rename ", 7) == 0) cmd_rename(input + 7);
     else if (strcmp(input, "space") == 0) cmd_space();
+    
     else if (input[0] != '\0') printf("Unknown command: %s\n", input);
 }
 
