@@ -309,33 +309,36 @@ void cmd_shutdown() {
 }
 
 // В commands.c ДОБАВИТЬ новые команды:
+void cmd_rename(char *args) {
+    char oldname[32] = {0};
+    char newname[32] = {0};
 
-void cmd_write(char *args) {
-    char filename[32];
-    char text[256];
-    
-    if (sscanf(args, "%31s %255[^\n]", filename, text) != 2) {
-        printf("Usage: write <filename> <text>\n");
-        printf("Example: write note.txt Hello World!\n");
+    int i = 0;
+    while (args[i] == ' ') i++;
+    int j = 0;
+    while (args[i] != ' ' && args[i] != '\0' && j < 31) {
+        oldname[j++] = args[i++];
+    }
+    oldname[j] = '\0';
+
+    while (args[i] == ' ') i++;
+    j = 0;
+    while (args[i] != '\0' && j < 31) {
+        newname[j++] = args[i++];
+    }
+    newname[j] = '\0';
+
+    if (oldname[0] == '\0' || newname[0] == '\0') {
+        printf("Usage: rename <oldname> <newname>\n");
         return;
     }
-    
-    file_t *file = fat16_open(filename, 1);  // Write mode
-    if (!file) {
-        printf("Error: Cannot open '%s' for writing\n", filename);
-        return;
-    }
-    
-    int written = fat16_write(file, text, strlen(text));
-    if (written > 0) {
-        printf("Written %d bytes to '%s'\n", written, filename);
+
+    if (fat16_rename(oldname, newname)) {
+        printf("Renamed '%s' to '%s'\n", oldname, newname);
     } else {
-        printf("Error writing to '%s'\n", filename);
+        printf("Rename failed\n");
     }
-    
-    fat16_close(file);
 }
-
 void cmd_info(char *filename) {
     if (filename[0] == '\0') {
         printf("Usage: info <filename>\n");
