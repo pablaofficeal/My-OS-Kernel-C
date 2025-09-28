@@ -40,11 +40,13 @@ PureC OS - это простая 32-битная операционная сис
 ### 📦 Быстрый старт
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/yourusername/purec-os.git
+git clone https://github.com/pablaofficeal/My-OS-Kernel-C.git
 cd purec-os
 
 # Установить зависимости (Debian/Ubuntu)
 sudo apt install build-essential nasm grub-common xorriso qemu-system-x86
+
+
 
 # Сборка и запуск
 ./build.sh && ./run.sh
