@@ -19,12 +19,14 @@ void cmd_help() {
     printf("  version  - Show kernel version\n");
     printf("  reboot   - Reboot system\n");
     printf("  shutdown - Shutdown system safely\n");
-    printf("  test     - Test keyboard input\n");
-    printf("  keytest  - Debug keyboard scancodes\n");
     printf("  ls       - List files\n");
     printf("  cat      - Read file\n");
+    printf("  write    - Write to file\n");
     printf("  touch    - Create file\n");
     printf("  rm       - Delete file\n");
+    printf("  rename   - Rename file\n");
+    printf("  info     - File information\n");
+    printf("  space    - Show disk space\n");
     printf("  fsinfo   - File system info\n");
     printf("  df       - Show disk space\n");
 }
