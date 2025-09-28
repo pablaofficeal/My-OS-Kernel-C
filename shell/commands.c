@@ -303,3 +303,83 @@ void cmd_shutdown() {
         asm volatile ("hlt");
     }
 }
+
+// В commands.c ДОБАВИТЬ новые команды:
+
+void cmd_write(char *args) {
+    char filename[32];
+    char text[256];
+    
+    if (sscanf(args, "%31s %255[^\n]", filename, text) != 2) {
+        printf("Usage: write <filename> <text>\n");
+        printf("Example: write note.txt Hello World!\n");
+        return;
+    }
+    
+    file_t *file = fat16_open(filename, 1);  // Write mode
+    if (!file) {
+        printf("Error: Cannot open '%s' for writing\n", filename);
+        return;
+    }
+    
+    int written = fat16_write(file, text, strlen(text));
+    if (written > 0) {
+        printf("Written %d bytes to '%s'\n", written, filename);
+    } else {
+        printf("Error writing to '%s'\n", filename);
+    }
+    
+    fat16_close(file);
+}
+
+void cmd_info(char *filename) {
+    if (filename[0] == '\0') {
+        printf("Usage: info <filename>\n");
+        return;
+    }
+    
+    fat16_dir_entry_t info;
+    if (fat16_get_file_info(filename, &info)) {
+        char name83[13];
+        name83_to_filename(info.filename, name83);
+        
+        int day = info.date & 0x1F;
+        int month = (info.date >> 5) & 0x0F;
+        int year = ((info.date >> 9) & 0x7F) + 1980;
+        
+        printf("File: %s\n", name83);
+        printf("Size: %d bytes\n", info.file_size);
+        printf("Cluster: %d\n", info.starting_cluster);
+        printf("Attributes: 0x%02x\n", info.attributes);
+        printf("Modified: %02d/%02d/%04d\n", day, month, year);
+    } else {
+        printf("File not found: %s\n", filename);
+    }
+}
+
+void cmd_rename(char *args) {
+    char oldname[32], newname[32];
+    
+    if (sscanf(args, "%31s %31s", oldname, newname) != 2) {
+        printf("Usage: rename <oldname> <newname>\n");
+        return;
+    }
+    
+    if (fat16_rename(oldname, newname)) {
+        printf("Renamed '%s' to '%s'\n", oldname, newname);
+    } else {
+        printf("Rename failed\n");
+    }
+}
+
+void cmd_space() {
+    unsigned int total = fat16_get_total_space();
+    unsigned int free = fat16_get_free_space();
+    unsigned int used = total - free;
+    
+    printf("Disk Space Information:\n");
+    printf("Total:  %10u bytes (%u MB)\n", total, total / (1024*1024));
+    printf("Used:   %10u bytes (%u MB)\n", used, used / (1024*1024));
+    printf("Free:   %10u bytes (%u MB)\n", free, free / (1024*1024));
+    printf("Usage:  %d%%\n", (used * 100) / total);
+}
