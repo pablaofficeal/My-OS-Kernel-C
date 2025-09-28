@@ -1,4 +1,4 @@
-// fs/fat16.h
+// fs/fat16.h - ДОБАВИМ ФУНКЦИИ СИНХРОНИЗАЦИИ
 #ifndef FAT16_H
 #define FAT16_H
 
@@ -27,7 +27,6 @@ typedef struct {
     unsigned int hidden_sectors;
     unsigned int total_sectors_large;
     
-    // Extended BPB
     unsigned char drive_number;
     unsigned char reserved;
     unsigned char signature;
@@ -50,13 +49,13 @@ typedef struct {
 
 // File handle
 typedef struct {
-    char filename[13];  // 8.3 + null terminator
+    char filename[13];
     unsigned int size;
     unsigned short first_cluster;
     unsigned int current_position;
     unsigned short current_cluster;
     int is_open;
-    int mode;  // 0=read, 1=write, 2=append
+    int mode;
 } file_t;
 
 // FAT16 functions
@@ -74,6 +73,11 @@ unsigned int fat16_get_free_space();
 unsigned int fat16_get_total_space();
 int fat16_rename(const char *oldname, const char *newname);
 int fat16_get_file_info(const char *filename, fat16_dir_entry_t *info);
-void name83_to_filename(const char *name83, char *filename);
+
+// НОВЫЕ ФУНКЦИИ СИНХРОНИЗАЦИИ
+void fat16_sync();  // Синхронизировать все изменения на диск
+void fat16_sync_fat();  // Синхронизировать FAT таблицу
+void fat16_sync_root(); // Синхронизировать корневой каталог
+int fat16_load_from_disk();  // Загрузить файловую систему с диска
 
 #endif
