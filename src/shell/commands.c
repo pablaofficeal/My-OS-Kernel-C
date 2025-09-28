@@ -565,3 +565,24 @@ void cmd_tetris(char *args) {
     
     printf("Returning to shell...\n");
 }
+
+// В начало добавить:
+#include "../game/2048/2048.h"
+
+// Добавить функцию:
+void cmd_2048(char *args) {
+    printf("Starting 2048...\n");
+    printf("Choose your board size and reach 2048!\n");
+    printf("Press any key to continue...\n");
+    
+    // Ждем нажатия любой клавиши
+    while (!keyboard_has_data()) {
+        for (volatile int i = 0; i < 10000; i++);
+    }
+    keyboard_read_scancode(); // Очищаем буфер
+    
+    // Запускаем игру
+    show_size_selection();
+    
+    printf("Returning to shell...\n");
+}
