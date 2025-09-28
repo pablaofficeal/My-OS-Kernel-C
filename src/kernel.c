@@ -1,4 +1,3 @@
-// kernel.c - ИСПРАВЛЕННАЯ ВЕРСИЯ
 #define MULTIBOOT_HEADER_MAGIC 0x1BADB002
 #define MULTIBOOT_HEADER_FLAGS 0x00000003
 #define MULTIBOOT_HEADER_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
@@ -22,7 +21,6 @@ void _start(void) {
     kernel_main();
 }
 
-// Реализация
 void kernel_main(void) {
     shell_init();
     
@@ -34,13 +32,11 @@ void kernel_main(void) {
         printf("FAT16 init failed!\n");
     }
     
-    // Автоматическая синхронизация при запуске
     fat16_sync();
     
     printf("Kernel ready! Starting shell...\n");
     shell_run();
     
-    // Синхронизация при завершении
     fat16_sync();
     
     while(1) asm("hlt");
