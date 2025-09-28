@@ -74,5 +74,6 @@ unsigned int fat16_get_free_space();
 unsigned int fat16_get_total_space();
 int fat16_rename(const char *oldname, const char *newname);
 int fat16_get_file_info(const char *filename, fat16_dir_entry_t *info);
+void name83_to_filename(const char *name83, char *filename);
 
 #endif
