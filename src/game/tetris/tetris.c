@@ -4,6 +4,10 @@
 static tetris_game game;
 static unsigned long game_timer = 0;
 
+// Объявляем функции которые будем использовать
+extern int keyboard_has_data(void);
+extern unsigned char keyboard_read_scancode(void);
+
 // Формы тетрамино
 static const int tetris_shapes[TETRIS_COUNT][4][4][4] = {
     // I

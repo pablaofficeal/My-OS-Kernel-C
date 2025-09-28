@@ -31,6 +31,7 @@ void cmd_help() {
     printf("  fsinfo   - File system info\n");
     printf("  df       - Show disk space\n");
     printf("  snake    - Play Snake game\n");
+    printf("  tetris    - Play Tetris game\n");
     printf("  wifi scan - Scan wifi interface\n");
     printf("  wifi status - Get wifi status\n");
     printf("  wifi connect name, and, password. - Connect to WiFi\n");
