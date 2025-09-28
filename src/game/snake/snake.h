@@ -2,8 +2,8 @@
 #ifndef SNAKE_H
 #define SNAKE_H
 
-#include "../drivers/screen.h"
-#include "../drivers/keyboard.h"
+#include "./drivers/screen.h"
+#include "./drivers/keyboard.h"
 
 #define SNAKE_WIDTH 80
 #define SNAKE_HEIGHT 25
