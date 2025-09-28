@@ -134,7 +134,7 @@ void cmd_cat(char *filename) {
         return;
     }
     
-    file_t *file = fat16_open(filename);
+    file_t *file = fat16_open(filename, 0); // 0 = read mode
     if (!file) {
         printf("Error: File not found - %s\n", filename);
         return;
