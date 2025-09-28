@@ -1,6 +1,7 @@
 #include "tetris.h"
 #include "../../lib/string.h"
 
+
 static tetris_game game;
 static unsigned long game_timer = 0;
 
