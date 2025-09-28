@@ -1,21 +1,21 @@
-/* linker.ld - для Multiboot ISO */
+/* linker.ld - исправленная версия */
 ENTRY(_start)
 
 SECTIONS
 {
     . = 0x100000; /* Загрузка по адресу 1MB */
 
-    /* Multiboot header должен быть в первых 8KB */
-    .text : {
+    .text : ALIGN(4) {
         *(.multiboot)
         *(.text)
     }
 
-    .data : {
+    .data : ALIGN(4) {
         *(.data)
     }
 
-    .bss : {
+    .bss : ALIGN(4) {
+        *(COMMON)
         *(.bss)
     }
 }
