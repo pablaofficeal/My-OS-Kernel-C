@@ -3,6 +3,7 @@
 #include "../fs/fat16.h"
 #include "../lib/string.h"
 #include "../drivers/keyboard.h"
+#include <stdarg.h>
 
 // Объявляем функции из keyboard.c
 extern int kbhit();
