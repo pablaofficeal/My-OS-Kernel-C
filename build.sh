@@ -1,10 +1,9 @@
 #!/bin/bash
-echo "🔧 Building PureC OS with Snake Game..."
+echo "🔧 Building PureC OS with Wi-Fi and Snake..."
 rm -rf iso/
 rm -f *.o *.bin *.iso
 
 echo "📦 Compiling modules..."
-# Компилируем все файлы с правильными путями
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/kernel.c -o kernel.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/keyboard.c -o keyboard.o
@@ -34,7 +33,7 @@ cat > iso/boot/grub/grub.cfg << 'EOF'
 set timeout=5
 set default=0
 
-menuentry "PureC OS - FAT16 with Snake" {
+menuentry "PureC OS - Wi-Fi & Snake" {
     multiboot /boot/kernel.bin
     boot
 }
@@ -50,6 +49,6 @@ fi
 echo "✅ Build successful!"
 echo "📁 Generated: myos.iso ($(du -h myos.iso | cut -f1))"
 echo ""
-echo "🎮 Now available: 'snake' command"
+echo "🎮 Available commands: snake, wifi"
 echo "🚀 Starting QEMU..."
 qemu-system-i386 -cdrom myos.iso -m 512M
