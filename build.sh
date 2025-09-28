@@ -5,14 +5,14 @@ rm -f *.o *.bin *.iso
 
 echo "📦 Compiling modules..."
 # Компилируем все файлы по одному для ясности
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c kernel.c -o kernel.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c drivers/screen.c -o screen.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c drivers/keyboard.c -o keyboard.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c lib/string.c -o string.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c shell/shell.c -o shell.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c shell/commands.c -o commands.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c fs/disk.c -o disk.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c fs/fat16.c -o fat16.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/kernel.c -o kernel.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/drivers/screen.c -o screen.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/drivers/keyboard.c -o keyboard.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/lib/string.c -o string.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/shell/shell.c -o shell.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/shell/commands.c -o commands.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/fs/disk.c -o disk.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I. -c src/fs/fat16.c -o fat16.o
 
 echo "🔗 Linking kernel..."
 ld -m elf_i386 -T linker.ld -o kernel.bin kernel.o screen.o keyboard.o string.o shell.o commands.o disk.o fat16.o
