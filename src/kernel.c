@@ -15,19 +15,25 @@ const unsigned int multiboot_header[] = {
 #include "shell/shell.h"
 #include "fs/fat16.h"
 
+// kernel.c - ДОБАВИТЬ В kernel_main
 void kernel_main(void) {
     shell_init();
+    
+    printf("Initializing disk...\n");
+    disk_init();
     
     printf("Initializing FAT16...\n");
     if (!fat16_init()) {
         printf("FAT16 init failed!\n");
     }
     
+    // Автоматическая синхронизация при запуске
+    fat16_sync();
+    
     shell_run();
     
+    // Синхронизация при завершении
+    fat16_sync();
+    
     while(1) asm("hlt");
-}
-
-void _start(void) {
-    kernel_main();
 }
