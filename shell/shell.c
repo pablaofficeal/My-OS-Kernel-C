@@ -38,6 +38,10 @@ void execute_command(char *input) {
     else if (strcmp(input, "format") == 0) cmd_format("");
     else if (strcmp(input, "testfiles") == 0) cmd_create_test_files();
     else if (strncmp(input, "echo ", 5) == 0) cmd_echo(input + 5);
+    else if (strncmp(input, "write ", 6) == 0) cmd_write(input + 6);
+    else if (strncmp(input, "info ", 5) == 0) cmd_info(input + 5);
+    else if (strncmp(input, "rename ", 7) == 0) cmd_rename(input + 7);
+    else if (strcmp(input, "space") == 0) cmd_space();
     else if (input[0] != '\0') printf("Unknown command: %s\n", input);
 }
 
