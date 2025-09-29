@@ -567,10 +567,10 @@ void cmd_tetris(char *args) {
     printf("Returning to shell...\n");
 }
 
-// В начало добавить:
+// В НАЧАЛО добавить include:
 #include "../game/2048/2048.h"
 
-// Добавить функцию:
+// В КОНЕЦ файла добавить функцию:
 void cmd_2048(char *args) {
     printf("Starting 2048...\n");
     printf("Choose your board size and reach 2048!\n");

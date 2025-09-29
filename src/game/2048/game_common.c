@@ -278,3 +278,42 @@ void game_draw_game_over(const game_2048* game) {
     // Считываем клавишу чтобы очистить буфер
     keyboard_read_scancode();
 }
+
+// В КОНЕЦ src/game/2048/game_common.c добавить:
+
+// Обертки для вызова правильных функций движения
+int move_left(game_2048* game) {
+    switch (game->size) {
+        case 4: return move_left_4x4(game);
+        case 8: return move_left_8x8(game);
+        case 16: return move_left_16x16(game);
+        default: return 0;
+    }
+}
+
+int move_right(game_2048* game) {
+    switch (game->size) {
+        case 4: return move_right_4x4(game);
+        case 8: return move_right_8x8(game);
+        case 16: return move_right_16x16(game);
+        default: return 0;
+    }
+}
+
+int move_up(game_2048* game) {
+    switch (game->size) {
+        case 4: return move_up_4x4(game);
+        case 8: return move_up_8x8(game);
+        case 16: return move_up_16x16(game);
+        default: return 0;
+    }
+}
+
+int move_down(game_2048* game) {
+    switch (game->size) {
+        case 4: return move_down_4x4(game);
+        case 8: return move_down_8x8(game);
+        case 16: return move_down_16x16(game);
+        default: return 0;
+    }
+}
