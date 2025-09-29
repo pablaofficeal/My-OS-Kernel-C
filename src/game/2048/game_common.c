@@ -1,6 +1,6 @@
 #include "game_common.h"
 #include "../../lib/string.h"
-#include <stdlib.h>
+#include "../../lib/memory.h"
 #include "field_4x4.h"
 #include "field_8x8.h"
 #include "field_16x16.h"
