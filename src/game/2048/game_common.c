@@ -1,5 +1,9 @@
 #include "game_common.h"
 #include "../../lib/string.h"
+#include <stdlib.h>
+#include "field_4x4.h"
+#include "field_8x8.h"
+#include "field_16x16.h"
 
 // Объявляем функции которые будем использовать
 extern int keyboard_has_data(void);

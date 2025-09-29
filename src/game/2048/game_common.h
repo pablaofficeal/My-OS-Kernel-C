@@ -2,6 +2,7 @@
 #define GAME_COMMON_H
 
 #include "2048.h"
+#include <stdlib.h>  // Добавьте для malloc/free
 
 // Общие функции для всех размеров поля
 game_2048* game_init(int size);
