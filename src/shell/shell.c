@@ -55,7 +55,7 @@ void execute_command(char *input) {
     else if (strcmp(input, "snake") == 0) cmd_snake("");
     else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);
     else if (strcmp(input, "tetris") == 0) cmd_tetris("");
-    else if ()
+    else if (strcmp(input, "2048") == 0) cmd_2048("");
     
     else if (input[0] != '\0') printf("Unknown command: %s\n", input);
 }

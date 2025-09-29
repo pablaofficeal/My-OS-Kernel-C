@@ -17,11 +17,13 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/tetris/tetris.c -o tetris.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/game_common.c -o game_common.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_4x4.c -o field_4x4.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_8x8.c -o field_8x8.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_16x16.c -o field_16x16.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/game_start.c -o game_start.o
 
 echo "🔗 Linking kernel..."
-ld -m elf_i386 -T linker.ld -o kernel.bin kernel.o screen.o keyboard.o string.o shell.o commands.o disk.o fat16.o snake.o pci.o wifi.o ax210.o tetris.o game_start.o field_4x4.o
+ld -m elf_i386 -T linker.ld -o kernel.bin kernel.o screen.o keyboard.o string.o shell.o commands.o disk.o fat16.o snake.o pci.o wifi.o ax210.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o
 
 if [ ! -f kernel.bin ]; then
     echo "❌ Linking failed! Check for errors above."
