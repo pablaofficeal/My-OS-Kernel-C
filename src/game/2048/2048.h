@@ -3,7 +3,7 @@
 
 #include "../../drivers/screen.h"
 #include "../../drivers/keyboard.h"
-#include "../../lib/memory.h"
+#include <stdlib.h>  // Добавьте эту строку
 
 #define MAX_BOARD_SIZE 16
 

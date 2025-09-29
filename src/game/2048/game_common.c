@@ -1,6 +1,6 @@
 #include "game_common.h"
 #include "../../lib/string.h"
-#include "../../lib/memory.h"
+#include <stdlib.h>
 #include "field_4x4.h"
 #include "field_8x8.h"
 #include "field_16x16.h"
@@ -16,8 +16,11 @@ static unsigned long get_game_timer(void) {
 }
 
 game_2048* game_init(int size) {
-    game_2048* game = (game_2048*)malloc(sizeof(game_2048));
-    if (!game) return NULL;
+    static game_2048 game_storage;
+    static int* board_ptrs[MAX_BOARD_SIZE];
+    static int board_data[MAX_BOARD_SIZE][MAX_BOARD_SIZE];
+    
+    game_2048* game = &game_storage;
     
     game->size = size;
     game->score = 0;
@@ -26,10 +29,9 @@ game_2048* game_init(int size) {
     game->won = 0;
     game->moved = 0;
     
-    // Выделяем память для поля
-    game->board = (int**)malloc(size * sizeof(int*));
+    // Используем статическую память вместо malloc
     for (int i = 0; i < size; i++) {
-        game->board[i] = (int*)malloc(size * sizeof(int));
+        game->board[i] = board_data[i];
         for (int j = 0; j < size; j++) {
             game->board[i][j] = 0;
         }
@@ -43,13 +45,8 @@ game_2048* game_init(int size) {
 }
 
 void game_cleanup(game_2048* game) {
-    if (!game) return;
-    
-    for (int i = 0; i < game->size; i++) {
-        free(game->board[i]);
-    }
-    free(game->board);
-    free(game);
+    // В статической реализации ничего не делаем
+    (void)game;
 }
 
 int get_color_for_tile(int value) {
