@@ -44,7 +44,6 @@ void cmd_help() {
 void cmd_clear() {
     clear_screen();
     printf("FAT16 File System Ready.\n");
-    printf("500MB disk space available.\n");
 }
 
 void cmd_echo(char *args) {

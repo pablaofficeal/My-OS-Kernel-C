@@ -104,3 +104,4 @@ purec-os/
 ---
 
 ![Статистика](https://img.shields.io/github/repo-size/yourusername/purec-os?label=Размер%20репозитория&style=flat-square) ![Лицензия](https://img.shields.io/github/license/yourusername/purec-os?color=blue&style=flat-square)
+   
