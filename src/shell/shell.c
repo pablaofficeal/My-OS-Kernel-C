@@ -3,7 +3,8 @@
 #include "../drivers/screen.h"
 #include "../drivers/keyboard.h"
 #include "../lib/string.h"
-#include "../fs/fat16.h"  // <-- ДОБАВИТЬ ЭТУ СТРОКУ
+#include "../fs/fat16.h"
+#include "../tools/hexedit.h"
 
 // Объявления всех команд
 extern void cmd_help();
@@ -56,7 +57,15 @@ void execute_command(char *input) {
     else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);
     else if (strcmp(input, "tetris") == 0) cmd_tetris("");
     else if (strcmp(input, "2048") == 0) cmd_2048("");
-    
+
+    else if (strncmp(input, "hexedit", 7) == 0) {
+        if (input[7] == ' ') {
+            cmd_hexedit(input + 8);  // с аргументом
+        } else {
+            cmd_hexedit("");         // без аргумента
+        }
+    }
+
     else if (input[0] != '\0') printf("Unknown command: %s\n", input);
 }
 

@@ -4,6 +4,7 @@
 #include "../lib/string.h"
 #include "../drivers/keyboard.h"
 #include "../game/snake/snake.h"
+#include "../tools/hexedit.h"
 
 // Объявляем функции из keyboard.c
 extern int kbhit();
@@ -37,6 +38,7 @@ void cmd_help() {
     printf("  wifi status - Get wifi status\n");
     printf("  wifi connect name, and, password. - Connect to WiFi\n");
     printf("  wifi disconnect - Disconnect from WiFi\n");
+    printf("  hexedit  - Hex editor with assembly support\n");
 }
 
 void cmd_clear() {

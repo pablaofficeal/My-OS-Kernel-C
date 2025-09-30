@@ -1,6 +1,3 @@
-[file name]: hexedit.c
-[file content begin]
-// tools/hexedit.c - HEX EDITOR WITH ASSEMBLY SUPPORT
 #include "../drivers/screen.h"
 #include "../drivers/keyboard.h"
 #include "../fs/fat16.h"
@@ -46,7 +43,7 @@ void hexedit_display_help() {
     printf("F7 - Assemble code\n");
     printf("F8 - Fill pattern\n");
     printf("ESC - Exit\n");
-    printf("Arrows - Navigate\n");
+    printf("WASD - Navigate\n");
     printf("0-9,A-F - Edit hex values\n");
     printf("===========================\n");
 }
@@ -441,11 +438,60 @@ void hexedit_fill_pattern() {
 }
 
 void hexedit_handle_input() {
+    int function_key_mode = 0; // 0 = normal, 1 = function key
+    
     while (1) {
         hexedit_display();
         
         char c = getchar();
         
+        // Handle function keys (F1-F8)
+        if (c == 0) {
+            function_key_mode = 1;
+            continue;
+        }
+        
+        if (function_key_mode) {
+            function_key_mode = 0;
+            switch (c) {
+                case 0x3B: // F1
+                    hexedit_display_help();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+                case 0x3C: // F2
+                    hexedit_save_file();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+                case 0x3D: // F3
+                    mode = (mode + 1) % 3;
+                    break;
+                case 0x3F: // F5
+                    hexedit_goto_offset();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+                case 0x40: // F6
+                    hexedit_find_bytes();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+                case 0x41: // F7
+                    hexedit_assemble_code();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+                case 0x42: // F8
+                    hexedit_fill_pattern();
+                    printf("Press any key to continue...");
+                    getchar();
+                    break;
+            }
+            continue;
+        }
+        
+        // Handle normal keys
         switch (c) {
             case 27: // ESC
                 if (modified) {
@@ -457,49 +503,9 @@ void hexedit_handle_input() {
                 }
                 return;
                 
-            case 0x3B: // F1
-                hexedit_display_help();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
-            case 0x3C: // F2
-                hexedit_save_file();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
-            case 0x3D: // F3
-                mode = (mode + 1) % 3;
-                break;
-                
-            case 0x3F: // F5
-                hexedit_goto_offset();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
-            case 0x40: // F6
-                hexedit_find_bytes();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
-            case 0x41: // F7
-                hexedit_assemble_code();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
-            case 0x42: // F8
-                hexedit_fill_pattern();
-                printf("Press any key to continue...");
-                getchar();
-                break;
-                
             // Navigation
-            case 'H': // Up
-            case 'h':
+            case 'w': // Up
+            case 'W':
                 if (cursor_pos >= BYTES_PER_LINE) {
                     cursor_pos -= BYTES_PER_LINE;
                     if (cursor_pos < file_offset) {
@@ -508,8 +514,8 @@ void hexedit_handle_input() {
                 }
                 break;
                 
-            case 'P': // Down
-            case 'p':
+            case 's': // Down  
+            case 'S':
                 if (cursor_pos + BYTES_PER_LINE < HEXEDIT_BUFFER_SIZE) {
                     cursor_pos += BYTES_PER_LINE;
                     if (cursor_pos >= file_offset + (DISPLAY_LINES * BYTES_PER_LINE)) {
@@ -518,13 +524,11 @@ void hexedit_handle_input() {
                 }
                 break;
                 
-            case 'K': // Left
-            case 'k':
+            case 'a': // Left
                 if (cursor_pos > 0) cursor_pos--;
                 break;
                 
-            case 'M': // Right
-            case 'm':
+            case 'd': // Right
                 if (cursor_pos < buffer_size - 1) cursor_pos++;
                 break;
                 
