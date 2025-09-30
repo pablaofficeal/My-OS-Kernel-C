@@ -20,7 +20,6 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_8x8.c -o field_8x8.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_16x16.c -o field_16x16.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/game_start.c -o game_start.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/editor/editor.c -o editor.o
 
 ld -m elf_i386 -T linker.ld -o kernel.bin kernel.o screen.o keyboard.o string.o shell.o commands.o disk.o fat16.o snake.o pci.o wifi.o ax210.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o
 
