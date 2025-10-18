@@ -38,7 +38,7 @@ cat > iso/boot/grub/grub.cfg << 'EOF'
 set timeout=5
 set default=0
 
-menuentry "PureC OS - Hex Editor & Games" {
+menuentry "PureC OS" {
     multiboot /boot/kernel.bin
     boot
 }

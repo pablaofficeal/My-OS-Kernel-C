@@ -3,7 +3,7 @@
 #define SNAKE_H
 
 #include "./drivers/screen.h"
-#include "./drivers/keyboard.h"
+#include "./drivers/keyboard/keyboard.h"
 
 #define SNAKE_WIDTH 120
 #define SNAKE_HEIGHT 40

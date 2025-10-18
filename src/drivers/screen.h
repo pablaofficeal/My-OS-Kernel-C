@@ -2,9 +2,9 @@
 #ifndef SCREEN_H
 #define SCREEN_H
 
-#define SCREEN_WIDTH 192
-#define SCREEN_HEIGHT 108
-#define VIDEO_MEMORY 0xB0000
+#define SCREEN_WIDTH 80
+#define SCREEN_HEIGHT 25
+#define VIDEO_MEMORY 0xB8000
 
 void clear_screen();
 void putchar(char c);

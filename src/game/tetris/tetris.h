@@ -2,7 +2,7 @@
 #define TETRIS_H
 
 #include "../../drivers/screen.h"
-#include "../../drivers/keyboard.h"
+#include "../../drivers/keyboard/keyboard.h"
 
 #define TETRIS_WIDTH 10
 #define TETRIS_HEIGHT 20

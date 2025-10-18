@@ -2,7 +2,7 @@
 #define GAME_2048_H
 
 #include "../../drivers/screen.h"
-#include "../../drivers/keyboard.h"
+#include "../../drivers/keyboard/keyboard.h"
 #include <stdlib.h>  // Добавьте эту строку
 
 #define MAX_BOARD_SIZE 16
