@@ -1,7 +1,7 @@
 // shell.c - ИСПРАВЛЕННАЯ ВЕРСИЯ
 #include "shell.h"
 #include "../drivers/screen.h"
-#include "../drivers/keyboard.h"
+#include "../drivers/keyboard/keyboard.h"
 #include "../lib/string.h"
 #include "../fs/fat16.h"
 #include "../tools/hexedit.h"

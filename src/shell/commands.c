@@ -2,7 +2,7 @@
 #include "../drivers/screen.h"
 #include "../fs/fat16.h"
 #include "../lib/string.h"
-#include "../drivers/keyboard.h"
+#include "../drivers/keyboard/keyboard.h"
 #include "../game/snake/snake.h"
 #include "../tools/hexedit.h"
 
