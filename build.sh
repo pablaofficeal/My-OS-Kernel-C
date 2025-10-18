@@ -54,4 +54,6 @@ if [ ! -f myos.iso ]; then
     exit 1
 fi
 
+rm "*.o"
+
 qemu-system-i386 -cdrom myos.iso -m 512M
