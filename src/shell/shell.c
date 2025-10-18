@@ -29,6 +29,7 @@ extern void cmd_write(char *args);
 extern void cmd_info(char *filename);
 extern void cmd_rename(char *args);
 extern void cmd_space();
+extern void cmd_edit(char *filename);
 
 void execute_command(char *input) {
     if (strcmp(input, "help") == 0) cmd_help();
@@ -52,6 +53,7 @@ void execute_command(char *input) {
     else if (strncmp(input, "write ", 6) == 0) cmd_write(input + 6);
     else if (strncmp(input, "info ", 5) == 0) cmd_info(input + 5);
     else if (strncmp(input, "rename ", 7) == 0) cmd_rename(input + 7);
+    else if (strncmp(input, "edit ", 5) == 0) cmd_edit(input + 5);
     else if (strcmp(input, "space") == 0) cmd_space();
     else if (strcmp(input, "snake") == 0) cmd_snake("");
     else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);

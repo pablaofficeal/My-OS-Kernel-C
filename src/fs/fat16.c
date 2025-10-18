@@ -148,6 +148,8 @@ static void fat16_write_fat_entry(unsigned short cluster, unsigned short value) 
         unsigned int fat_offset = cluster * 2;
         *(unsigned short*)&fat_table[fat_offset] = value;
         needs_sync = 1;
+        // Автоматическое сохранение при изменении FAT
+        fat16_sync();
     }
 }
 
@@ -226,13 +228,20 @@ static fat16_dir_entry_t* fat16_find_free_entry() {
 int fat16_init() {
     printf("FAT16: Initializing %dMB file system...\n", DISK_SIZE_MB);
     
-    // Пытаемся загрузить существующую файловую систему
+    // Инициализируем диск
+    if (!disk_init()) {
+        printf("FAT16: Disk init failed\n");
+        return 0;
+    }
+    
+    // Проверяем, есть ли существующая файловая система
     if (fat16_load_from_disk()) {
+        printf("FAT16: Using existing filesystem\n");
         return 1;
     }
     
-    // Создаем новую файловую систему
-    printf("FAT16: Creating new file system...\n");
+    // Если нет, создаем новую
+    printf("FAT16: Creating new filesystem\n");
     
     memset(&boot_sector, 0, sizeof(boot_sector));
     

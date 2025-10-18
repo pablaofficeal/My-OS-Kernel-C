@@ -1,6 +1,3 @@
-rm -rf iso/
-rm -f *.o *.bin *.iso
-
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/kernel.c -o kernel.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/keyboard.c -o keyboard.o
@@ -53,6 +50,5 @@ if [ ! -f myos.iso ]; then
     echo "❌ ISO creation failed!"
     exit 1
 fi
-rm -f *.o
 
 qemu-system-i386 -cdrom myos.iso -m 512M

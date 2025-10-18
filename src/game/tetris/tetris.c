@@ -172,39 +172,38 @@ void tetris_draw_field(void) {
 void tetris_draw_ui(void) {
     // Очищаем область UI
     for (int y = 0; y < 5; y++) {
-        set_cursor(25, y + 2);
+        set_cursor(70, y + 2);
         printf("                    ");
     }
     
     // Рисуем статистику
-    set_cursor(25, 2);
+    set_cursor(70, 2);
     printf("=== TETRIS ===");
     
-    set_cursor(25, 4);
+    set_cursor(70, 4);
     printf("Score: %d", game.score);
     
-    set_cursor(25, 5);
-    printf("Level: %d", game.level);
+    set_cursor(70, 5);
+    printf("Level: %d", game.level + 1);
     
-    set_cursor(25, 6);
+    set_cursor(70, 6);
     printf("Lines: %d", game.lines_cleared);
     
-    set_cursor(25, 8);
+    set_cursor(70, 8);
+    printf("Next:");
+    
+    set_cursor(70, 8);
     printf("Controls:");
-    set_cursor(25, 9);
-    printf("A - Left");
-    set_cursor(25, 10);
-    printf("D - Right");
-    set_cursor(25, 11);
-    printf("S - Down");
-    set_cursor(25, 12);
-    printf("W - Rotate");
-    set_cursor(25, 13);
-    printf("Space - Drop");
-    set_cursor(25, 14);
-    printf("P - Pause");
-    set_cursor(25, 15);
-    printf("ESC - Quit");
+    set_cursor(70, 9);
+    printf("←→ - Move");
+    set_cursor(70, 10);
+    printf("↓ - Soft drop");
+    set_cursor(70, 11);
+    printf("↑ - Rotate");
+    set_cursor(70, 12);
+    printf("Space - Hard drop");
+    set_cursor(70, 13);
+    printf("Q - Quit");
     
     if (game.paused) {
         set_cursor(25, 17);

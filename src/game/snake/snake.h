@@ -5,8 +5,8 @@
 #include "./drivers/screen.h"
 #include "./drivers/keyboard.h"
 
-#define SNAKE_WIDTH 80
-#define SNAKE_HEIGHT 25
+#define SNAKE_WIDTH 120
+#define SNAKE_HEIGHT 40
 #define SNAKE_MAX_LENGTH 100
 
 // Направления

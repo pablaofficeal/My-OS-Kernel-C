@@ -27,6 +27,7 @@ void cmd_help() {
     printf("  touch    - Create file\n");
     printf("  rm       - Delete file\n");
     printf("  rename   - Rename file\n");
+    printf("  edit     - Text editor\n");
     printf("  info     - File information\n");
     printf("  space    - Show disk space\n");
     printf("  fsinfo   - File system info\n");
@@ -388,6 +389,113 @@ void cmd_info(char *filename) {
         printf("Modified: %02d/%02d/%04d\n", day, month, year);
     } else {
         printf("File not found: %s\n", filename);
+    }
+}
+
+void cmd_edit(char *filename) {
+    if (filename[0] == '\0') {
+        printf("Usage: edit <filename.ext>\n");
+        printf("Example: edit note.txt\n");
+        return;
+    }
+    
+    printf("=== FAT16 Text Editor ===\n");
+    printf("Editing: %s\n", filename);
+    printf("Commands: :w - save, :q - quit, :wq - save and quit\n");
+    printf("Enter your text below (empty line to finish):\n");
+    printf("---\n");
+    
+    char buffer[4096] = {0};
+    int total_len = 0;
+    char line[256];
+    
+    // Читаем существующий файл, если он есть
+    file_t *existing = fat16_open(filename, 0);
+    if (existing) {
+        printf("[Loading existing file...]\n");
+        int read_bytes = fat16_read(existing, buffer, sizeof(buffer) - 1);
+        if (read_bytes > 0) {
+            buffer[read_bytes] = '\0';
+            total_len = read_bytes;
+            printf("[Loaded %d bytes]\n", read_bytes);
+        }
+        fat16_close(existing);
+    }
+    
+    // Редактирование
+    while (total_len < sizeof(buffer) - 256) {
+        printf("[%d] ", total_len);
+        readline(line, sizeof(line));
+        
+        // Проверка команд
+        if (strcmp(line, ":w") == 0) {
+            // Сохранить
+            file_t *file = fat16_open(filename, 1);
+            if (file) {
+                int written = fat16_write(file, buffer, total_len);
+                if (written > 0) {
+                    printf("[Saved %d bytes]\n", written);
+                } else {
+                    printf("[Save failed]\n");
+                }
+                fat16_close(file);
+            } else {
+                printf("[Cannot open file for writing]\n");
+            }
+            continue;
+        }
+        
+        if (strcmp(line, ":q") == 0) {
+            printf("[Quit without saving]\n");
+            return;
+        }
+        
+        if (strcmp(line, ":wq") == 0) {
+            // Сохранить и выйти
+            file_t *file = fat16_open(filename, 1);
+            if (file) {
+                int written = fat16_write(file, buffer, total_len);
+                if (written > 0) {
+                    printf("[Saved %d bytes]\n", written);
+                }
+                fat16_close(file);
+            }
+            printf("[Quit]\n");
+            return;
+        }
+        
+        // Пустая строка - конец ввода
+        if (line[0] == '\0') {
+            break;
+        }
+        
+        // Добавляем строку к буферу
+        int line_len = strlen(line);
+        if (total_len + line_len + 2 < sizeof(buffer)) {
+            if (total_len > 0) {
+                buffer[total_len++] = '\n';
+            }
+            strcpy(buffer + total_len, line);
+            total_len += line_len;
+        } else {
+            printf("[Buffer full, ending input]\n");
+            break;
+        }
+    }
+    
+    // Автоматическое сохранение
+    printf("[Saving file...]\n");
+    file_t *file = fat16_open(filename, 1);
+    if (file) {
+        int written = fat16_write(file, buffer, total_len);
+        if (written > 0) {
+            printf("[File saved: %d bytes]\n", written);
+        } else {
+            printf("[Save failed]\n");
+        }
+        fat16_close(file);
+    } else {
+        printf("[Cannot create file]\n");
     }
 }
 
