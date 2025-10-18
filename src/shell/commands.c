@@ -735,22 +735,50 @@ void cmd_desktop(char *args) {
     printf("Starting desktop environment...\n");
     set_graphics_mode(MODE_GRAPHICS);
     
-    // Фон рабочего стола
-    graphics_clear(COLOR_BLUE);
+    // Создаем красивый градиентный фон
+    for (int y = 0; y < GRAPHICS_HEIGHT; y++) {
+        uint32_t color = 0xFF000000 | ((y * 255 / GRAPHICS_HEIGHT) << 16) | ((y * 100 / GRAPHICS_HEIGHT) << 8) | 128;
+        for (int x = 0; x < GRAPHICS_WIDTH; x++) {
+            put_pixel(x, y, color);
+        }
+    }
     
-    // Окна
-    draw_window(50, 50, 300, 200, "File Manager");
-    draw_window(400, 80, 350, 250, "Text Editor");
-    draw_window(200, 300, 280, 180, "Terminal");
+    // Окно приветствия
+    draw_window(250, 150, 500, 350, "Добро пожаловать в PureC OS!");
     
-    // Панель задач
+    // Логотип PureC OS
+    fill_rect(280, 200, 100, 100, COLOR_BLUE);
+    draw_string(290, 210, "PureC", COLOR_WHITE);
+    draw_string(290, 230, "OS", COLOR_WHITE);
+    
+    // Информация о системе
+    draw_string(400, 200, "PureC OS v2.0", COLOR_BLACK);
+    draw_string(400, 220, "Операционная система", COLOR_BLACK);
+    draw_string(400, 240, "написанная на C", COLOR_BLACK);
+    
+    // Разделительная линия
+    draw_line(280, 320, 720, 320, COLOR_GRAY);
+    
+    // Кнопки действий
+    draw_button(300, 340, 120, 35, "Начать работу");
+    draw_button(450, 340, 120, 35, "Справка");
+    draw_button(600, 340, 120, 35, "Выход");
+    
+    // Дополнительные окна на рабочем столе
+    draw_window(50, 50, 200, 150, "Система");
+    draw_string(70, 80, "CPU: x86_64", COLOR_BLACK);
+    draw_string(70, 100, "RAM: 4GB", COLOR_BLACK);
+    draw_string(70, 120, "Графика: VBE", COLOR_BLACK);
+    
+    draw_window(GRAPHICS_WIDTH - 250, 50, 200, 120, "Приложения");
+    draw_string(GRAPHICS_WIDTH - 230, 80, "• Тетрис", COLOR_BLACK);
+    draw_string(GRAPHICS_WIDTH - 230, 100, "• 2048", COLOR_BLACK);
+    
+    // Панель задач внизу
     fill_rect(0, GRAPHICS_HEIGHT - 40, GRAPHICS_WIDTH, 40, COLOR_DARK_GRAY);
     draw_string(10, GRAPHICS_HEIGHT - 25, "PureC OS Desktop", COLOR_WHITE);
+    draw_string(GRAPHICS_WIDTH - 200, GRAPHICS_HEIGHT - 25, "Пользователь", COLOR_WHITE);
     
-    // Иконки
-    draw_button(20, 70, 60, 60, "Files");
-    draw_button(20, 150, 60, 60, "Tools");
-    draw_button(20, 230, 60, 60, "Games");
-    
-    printf("Desktop ready! Type 'textmode' to return.\n");
+    printf("Добро пожаловать! Рабочий стол готов.\n");
+    printf("Используйте 'textmode' для возврата в текстовый режим.\n");
 }
