@@ -1,5 +1,5 @@
 #include "../drivers/screen.h"
-#include "../drivers/keyboard.h"
+#include "../drivers/keyboard/keyboard.h"
 #include "../fs/fat16.h"
 #include "../lib/string.h"
 #include "../lib/memory.h"
