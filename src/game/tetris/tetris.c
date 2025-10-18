@@ -64,13 +64,13 @@ static const int tetris_shapes[TETRIS_COUNT][4][4][4] = {
 
 // Цвета для каждого тетрамино
 static const char* tetris_colors[TETRIS_COUNT] = {
-    COLOR_CYAN,    // I
-    COLOR_BLUE,    // J
-    COLOR_ORANGE,  // L
-    COLOR_YELLOW,  // O
-    COLOR_GREEN,   // S
-    COLOR_PURPLE,  // T
-    COLOR_RED      // Z
+    TETRIS_COLOR_CYAN,    // I
+    TETRIS_COLOR_BLUE,    // J
+    TETRIS_COLOR_ORANGE,  // L
+    TETRIS_COLOR_YELLOW,  // O
+    TETRIS_COLOR_GREEN,   // S
+    TETRIS_COLOR_PURPLE,  // T
+    TETRIS_COLOR_RED      // Z
 };
 
 static unsigned long get_game_timer(void) {

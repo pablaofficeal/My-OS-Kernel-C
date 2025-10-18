@@ -17,6 +17,9 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/pci/pci.c -o pci.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/graphics.c -o graphics.o
+
+
 
 ld -m elf_i386 -T linker.ld -o kernel.bin \
     kernel.o screen.o keyboard.o string.o \
@@ -24,7 +27,7 @@ ld -m elf_i386 -T linker.ld -o kernel.bin \
     disk.o fat16.o \
     hexedit.o \
     snake.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o \
-    pci.o wifi.o ax210.o
+    pci.o wifi.o ax210.o graphics.o
 
 if [ ! -f kernel.bin ]; then
     echo "❌ Linking failed! Check for errors above."

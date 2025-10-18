@@ -696,3 +696,61 @@ void cmd_2048(char *args) {
     
     printf("Returning to shell...\n");
 }
+
+// В shell/commands.c добавить:
+
+#include "../drivers/screen.h"
+
+void cmd_graphics(char *args) {
+    printf("Switching to graphics mode...\n");
+    set_graphics_mode(MODE_GRAPHICS);
+    
+    // Тест графики
+    graphics_clear(0xFF00FFFF);  // Cyan color in ARGB format
+    
+    // Окно
+    draw_window(100, 50, 400, 300, "Graphics Test Window");
+    draw_string(120, 80, "Hello Graphics Mode!", COLOR_BLACK);
+    
+    // Фигуры
+    fill_rect(150, 120, 100, 60, COLOR_GREEN);
+    draw_rect(270, 120, 100, 60, COLOR_RED);
+    
+    // Кнопки
+    draw_button(180, 200, 80, 30, "OK");
+    draw_button(280, 200, 80, 30, "Cancel");
+    
+    // Линия
+    draw_line(150, 250, 350, 250, COLOR_BLUE);
+    
+    printf("Graphics test complete! Check screen.\n");
+}
+
+void cmd_textmode(char *args) {
+    printf("Switching to text mode...\n");
+    set_graphics_mode(MODE_TEXT);
+}
+
+void cmd_desktop(char *args) {
+    printf("Starting desktop environment...\n");
+    set_graphics_mode(MODE_GRAPHICS);
+    
+    // Фон рабочего стола
+    graphics_clear(COLOR_BLUE);
+    
+    // Окна
+    draw_window(50, 50, 300, 200, "File Manager");
+    draw_window(400, 80, 350, 250, "Text Editor");
+    draw_window(200, 300, 280, 180, "Terminal");
+    
+    // Панель задач
+    fill_rect(0, GRAPHICS_HEIGHT - 40, GRAPHICS_WIDTH, 40, COLOR_DARK_GRAY);
+    draw_string(10, GRAPHICS_HEIGHT - 25, "PureC OS Desktop", COLOR_WHITE);
+    
+    // Иконки
+    draw_button(20, 70, 60, 60, "Files");
+    draw_button(20, 150, 60, 60, "Tools");
+    draw_button(20, 230, 60, 60, "Games");
+    
+    printf("Desktop ready! Type 'textmode' to return.\n");
+}

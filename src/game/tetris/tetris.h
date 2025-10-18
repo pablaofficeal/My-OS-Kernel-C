@@ -13,14 +13,14 @@
 #define FIELD_HEIGHT (TETRIS_HEIGHT + 1)
 
 // Цвета для тетрамино (ANSI коды)
-#define COLOR_CYAN    "36"
-#define COLOR_BLUE    "34"
-#define COLOR_ORANGE  "33"
-#define COLOR_YELLOW  "33"
-#define COLOR_GREEN   "32"
-#define COLOR_PURPLE  "35"
-#define COLOR_RED     "31"
-#define COLOR_WHITE   "37"
+#define TETRIS_COLOR_CYAN    "36"
+#define TETRIS_COLOR_BLUE    "34"
+#define TETRIS_COLOR_ORANGE  "33"
+#define TETRIS_COLOR_YELLOW  "33"
+#define TETRIS_COLOR_GREEN   "32"
+#define TETRIS_COLOR_PURPLE  "35"
+#define TETRIS_COLOR_RED     "31"
+#define TETRIS_COLOR_WHITE   "37"
 
 // Типы тетрамино
 typedef enum {

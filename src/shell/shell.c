@@ -30,6 +30,14 @@ extern void cmd_info(char *filename);
 extern void cmd_rename(char *args);
 extern void cmd_space();
 extern void cmd_edit(char *filename);
+extern void cmd_snake(char *args);
+extern void cmd_wifi(char *args);
+extern void cmd_tetris(char *args);
+extern void cmd_2048(char *args);
+extern void cmd_graphics(char *args);
+extern void cmd_textmode(char *args);
+extern void cmd_desktop(char *args);
+extern void cmd_hexedit(char *args);
 
 void execute_command(char *input) {
     if (strcmp(input, "help") == 0) cmd_help();
@@ -59,6 +67,10 @@ void execute_command(char *input) {
     else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);
     else if (strcmp(input, "tetris") == 0) cmd_tetris("");
     else if (strcmp(input, "2048") == 0) cmd_2048("");
+
+    else if (strcmp(input, "graphics") == 0) cmd_graphics("");
+    else if (strcmp(input, "textmode") == 0) cmd_textmode("");
+    else if (strcmp(input, "desktop") == 0) cmd_desktop("");
 
     else if (strncmp(input, "hexedit", 7) == 0) {
         if (input[7] == ' ') {

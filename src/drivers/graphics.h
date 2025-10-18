@@ -9,8 +9,8 @@
 #define VGA_GRAPHICS_MODE 1
 
 // Графические константы
-#define SCREEN_WIDTH 1024
-#define SCREEN_HEIGHT 768
+#define GRAPHICS_WIDTH 1024
+#define GRAPHICS_HEIGHT 768
 #define BITS_PER_PIXEL 32
 
 // Цвета (ARGB)
@@ -52,7 +52,7 @@ void draw_circle(int x, int y, int radius, uint32_t color);
 void fill_circle(int x, int y, int radius, uint32_t color);
 void draw_char(int x, int y, char c, uint32_t color);
 void draw_string(int x, int y, const char *str, uint32_t color);
-void clear_screen(uint32_t color);
+void graphics_clear(uint32_t color);
 void swap_buffers();
 
 // Функции для оконного менеджера

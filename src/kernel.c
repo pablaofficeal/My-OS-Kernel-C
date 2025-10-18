@@ -1,5 +1,6 @@
+// kernel.c - ОБНОВЛЕННЫЙ
 #define MULTIBOOT_HEADER_MAGIC 0x1BADB002
-#define MULTIBOOT_HEADER_FLAGS 0x00000003 // MULTIBOOT_FLAG_ALIGN + MULTIBOOT_FLAG_MEMINFO
+#define MULTIBOOT_HEADER_FLAGS 0x00000003
 #define MULTIBOOT_HEADER_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
 
 __attribute__((section(".multiboot")))
@@ -24,6 +25,10 @@ void _start(void) {
 void kernel_main(void) {
     shell_init();
     
+    // Инициализация графики ДО файловой системы
+    printf("Initializing graphics...\n");
+    init_graphics();
+    
     printf("Initializing disk...\n");
     disk_init();
     
@@ -35,6 +40,8 @@ void kernel_main(void) {
     fat16_sync();
     
     printf("Kernel ready! Starting shell...\n");
+    printf("Try: graphics, desktop, textmode commands\n");
+    
     shell_run();
     
     fat16_sync();
