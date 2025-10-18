@@ -702,28 +702,61 @@ void cmd_2048(char *args) {
 #include "../drivers/screen.h"
 
 void cmd_graphics(char *args) {
-    printf("Switching to graphics mode...\n");
+    printf("Запуск графического теста...\n");
     set_graphics_mode(MODE_GRAPHICS);
     
-    // Тест графики
-    graphics_clear(0xFF00FFFF);  // Cyan color in ARGB format
+    // Создаем красивый градиентный фон
+    for (int y = 0; y < GRAPHICS_HEIGHT; y++) {
+        uint32_t color = 0xFF000000 | ((y * 200 / GRAPHICS_HEIGHT) << 16) | ((y * 50 / GRAPHICS_HEIGHT) << 8) | (y * 100 / GRAPHICS_HEIGHT);
+        for (int x = 0; x < GRAPHICS_WIDTH; x++) {
+            put_pixel(x, y, color);
+        }
+    }
     
-    // Окно
-    draw_window(100, 50, 400, 300, "Graphics Test Window");
-    draw_string(120, 80, "Hello Graphics Mode!", COLOR_BLACK);
+    // Рисуем демонстрационные фигуры
     
-    // Фигуры
-    fill_rect(150, 120, 100, 60, COLOR_GREEN);
-    draw_rect(270, 120, 100, 60, COLOR_RED);
+    // Круг (аппроксимация)
+    int center_x = 200, center_y = 200, radius = 80;
+    for (int y = -radius; y <= radius; y++) {
+        for (int x = -radius; x <= radius; x++) {
+            if (x*x + y*y <= radius*radius) {
+                put_pixel(center_x + x, center_y + y, COLOR_YELLOW);
+            }
+        }
+    }
     
-    // Кнопки
-    draw_button(180, 200, 80, 30, "OK");
-    draw_button(280, 200, 80, 30, "Cancel");
+    // Треугольник
+    draw_line(400, 150, 350, 250, COLOR_RED);
+    draw_line(350, 250, 450, 250, COLOR_RED);
+    draw_line(450, 250, 400, 150, COLOR_RED);
+    fill_rect(400, 200, 1, 50, COLOR_RED); // центр треугольника
     
-    // Линия
-    draw_line(150, 250, 350, 250, COLOR_BLUE);
+    // Прямоугольники с градиентом
+    for (int i = 0; i < 5; i++) {
+        uint32_t color = 0xFF000000 | (i * 40 << 16) | (255 - i * 40 << 8) | 128;
+        fill_rect(600 + i * 30, 150 + i * 20, 80, 60, color);
+    }
     
-    printf("Graphics test complete! Check screen.\n");
+    // Окно с информацией
+    draw_window(100, 300, 400, 200, "Графический Тест PureC OS");
+    draw_string(120, 330, "✓ Графический режим активен", COLOR_BLACK);
+    draw_string(120, 350, "✓ Поддержка окон", COLOR_BLACK);
+    draw_string(120, 370, "✓ Рисование фигур", COLOR_BLACK);
+    draw_string(120, 390, "✓ Текст и шрифты", COLOR_BLACK);
+    draw_string(120, 410, "✓ Цветовая палитра", COLOR_BLACK);
+    
+    // Анимационные элементы (статичные для демонстрации)
+    for (int i = 0; i < 10; i++) {
+        put_pixel(500 + i * 5, 100 + (i % 3) * 5, COLOR_WHITE);
+        put_pixel(501 + i * 5, 101 + (i % 3) * 5, COLOR_CYAN);
+    }
+    
+    // Надпись
+    draw_string(250, 50, "PureC OS - Графическая Подсистема", COLOR_WHITE);
+    draw_string(280, 70, "Демонстрация возможностей", COLOR_YELLOW);
+    
+    printf("Графический тест завершен! Проверьте экран.\n");
+    printf("Используйте 'textmode' для возврата в текстовый режим.\n");
 }
 
 void cmd_textmode(char *args) {
