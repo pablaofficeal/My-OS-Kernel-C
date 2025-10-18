@@ -7,7 +7,6 @@ int cursor_x = 0;
 int cursor_y = 0;
 unsigned char text_color = 0x07;
 
-// УБИРАЕМ get_system_timer отсюда, он будет в snake.c
 
 void clear_screen() {
     for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
