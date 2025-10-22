@@ -1,12 +1,17 @@
-// shell.h - ДОБАВИТЬ новые объявления
+// shell.h - Graphics-based shell header
 #ifndef SHELL_H
 #define SHELL_H
 
-void execute_command(char *input);
-void shell_init();
+#include "../drivers/screen.h"
+
+// Shell initialization and main loop
+void init_shell();
 void shell_run();
 
-// Все команды
+// Command execution
+void execute_command(char *input);
+
+// Command implementations
 void cmd_help();
 void cmd_clear();
 void cmd_echo(char *args);
@@ -23,25 +28,18 @@ void cmd_fsinfo();
 void cmd_df();
 void cmd_format(char *args);
 void cmd_create_test_files();
-void cmd_snake(char *args);
-
-// src/shell/shell.h - ДОБАВИТЬ В КОНЕЦ:
-void cmd_wifi(char* args);
-void cmd_wifi_scan(char* args);
-void cmd_wifi_connect(char* args);
-void cmd_wifi_status(char* args);
-void cmd_wifi_disconnect(char* args);
-
-// НОВЫЕ КОМАНДЫ - ДОБАВИТЬ ЭТИ СТРОКИ:
 void cmd_write(char *args);
 void cmd_info(char *filename);
 void cmd_rename(char *args);
 void cmd_space();
-
-// Добавить объявление:
+void cmd_edit(char *filename);
+void cmd_snake(char *args);
 void cmd_tetris(char *args);
 void cmd_2048(char *args);
+void cmd_wifi(char *args);
+void cmd_graphics(char *args);
+void cmd_textmode(char *args);
+void cmd_desktop(char *args);
 void cmd_hexedit(char *args);
-
 
 #endif

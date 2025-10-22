@@ -20,36 +20,47 @@ const unsigned int multiboot_header[] = {
 #include "drivers/usb/usb_driver.h"
 #include "drivers/wifi/wifi.h"
 
-void kernel_main(void);
-
-void _start(void) {
-    kernel_main();
-}
-
-void kernel_main(void) {
-    shell_init();
-    
-    // Инициализация графики ДО файловой системы
-    printf("Initializing graphics...\n");
-    init_graphics();
-    
-    printf("Initializing disk...\n");
-    disk_init();
-    
-    printf("Initializing FAT16...\n");
-    if (!fat16_init()) {
-        printf("FAT16 init failed!\n");
+void kernel_main() {
+    // Initialize framebuffer graphics
+    if (!init_framebuffer()) {
+        // If framebuffer init fails, we can't proceed
+        return;
     }
     
-    fat16_sync();
+    // Create desktop
+    desktop_t* desktop = create_desktop();
+    if (!desktop) {
+        return;
+    }
     
-    printf("Kernel ready! Starting shell...\n");
-    printf("Try: graphics, desktop, textmode commands\n");
+    // Initialize disk and filesystem
+    init_disk();
+    init_fat16();
     
-    shell_run();
-    printf("Shutting down...\n");   
+    // Initialize other drivers
+    init_usb_driver();
+    init_wifi();
     
-    fat16_sync();
+    // Create some demo windows
+    window_t* welcome_window = create_window(100, 100, 400, 300, "Welcome to MyOS", WINDOW_FLAG_DECORATED);
+    if (welcome_window) {
+        // Add some content to the window
+        draw_string(20, 50, "Welcome to MyOS!", COLOR_WHITE);
+        draw_string(20, 70, "This is a framebuffer-based GUI.", COLOR_WHITE);
+        draw_string(20, 90, "Click windows to interact.", COLOR_WHITE);
+        window_paint(welcome_window);
+    }
     
-    while(1) asm("hlt");
+    window_t* terminal_window = create_window(150, 150, 350, 250, "Terminal", WINDOW_FLAG_DECORATED);
+    if (terminal_window) {
+        draw_string(20, 50, "Terminal Window", COLOR_WHITE);
+        draw_string(20, 70, "Ready for input...", COLOR_WHITE);
+        window_paint(terminal_window);
+    }
+    
+    // Draw initial desktop
+    desktop_paint(desktop);
+    
+    // Start shell (now in graphics mode)
+    init_shell();
 }

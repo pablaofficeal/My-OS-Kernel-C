@@ -2,6 +2,7 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/keyboard/keyboard.c -o keyboard.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/lib/string.c -o string.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/lib/memory.c -o memory.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/shell/shell.c -o shell.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/shell/commands.c -o commands.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/fs/disk.c -o disk.o
@@ -17,18 +18,15 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/pci/pci.c -o pci.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/graphics.c -o graphics.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/usb/usb_driver.c -o usb_driver.o
 
-
-
 ld -m elf_i386 -T linker.ld -o kernel.bin \
-    kernel.o screen.o keyboard.o string.o \
+    kernel.o screen.o keyboard.o string.o memory.o \
     shell.o commands.o \
     disk.o fat16.o \
     hexedit.o \
     snake.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o \
-    pci.o wifi.o ax210.o graphics.o usb_driver.o
+    pci.o wifi.o ax210.o usb_driver.o
 
 if [ ! -f kernel.bin ]; then
     echo "❌ Linking failed! Check for errors above."
@@ -56,6 +54,5 @@ if [ ! -f myos.iso ]; then
     exit 1
 fi
 
-rm "*.o"
-
+rm -f *.o
 qemu-system-i386 -cdrom myos.iso -m 512M -usb -device usb-kbd -device usb-mouse

@@ -1,6 +1,7 @@
 // src/drivers/pci/pci.c
 #include "pci.h"
 #include "../screen.h"
+#include <stdio.h>
 
 static pci_device_t pci_devices[32];
 static int pci_device_count = 0;

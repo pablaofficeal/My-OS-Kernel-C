@@ -1,8 +1,9 @@
 // usb_driver.c - ПОЛНОСТЬЮ ДОПИСАННЫЙ
 #include "usb_driver.h"
-#include "../screen.h"
-#include "../../lib/string.h"
 #include "../pci/pci.h"
+#include "../screen.h"
+#include <stdio.h>
+#include "../../lib/string.h"
 
 // Порты USB контроллера (UHCI)
 #define USB_COMMAND_PORT       0x0
