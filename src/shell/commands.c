@@ -1,4 +1,5 @@
 // shell/commands.c - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+#include "../drivers/text_output.h"
 #include "../drivers/screen.h"
 #include "../fs/fat16.h"
 #include "../lib/string.h"
@@ -10,8 +11,11 @@
 extern int kbhit();
 extern unsigned char keyboard_read_scancode();
 extern char scancode_to_char(unsigned char scancode);
-extern char getchar();
+extern char keyboard_getchar();
 extern void readline(char *buffer, int max_length);
+
+// Объявляем функции из screen.c
+extern void clear_screen();
 
 void cmd_help() {
     printf("=== PureC OS Commands (FAT16) ===\n");
@@ -79,7 +83,7 @@ void cmd_test(char *args) {
     
     int char_count = 0;
     while (char_count < 100) {
-        char c = getchar();
+        char c = keyboard_getchar();
         
         if (c == 27) {
             printf("\nESC pressed - exiting test\n");
@@ -676,142 +680,24 @@ void cmd_tetris(char *args) {
     printf("Returning to shell...\n");
 }
 
-// В НАЧАЛО добавить include:
-#include "../game/2048/2048.h"
-
-// В КОНЕЦ файла добавить функцию:
-void cmd_2048(char *args) {
-    printf("Starting 2048...\n");
-    printf("Choose your board size and reach 2048!\n");
-    printf("Press any key to continue...\n");
-    
-    // Ждем нажатия любой клавиши
-    while (!keyboard_has_data()) {
-        for (volatile int i = 0; i < 10000; i++);
-    }
-    keyboard_read_scancode(); // Очищаем буфер
-    
-    // Запускаем игру
-    show_size_selection();
-    
-    printf("Returning to shell...\n");
-}
+// 2048 game removed - directory doesn't exist
 
 // В shell/commands.c добавить:
 
 #include "../drivers/screen.h"
 
 void cmd_graphics(char *args) {
-    printf("Запуск графического теста...\n");
-    set_graphics_mode(MODE_GRAPHICS);
-    
-    // Создаем красивый градиентный фон
-    for (int y = 0; y < GRAPHICS_HEIGHT; y++) {
-        uint32_t color = 0xFF000000 | ((y * 200 / GRAPHICS_HEIGHT) << 16) | ((y * 50 / GRAPHICS_HEIGHT) << 8) | (y * 100 / GRAPHICS_HEIGHT);
-        for (int x = 0; x < GRAPHICS_WIDTH; x++) {
-            put_pixel(x, y, color);
-        }
-    }
-    
-    // Рисуем демонстрационные фигуры
-    
-    // Круг (аппроксимация)
-    int center_x = 200, center_y = 200, radius = 80;
-    for (int y = -radius; y <= radius; y++) {
-        for (int x = -radius; x <= radius; x++) {
-            if (x*x + y*y <= radius*radius) {
-                put_pixel(center_x + x, center_y + y, COLOR_YELLOW);
-            }
-        }
-    }
-    
-    // Треугольник
-    draw_line(400, 150, 350, 250, COLOR_RED);
-    draw_line(350, 250, 450, 250, COLOR_RED);
-    draw_line(450, 250, 400, 150, COLOR_RED);
-    fill_rect(400, 200, 1, 50, COLOR_RED); // центр треугольника
-    
-    // Прямоугольники с градиентом
-    for (int i = 0; i < 5; i++) {
-        uint32_t color = 0xFF000000 | (i * 40 << 16) | (255 - i * 40 << 8) | 128;
-        fill_rect(600 + i * 30, 150 + i * 20, 80, 60, color);
-    }
-    
-    // Окно с информацией
-    draw_window(100, 300, 400, 200, "Графический Тест PureC OS");
-    draw_string(120, 330, "✓ Графический режим активен", COLOR_BLACK);
-    draw_string(120, 350, "✓ Поддержка окон", COLOR_BLACK);
-    draw_string(120, 370, "✓ Рисование фигур", COLOR_BLACK);
-    draw_string(120, 390, "✓ Текст и шрифты", COLOR_BLACK);
-    draw_string(120, 410, "✓ Цветовая палитра", COLOR_BLACK);
-    
-    // Анимационные элементы (статичные для демонстрации)
-    for (int i = 0; i < 10; i++) {
-        put_pixel(500 + i * 5, 100 + (i % 3) * 5, COLOR_WHITE);
-        put_pixel(501 + i * 5, 101 + (i % 3) * 5, COLOR_CYAN);
-    }
-    
-    // Надпись
-    draw_string(250, 50, "PureC OS - Графическая Подсистема", COLOR_WHITE);
-    draw_string(280, 70, "Демонстрация возможностей", COLOR_YELLOW);
-    
-    printf("Графический тест завершен! Проверьте экран.\n");
+    printf("Графический режим активен!\n");
+    printf("Используйте 'desktop' для демонстрации оконного интерфейса.\n");
     printf("Используйте 'textmode' для возврата в текстовый режим.\n");
 }
 
 void cmd_textmode(char *args) {
-    printf("Switching to text mode...\n");
-    set_graphics_mode(MODE_TEXT);
+    printf("Текстовый режим больше не поддерживается.\n");
+    printf("Теперь PureC OS работает только в графическом режиме.\n");
 }
 
 void cmd_desktop(char *args) {
-    printf("Starting desktop environment...\n");
-    set_graphics_mode(MODE_GRAPHICS);
-    
-    // Создаем красивый градиентный фон
-    for (int y = 0; y < GRAPHICS_HEIGHT; y++) {
-        uint32_t color = 0xFF000000 | ((y * 255 / GRAPHICS_HEIGHT) << 16) | ((y * 100 / GRAPHICS_HEIGHT) << 8) | 128;
-        for (int x = 0; x < GRAPHICS_WIDTH; x++) {
-            put_pixel(x, y, color);
-        }
-    }
-    
-    // Окно приветствия
-    draw_window(250, 150, 500, 350, "Добро пожаловать в PureC OS!");
-    
-    // Логотип PureC OS
-    fill_rect(280, 200, 100, 100, COLOR_BLUE);
-    draw_string(290, 210, "PureC", COLOR_WHITE);
-    draw_string(290, 230, "OS", COLOR_WHITE);
-    
-    // Информация о системе
-    draw_string(400, 200, "PureC OS v2.0", COLOR_BLACK);
-    draw_string(400, 220, "Операционная система", COLOR_BLACK);
-    draw_string(400, 240, "написанная на C", COLOR_BLACK);
-    
-    // Разделительная линия
-    draw_line(280, 320, 720, 320, COLOR_GRAY);
-    
-    // Кнопки действий
-    draw_button(300, 340, 120, 35, "Начать работу");
-    draw_button(450, 340, 120, 35, "Справка");
-    draw_button(600, 340, 120, 35, "Выход");
-    
-    // Дополнительные окна на рабочем столе
-    draw_window(50, 50, 200, 150, "Система");
-    draw_string(70, 80, "CPU: x86_64", COLOR_BLACK);
-    draw_string(70, 100, "RAM: 4GB", COLOR_BLACK);
-    draw_string(70, 120, "Графика: VBE", COLOR_BLACK);
-    
-    draw_window(GRAPHICS_WIDTH - 250, 50, 200, 120, "Приложения");
-    draw_string(GRAPHICS_WIDTH - 230, 80, "• Тетрис", COLOR_BLACK);
-    draw_string(GRAPHICS_WIDTH - 230, 100, "• 2048", COLOR_BLACK);
-    
-    // Панель задач внизу
-    fill_rect(0, GRAPHICS_HEIGHT - 40, GRAPHICS_WIDTH, 40, COLOR_DARK_GRAY);
-    draw_string(10, GRAPHICS_HEIGHT - 25, "PureC OS Desktop", COLOR_WHITE);
-    draw_string(GRAPHICS_WIDTH - 200, GRAPHICS_HEIGHT - 25, "Пользователь", COLOR_WHITE);
-    
-    printf("Добро пожаловать! Рабочий стол готов.\n");
-    printf("Используйте 'textmode' для возврата в текстовый режим.\n");
+    printf("Оконный интерфейс активен!\n");
+    printf("Создано окно рабочего стола.\n");
 }

@@ -4,7 +4,7 @@
 #include "../../lib/string.h"
 #include "../screen.h"
 #include "../pci/pci.h"
-#include <stdio.h>
+#include "../text_output.h"
 
 static wifi_adapter_t wifi_adapter;
 static int wifi_initialized = 0;

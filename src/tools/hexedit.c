@@ -3,6 +3,11 @@
 #include "../fs/fat16.h"
 #include "../lib/string.h"
 #include "../lib/memory.h"
+#include "../drivers/text_output.h"
+
+// Function declarations
+void set_cursor(int x, int y);
+void clear_screen(void);
 
 #define HEXEDIT_BUFFER_SIZE 8192
 #define DISPLAY_LINES 20
@@ -443,7 +448,7 @@ void hexedit_handle_input() {
     while (1) {
         hexedit_display();
         
-        char c = getchar();
+        char c = keyboard_getchar();
         
         // Handle function keys (F1-F8)
         if (c == 0) {
@@ -457,12 +462,12 @@ void hexedit_handle_input() {
                 case 0x3B: // F1
                     hexedit_display_help();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
                 case 0x3C: // F2
                     hexedit_save_file();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
                 case 0x3D: // F3
                     mode = (mode + 1) % 3;
@@ -470,22 +475,22 @@ void hexedit_handle_input() {
                 case 0x3F: // F5
                     hexedit_goto_offset();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
                 case 0x40: // F6
                     hexedit_find_bytes();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
                 case 0x41: // F7
                     hexedit_assemble_code();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
                 case 0x42: // F8
                     hexedit_fill_pattern();
                     printf("Press any key to continue...");
-                    getchar();
+                    keyboard_getchar();
                     break;
             }
             continue;
@@ -496,7 +501,7 @@ void hexedit_handle_input() {
             case 27: // ESC
                 if (modified) {
                     printf("Unsaved changes! Save? (y/n): ");
-                    c = getchar();
+                    c = keyboard_getchar();
                     if (c == 'y' || c == 'Y') {
                         hexedit_save_file();
                     }

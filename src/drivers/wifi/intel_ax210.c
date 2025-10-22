@@ -1,6 +1,7 @@
-#include "../screen.h"
-#include <stdio.h>
 #include "intel_ax210.h"
+#include "../../lib/string.h"
+#include "../screen.h"
+#include "../text_output.h"
 
 static pci_device_t ax210_device;
 static uint32_t ax210_base_addr = 0;

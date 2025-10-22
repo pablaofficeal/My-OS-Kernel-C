@@ -1,5 +1,10 @@
 // src/game/snake.c
 #include "snake.h"
+#include "../../drivers/text_output.h"
+
+// Function declarations
+void set_cursor(int x, int y);
+void clear_screen(void);
 
 static snake_t snake;
 static food_t food;

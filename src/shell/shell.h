@@ -35,7 +35,7 @@ void cmd_space();
 void cmd_edit(char *filename);
 void cmd_snake(char *args);
 void cmd_tetris(char *args);
-void cmd_2048(char *args);
+
 void cmd_wifi(char *args);
 void cmd_graphics(char *args);
 void cmd_textmode(char *args);

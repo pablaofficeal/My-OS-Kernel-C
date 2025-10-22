@@ -120,4 +120,10 @@ extern int framebuffer_width;
 extern int framebuffer_height;
 extern int framebuffer_pitch;
 
+// Font data
+extern unsigned char font_8x8[128][8];
+
+// Global desktop pointer
+extern desktop_t* global_desktop;
+
 #endif

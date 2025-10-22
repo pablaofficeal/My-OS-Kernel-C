@@ -4,16 +4,17 @@
 #include "../lib/memory.h"
 
 // Global framebuffer
-uint32_t* framebuffer = 0;
+uint32_t* framebuffer = (uint32_t*)0xFD000000;
 int framebuffer_width = SCREEN_WIDTH;
 int framebuffer_height = SCREEN_HEIGHT;
 int framebuffer_pitch = SCREEN_WIDTH * BYTES_PER_PIXEL;
 
-// Desktop
-static desktop_t* global_desktop = 0;
+desktop_t* global_desktop = 0;  // Remove static keyword
+static window_t* windows[MAX_WINDOWS];
+static int window_count = 0;
 
 // Font data (8x8 bitmap font)
-static unsigned char font_8x8[128][8] = {
+unsigned char font_8x8[128][8] = {
     [32] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // space
     [33] = {0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00}, // !
     [48] = {0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x66, 0x3C}, // 0
@@ -315,20 +316,6 @@ void fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3, uint32_t colo
 
 // ==================== TEXT RENDERING ====================
 
-void draw_char(int x, int y, char c, uint32_t color) {
-    if (c < 32 || c > 126) c = 32; // Replace non-printable with space
-    
-    unsigned char *glyph = font_8x8[(unsigned char)c];
-    
-    for (int dy = 0; dy < 8; dy++) {
-        for (int dx = 0; dx < 8; dx++) {
-            if (glyph[dy] & (1 << (7 - dx))) {
-                draw_pixel(x + dx, y + dy, color);
-            }
-        }
-    }
-}
-
 void draw_string(int x, int y, const char *str, uint32_t color) {
     int pos_x = x;
     while (*str) {
@@ -353,7 +340,6 @@ int get_char_height(void) {
 // ==================== WINDOW MANAGER ====================
 
 static window_t* window_list[MAX_WINDOWS];
-static int window_count = 0;
 
 window_t* create_window(int x, int y, int width, int height, const char* title, uint32_t flags) {
     if (window_count >= MAX_WINDOWS) return 0;
@@ -366,8 +352,12 @@ window_t* create_window(int x, int y, int width, int height, const char* title, 
     window->width = width;
     window->height = height;
     window->flags = flags | WINDOW_FLAG_VISIBLE;
-    strncpy(window->title, title, 63);
-    window->title[63] = '\0';
+    // Copy title string manually
+    int i;
+    for (i = 0; i < 63 && title[i]; i++) {
+        window->title[i] = title[i];
+    }
+    window->title[i] = '\0';
     
     // Allocate window buffer
     window->buffer = (uint32_t*)malloc(width * height * sizeof(uint32_t));
@@ -563,7 +553,7 @@ void window_paint(window_t* window) {
     
     // Call custom paint handler if available
     if (window->on_paint) {
-        window->on_paint(window);
+        window->on_paint((struct window*)window);
     }
 }
 
@@ -638,7 +628,7 @@ void desktop_handle_mouse(desktop_t* desktop, int x, int y, int buttons) {
         
         // Call window's click handler
         if (win->on_click) {
-            win->on_click(win, x - win->x, y - win->y);
+            win->on_click((struct window*)win, x - win->x, y - win->y);
         }
     }
     
@@ -651,7 +641,7 @@ void desktop_handle_key(desktop_t* desktop, char key) {
     
     // Send key to active window
     if (desktop->active_window->on_key) {
-        desktop->active_window->on_key(desktop->active_window, key);
+        desktop->active_window->on_key((struct window*)desktop->active_window, key);
     }
 }
 

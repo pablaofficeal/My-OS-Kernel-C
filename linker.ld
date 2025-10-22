@@ -5,17 +5,34 @@ SECTIONS
 {
     . = 0x100000; /* Загрузка по адресу 1MB */
 
-    .text : ALIGN(4) {
+    /* Multiboot заголовок должен быть в первых 8KB */
+    .multiboot BLOCK(4) : {
         *(.multiboot)
+    }
+
+    .text BLOCK(4) : {
         *(.text)
     }
 
-    .data : ALIGN(4) {
-        *(.data)
+    .rodata BLOCK(4) : {
+        *(.rodata)
+        *(.rodata.*)
     }
 
-    .bss : ALIGN(4) {
+    .data BLOCK(4) : {
+        *(.data)
+        *(.data.*)
+    }
+
+    .bss BLOCK(4) : {
         *(COMMON)
         *(.bss)
+        *(.bss.*)
+    }
+
+    /DISCARD/ : {
+        *(.comment)
+        *(.note*)
+        *(.eh_frame*)
     }
 }

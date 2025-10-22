@@ -12,7 +12,10 @@ static window_t* shell_window = 0;
 static int shell_cursor_x = 20;
 static int shell_cursor_y = 50;
 
-// Command declarations
+// External function declarations
+extern char keyboard_getchar();
+
+// External command functions from commands.c
 extern void cmd_help();
 extern void cmd_clear();
 extern void cmd_echo(char *args);
@@ -37,7 +40,7 @@ extern void cmd_edit(char *filename);
 extern void cmd_snake(char *args);
 extern void cmd_wifi(char *args);
 extern void cmd_tetris(char *args);
-extern void cmd_2048(char *args);
+
 extern void cmd_graphics(char *args);
 extern void cmd_textmode(char *args);
 extern void cmd_desktop(char *args);
@@ -89,158 +92,9 @@ void shell_prompt() {
     shell_cursor_x = 20 + 7 * 8; // Position after prompt
 }
 
-// Updated command implementations
-void cmd_help() {
-    shell_print("Available commands:");
-    shell_print("  help     - Show this help");
-    shell_print("  clear    - Clear screen");
-    shell_print("  version  - Show version info");
-    shell_print("  ls       - List files");
-    shell_print("  cat      - Show file contents");
-    shell_print("  touch    - Create file");
-    shell_print("  rm       - Remove file");
-    shell_print("  echo     - Print text");
-    shell_print("  fsinfo   - Show filesystem info");
-    shell_print("  df       - Show disk usage");
-    shell_print("  format   - Format disk");
-    shell_print("  testfiles- Create test files");
-    shell_print("  write    - Write to file");
-    shell_print("  info     - Show file info");
-    shell_print("  rename   - Rename file");
-    shell_print("  edit     - Edit file");
-    shell_print("  space    - Show free space");
-    shell_print("  snake    - Play Snake game");
-    shell_print("  tetris   - Play Tetris game");
-    shell_print("  2048     - Play 2048 game");
-    shell_print("  wifi     - WiFi commands");
-    shell_print("  reboot   - Reboot system");
-    shell_print("  shutdown - Shutdown system");
-}
-
-void cmd_clear() {
-    shell_clear();
-}
-
-void cmd_version() {
-    shell_print("MyOS v1.0 - Framebuffer GUI Edition");
-    shell_print("Pure C OS with Window Manager");
-}
-
-void cmd_echo(char *args) {
-    shell_print(args);
-}
-
-void cmd_reboot() {
-    shell_print("Rebooting...");
-    // Add reboot code here
-}
-
-void cmd_shutdown() {
-    shell_print("Shutting down...");
-    // Add shutdown code here
-}
-
-void cmd_ls() {
-    shell_print("File listing not implemented in GUI shell");
-}
-
-void cmd_cat(char *filename) {
-    shell_print("File reading not implemented in GUI shell");
-}
-
-void cmd_touch(char *filename) {
-    shell_print("File creation not implemented in GUI shell");
-}
-
-void cmd_rm(char *filename) {
-    shell_print("File removal not implemented in GUI shell");
-}
-
-void cmd_fsinfo() {
-    shell_print("Filesystem info not implemented in GUI shell");
-}
-
-void cmd_df() {
-    shell_print("Disk usage not implemented in GUI shell");
-}
-
-void cmd_format(char *args) {
-    shell_print("Disk format not implemented in GUI shell");
-}
-
-void cmd_create_test_files() {
-    shell_print("Test file creation not implemented in GUI shell");
-}
-
-void cmd_write(char *args) {
-    shell_print("File writing not implemented in GUI shell");
-}
-
-void cmd_info(char *filename) {
-    shell_print("File info not implemented in GUI shell");
-}
-
-void cmd_rename(char *args) {
-    shell_print("File rename not implemented in GUI shell");
-}
-
-void cmd_space() {
-    shell_print("Free space info not implemented in GUI shell");
-}
-
-void cmd_edit(char *filename) {
-    shell_print("File editing not implemented in GUI shell");
-}
-
-void cmd_keytest() {
-    shell_print("Key test not implemented in GUI shell");
-}
-
-void cmd_test(char *args) {
-    shell_print("Running tests...");
-    shell_print("Framebuffer: OK");
-    shell_print("Window Manager: OK");
-    shell_print("Desktop: OK");
-}
-
-void cmd_graphics(char *args) {
-    shell_print("Already in graphics mode!");
-    shell_print("Desktop with window manager is active.");
-}
-
-void cmd_textmode(char *args) {
-    shell_print("Text mode removed!");
-    shell_print("This OS now uses framebuffer graphics only.");
-}
-
-void cmd_desktop(char *args) {
-    shell_print("Desktop is already running!");
-    shell_print("Use mouse to interact with windows.");
-}
-
-void cmd_snake(char *args) {
-    shell_print("Snake game not implemented in GUI shell");
-}
-
-void cmd_tetris(char *args) {
-    shell_print("Tetris game not implemented in GUI shell");
-}
-
-void cmd_2048(char *args) {
-    shell_print("2048 game not implemented in GUI shell");
-}
-
-void cmd_wifi(char *args) {
-    shell_print("WiFi not implemented in GUI shell");
-}
-
-void cmd_hexedit(char *args) {
-    shell_print("Hex editor not implemented in GUI shell");
-}
-
 void execute_command(char *input) {
     if (strcmp(input, "help") == 0) cmd_help();
-    else if (strcmp(input, "clear") == 0) cmd_clear();
+    else if (strcmp(input, "clear") == 0) { shell_clear(); cmd_clear(); }
     else if (strcmp(input, "version") == 0) cmd_version();
     else if (strcmp(input, "reboot") == 0) cmd_reboot();
     else if (strcmp(input, "shutdown") == 0) cmd_shutdown();
@@ -263,7 +117,7 @@ void execute_command(char *input) {
     else if (strcmp(input, "snake") == 0) cmd_snake("");
     else if (strncmp(input, "wifi ", 5) == 0) cmd_wifi(input + 5);
     else if (strcmp(input, "tetris") == 0) cmd_tetris("");
-    else if (strcmp(input, "2048") == 0) cmd_2048("");
+
     else if (strcmp(input, "graphics") == 0) cmd_graphics("");
     else if (strcmp(input, "textmode") == 0) cmd_textmode("");
     else if (strcmp(input, "desktop") == 0) cmd_desktop("");
@@ -306,7 +160,7 @@ void shell_run() {
     int input_pos = 0;
     
     while (1) {
-        char key = getchar();
+        char key = keyboard_getchar();
         if (key) {
             if (key == '\n') {
                 input_buffer[input_pos] = '\0';

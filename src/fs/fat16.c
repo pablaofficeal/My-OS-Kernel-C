@@ -2,6 +2,7 @@
 #include "fat16.h"
 #include "../drivers/screen.h"
 #include "../lib/string.h"
+#include "../drivers/text_output.h"
 
 static fat16_boot_sector_t boot_sector;
 static unsigned char fat_table[800 * 512];

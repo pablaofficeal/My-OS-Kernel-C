@@ -1,9 +1,14 @@
 #include "tetris.h"
 #include "../../lib/string.h"
-
+#include "../../drivers/text_output.h"
 
 static tetris_game game;
 static unsigned long game_timer = 0;
+
+// Function declarations
+void set_cursor(int x, int y);
+void clear_screen(void);
+int putchar(int c);
 
 // Объявляем функции которые будем использовать
 extern int keyboard_has_data(void);

@@ -1,6 +1,7 @@
 // drivers/keyboard.c - FIXED KEYCODES
 #include "keyboard.h"
 #include "../screen.h"
+#include "../text_output.h"
 
 #define KEYBOARD_DATA_PORT 0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -80,7 +81,7 @@ int kbhit() {
     return keyboard_has_data();
 }
 
-char getchar() {
+char keyboard_getchar() {
     while (1) {
         if (kbhit()) {
             unsigned char scancode = keyboard_read_scancode();
@@ -100,7 +101,7 @@ void readline(char *buffer, int max_length) {
     int pos = 0;
     
     while (1) {
-        char c = getchar();
+        char c = keyboard_getchar();
         
         if (c == '\n') {
             putchar('\n');

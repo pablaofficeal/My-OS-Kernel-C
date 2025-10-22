@@ -2,7 +2,7 @@
 #include "usb_driver.h"
 #include "../pci/pci.h"
 #include "../screen.h"
-#include <stdio.h>
+#include "../text_output.h"
 #include "../../lib/string.h"
 
 // Порты USB контроллера (UHCI)

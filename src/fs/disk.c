@@ -1,6 +1,7 @@
 // fs/disk.c - РЕАЛЬНОЕ СОХРАНЕНИЕ ДАННЫХ
 #include "disk.h"
 #include "../drivers/screen.h"
+#include "../drivers/text_output.h"
 
 // Увеличим размер диска до 500MB
 #define DISK_SIZE_BYTES (500 * 1024 * 1024)

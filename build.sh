@@ -1,5 +1,7 @@
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/start.c -o start.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/kernel.c -o kernel.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/text_output.c -o text_output.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/keyboard/keyboard.c -o keyboard.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/lib/string.c -o string.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/lib/memory.c -o memory.o
@@ -10,22 +12,17 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/tools/hexedit.c -o hexedit.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/snake/snake.c -o snake.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/tetris/tetris.c -o tetris.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/game_common.c -o game_common.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_4x4.c -o field_4x4.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_8x8.c -o field_8x8.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/field_16x16.c -o field_16x16.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/game/2048/game_start.c -o game_start.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/pci/pci.c -o pci.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/usb/usb_driver.c -o usb_driver.o
 
 ld -m elf_i386 -T linker.ld -o kernel.bin \
-    kernel.o screen.o keyboard.o string.o memory.o \
+    start.o kernel.o screen.o text_output.o keyboard.o string.o memory.o \
     shell.o commands.o \
     disk.o fat16.o \
     hexedit.o \
-    snake.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o \
+    snake.o tetris.o \
     pci.o wifi.o ax210.o usb_driver.o
 
 if [ ! -f kernel.bin ]; then
@@ -40,9 +37,31 @@ cat > iso/boot/grub/grub.cfg << 'EOF'
 set timeout=5
 set default=0
 
+# Устанавливаем текстовый режим для совместимости
+set gfxpayload=text
+
+# Опции для отладки и совместимости
+set debug=multiboot
+
+# Включаем консоль для решения проблемы "no console"
+terminal_input console
+terminal_output console
+
 menuentry "PureC OS" {
+    insmod vbe
+    insmod vga
+    insmod video_bochs
+    insmod video_cirrus
     multiboot /boot/kernel.bin
-    graphics_mode 640x480x32
+    boot
+}
+
+# Резервный вариант с минимальными требованиями
+menuentry "PureC OS (Safe Mode)" {
+    set gfxpayload=text
+    terminal_input console
+    terminal_output console
+    multiboot /boot/kernel.bin
     boot
 }
 EOF
@@ -53,6 +72,3 @@ if [ ! -f myos.iso ]; then
     echo "❌ ISO creation failed!"
     exit 1
 fi
-
-rm -f *.o
-qemu-system-i386 -cdrom myos.iso -m 512M -usb -device usb-kbd -device usb-mouse

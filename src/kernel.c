@@ -1,45 +1,39 @@
 // kernel.c - ОБНОВЛЕННЫЙ
-#define MULTIBOOT_HEADER_MAGIC 0x1BADB002
-#define MULTIBOOT_HEADER_FLAGS 0x00000003
-#define MULTIBOOT_HEADER_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
-
-__attribute__((section(".multiboot")))
-__attribute__((aligned(4)))
-const unsigned int multiboot_header[] = {
-    MULTIBOOT_HEADER_MAGIC,
-    MULTIBOOT_HEADER_FLAGS,
-    MULTIBOOT_HEADER_CHECKSUM
-};
-
 #include "drivers/screen.h"
+#include "drivers/text_output.h"
 #include "shell/shell.h"
 #include "fs/fat16.h"
 #include "fs/disk.h"
 #include "drivers/usb/usb_driver.h"
 #include "drivers/wifi/wifi.h"
-#include "drivers/usb/usb_driver.h"
-#include "drivers/wifi/wifi.h"
 
 void kernel_main() {
+    // First try basic text output
+    clear_screen();
+    printf("MyOS Kernel Starting...\n");
+    
     // Initialize framebuffer graphics
     if (!init_framebuffer()) {
-        // If framebuffer init fails, we can't proceed
-        return;
+        printf("Framebuffer init failed, using text mode\n");
+        // Continue with text mode if framebuffer fails
+    } else {
+        printf("Framebuffer initialized successfully\n");
     }
     
     // Create desktop
     desktop_t* desktop = create_desktop();
     if (!desktop) {
+        printf("Desktop creation failed\n");
         return;
     }
     
     // Initialize disk and filesystem
-    init_disk();
-    init_fat16();
+    disk_init();
+    fat16_init();
     
     // Initialize other drivers
-    init_usb_driver();
-    init_wifi();
+    usb_controller_init();
+    wifi_init();
     
     // Create some demo windows
     window_t* welcome_window = create_window(100, 100, 400, 300, "Welcome to MyOS", WINDOW_FLAG_DECORATED);
