@@ -1,16 +1,23 @@
-/* linker.ld - исправленная версия */
+/* linker.ld - скрипт для flat binary с Multiboot */
 ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x100000; /* Загрузка по адресу 1MB */
+    /* Начинаем с адреса 0x100000 (1MB) - стандартный адрес загрузки */
+    . = 0x100000;
 
-    /* Multiboot заголовок должен быть в первых 8KB */
-    .multiboot BLOCK(4) : {
-        *(.multiboot)
+    /* Multiboot заголовок ДОЛЖЕН быть в первых 8KB от начала файла */
+    .multiboot : {
+        KEEP(*(.multiboot))
+    }
+    
+    /* Multiboot2 заголовок для UEFI */
+    .multiboot2 : {
+        KEEP(*(.multiboot2))
     }
 
-    .text BLOCK(4) : {
+    /* Код и данные */
+    .text : {
         *(.text)
     }
 
