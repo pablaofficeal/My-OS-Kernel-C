@@ -18,6 +18,7 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/graphics.c -o graphics.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/usb/usb_driver.c -o usb_driver.o
 
 
 
@@ -27,7 +28,7 @@ ld -m elf_i386 -T linker.ld -o kernel.bin \
     disk.o fat16.o \
     hexedit.o \
     snake.o tetris.o game_common.o field_4x4.o field_8x8.o field_16x16.o game_start.o \
-    pci.o wifi.o ax210.o graphics.o
+    pci.o wifi.o ax210.o graphics.o usb_driver.o
 
 if [ ! -f kernel.bin ]; then
     echo "❌ Linking failed! Check for errors above."
@@ -43,6 +44,7 @@ set default=0
 
 menuentry "PureC OS" {
     multiboot /boot/kernel.bin
+    graphics_mode 640x480x32
     boot
 }
 EOF
@@ -56,4 +58,4 @@ fi
 
 rm "*.o"
 
-qemu-system-i386 -cdrom myos.iso -m 512M
+qemu-system-i386 -cdrom myos.iso -m 512M -usb -device usb-kbd -device usb-mouse

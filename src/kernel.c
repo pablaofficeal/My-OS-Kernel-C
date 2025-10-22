@@ -15,6 +15,10 @@ const unsigned int multiboot_header[] = {
 #include "shell/shell.h"
 #include "fs/fat16.h"
 #include "fs/disk.h"
+#include "drivers/usb/usb_driver.h"
+#include "drivers/wifi/wifi.h"
+#include "drivers/usb/usb_driver.h"
+#include "drivers/wifi/wifi.h"
 
 void kernel_main(void);
 
@@ -43,6 +47,7 @@ void kernel_main(void) {
     printf("Try: graphics, desktop, textmode commands\n");
     
     shell_run();
+    printf("Shutting down...\n");   
     
     fat16_sync();
     
