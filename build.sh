@@ -1,4 +1,7 @@
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/start.c -o start.o
+gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/boot/lowlevel.c -o lowlevel.o
+# Компилируем ассемблерный файл
+nasm -f elf32 src/boot/lowlevel.asm -o lowlevel_asm.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/kernel.c -o kernel.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/text_output.c -o text_output.o
@@ -17,30 +20,40 @@ gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c s
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/wifi.c -o wifi.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/wifi/intel_ax210.c -o ax210.o
 gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/usb/usb_driver.c -o usb_driver.o
+# Компилируем драйвер мыши на ассемблере
+nasm -f elf32 src/drivers/mouse/mouse.asm -o mouse.o
+# Компилируем загрузчик (для создания boot.bin, если нужен отдельный загрузчик)
+nasm -f bin src/boot/boot.asm -o boot.bin
 # Создаем ELF-файл сначала
 ld -m elf_i386 -T linker.ld -o kernel.elf \
-    start.o kernel.o screen.o text_output.o keyboard.o string.o memory.o error_handler.o \
+    start.o lowlevel.o lowlevel_asm.o kernel.o screen.o text_output.o keyboard.o string.o memory.o error_handler.o \
     shell.o commands.o \
     disk.o fat16.o \
     hexedit.o \
     snake.o tetris.o \
-    pci.o wifi.o ax210.o usb_driver.o
+    pci.o wifi.o ax210.o usb_driver.o \
+    mouse.o
+
 
 if [ ! -f kernel.elf ]; then
     echo "❌ Linking failed! Check for errors above."
     exit 1
 fi
 
-# Конвертируем ELF в flat binary для GRUB
+# GRUB Multiboot требует ELF формат, не flat binary
+# Но для совместимости создаем и binary тоже
 objcopy -O binary kernel.elf kernel.bin
 
-if [ ! -f kernel.bin ]; then
-    echo "❌ Binary conversion failed!"
+if [ ! -f kernel.elf ]; then
+    echo "❌ Kernel ELF not found!"
     exit 1
 fi
 
 mkdir -p iso/boot/grub
-cp kernel.bin iso/boot/
+# Копируем ELF для GRUB Multiboot
+cp kernel.elf iso/boot/kernel.elf
+# И binary для совместимости
+cp kernel.bin iso/boot/kernel.bin
 mkdir -p iso/EFI/BOOT
 
 # Создаем UEFI загрузочный файл
@@ -62,27 +75,27 @@ insmod multiboot2
 set gfxpayload=text
 
 menuentry "PureC OS (Multiboot2)" {
-    echo "Loading PureC OS kernel with Multiboot..."
-    multiboot /boot/kernel.bin
+    echo "Loading PureC OS kernel with Multiboot2..."
+    multiboot2 /boot/kernel.elf
     boot
 }
 
 menuentry "PureC OS (Multiboot)" {
     echo "Loading PureC OS kernel with Multiboot..."
-    multiboot /boot/kernel.bin
+    multiboot /boot/kernel.elf
     boot
 }
 
 menuentry "PureC OS (Safe Mode)" {
     echo "Loading PureC OS kernel in safe mode..."
     set gfxpayload=text
-    multiboot2 /boot/kernel.bin
+    multiboot2 /boot/kernel.elf
     boot
 }
 
 menuentry "PureC OS (Legacy Fallback)" {
     echo "Loading PureC OS kernel (legacy fallback)..."
-    multiboot /boot/kernel.bin
+    multiboot /boot/kernel.elf
     boot
 }
 EOF
@@ -104,19 +117,19 @@ insmod multiboot2
 
 menuentry "PureC OS (UEFI)" {
     echo "Loading PureC OS kernel..."
-    multiboot2 /boot/kernel.bin
+    multiboot2 /boot/kernel.elf
     boot
 }
 
 menuentry "PureC OS (UEFI Safe Mode)" {
     echo "Loading PureC OS kernel (safe mode)..."
-    multiboot2 /boot/kernel.bin
+    multiboot2 /boot/kernel.elf
     boot
 }
 
 menuentry "PureC OS (Legacy Fallback)" {
     echo "Loading PureC OS kernel (legacy)..."
-    multiboot /boot/kernel.bin
+    multiboot /boot/kernel.elf
     boot
 }
 EOF
@@ -127,3 +140,29 @@ if [ ! -f myos.iso ]; then
     echo "❌ ISO creation failed!"
     exit 1
 fi
+#mkdir -p мусор/
+#mv kernel.o мусор/
+#mv start.o мусор/
+#mv screen.o мусор/
+#mv text_output.o мусор/
+#mv keyboard.o мусор/
+#mv string.o мусор/
+#mv memory.o мусор/
+#mv error_handler.o мусор/
+#mv shell.o мусор/
+#mv commands.o мусор/
+#mv disk.o мусор/
+#mv fat16.o мусор/
+#mv hexedit.o мусор/
+#mv snake.o мусор/
+#mv tetris.o мусор/
+#mv pci.o мусор/
+#mv wifi.o мусор/
+#mv ax210.o мусор/
+#mv usb_driver.o мусор/
+
+#sleep 3
+
+#rm -rf мусор/
+
+rm -rf *.o

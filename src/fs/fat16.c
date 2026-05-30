@@ -2,11 +2,13 @@
 #include "fat16.h"
 #include "../drivers/screen.h"
 #include "../lib/string.h"
+#include "../lib/memory.h"
 #include "../drivers/text_output.h"
 
 static fat16_boot_sector_t boot_sector;
-static unsigned char fat_table[800 * 512];
-static unsigned char root_dir[512 * 32];
+// Используем динамическое выделение вместо статических массивов
+static unsigned char* fat_table = 0;
+static unsigned char* root_dir = 0;
 static unsigned char file_buffer[512];
 
 static unsigned int fat_start, root_start, data_start;
@@ -227,6 +229,22 @@ static fat16_dir_entry_t* fat16_find_free_entry() {
 
 // Основные функции FAT16
 int fat16_init() {
+    // Выделяем память для FAT таблицы и root directory
+    if (!fat_table) {
+        fat_table = (unsigned char*)malloc(800 * 512);
+        if (!fat_table) {
+            printf("FAT16: Failed to allocate FAT table!\n");
+            return 0;
+        }
+    }
+    if (!root_dir) {
+        root_dir = (unsigned char*)malloc(512 * 32);
+        if (!root_dir) {
+            printf("FAT16: Failed to allocate root directory!\n");
+            return 0;
+        }
+    }
+    
     printf("FAT16: Initializing %dMB file system...\n", DISK_SIZE_MB);
     
     // Инициализируем диск

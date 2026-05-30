@@ -103,46 +103,108 @@ static unsigned char mouse_cursor_data[CURSOR_HEIGHT][CURSOR_WIDTH] = {
 
 // ==================== FRAMEBUFFER FUNCTIONS ====================
 
+// Внешняя функция для получения Multiboot info
+extern void* get_multiboot_info(void);
+
 int init_framebuffer(void) {
-    // Allocate framebuffer memory
-    framebuffer = (uint32_t*)0xFD000000; // Use high memory area
+    // Пытаемся получить информацию о framebuffer из Multiboot
+    void* mb_info = get_multiboot_info();
     
-    if (!framebuffer) {
-        return 0;
+    if (mb_info) {
+        // Multiboot info structure
+        typedef struct {
+            uint32_t flags;
+            uint32_t mem_lower;
+            uint32_t mem_upper;
+            uint32_t boot_device;
+            uint32_t cmdline;
+            uint32_t mods_count;
+            uint32_t mods_addr;
+            // Framebuffer info (если flags & 0x00001000)
+            uint32_t fb_addr;
+            uint32_t fb_pitch;
+            uint32_t fb_width;
+            uint32_t fb_height;
+            uint8_t  fb_bpp;
+            uint8_t  fb_type;
+        } __attribute__((packed)) multiboot_info_t;
+        
+        multiboot_info_t* mbi = (multiboot_info_t*)mb_info;
+        
+        // Проверяем, есть ли информация о framebuffer
+        if (mbi->flags & 0x00001000 && mbi->fb_addr != 0) {
+            framebuffer = (uint32_t*)mbi->fb_addr;
+            framebuffer_width = mbi->fb_width;
+            framebuffer_height = mbi->fb_height;
+            framebuffer_pitch = mbi->fb_pitch;
+            
+            // Очищаем framebuffer
+            framebuffer_clear(COLOR_BLACK);
+            return 1;
+        }
     }
     
-    // Clear framebuffer
-    framebuffer_clear(COLOR_BLACK);
-    
-    return 1;
+    // Fallback: без информации от Multiboot не можем безопасно инициализировать framebuffer
+    // Возвращаем 0, чтобы использовать text mode вместо зависания
+    return 0;
 }
 
 void framebuffer_clear(uint32_t color) {
-    if (framebuffer) {
-        for (int i = 0; i < framebuffer_width * framebuffer_height; i++) {
-            framebuffer[i] = color;
+    if (!framebuffer) return;
+    
+    // Очистка с использованием правильного pitch
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
+    // Очищаем построчно с учетом pitch
+    for (int y = 0; y < framebuffer_height; y++) {
+        uint32_t* row = fb + y * pitch_pixels;
+        for (int x = 0; x < framebuffer_width; x++) {
+            row[x] = color;
         }
     }
 }
 
 void framebuffer_put_pixel(int x, int y, uint32_t color) {
     if (x >= 0 && x < framebuffer_width && y >= 0 && y < framebuffer_height) {
-        framebuffer[y * framebuffer_width + x] = color;
+        // Используем pitch вместо width для правильного доступа к памяти
+        framebuffer[(y * framebuffer_pitch / BYTES_PER_PIXEL) + x] = color;
     }
 }
 
 uint32_t framebuffer_get_pixel(int x, int y) {
     if (x >= 0 && x < framebuffer_width && y >= 0 && y < framebuffer_height) {
-        return framebuffer[y * framebuffer_width + x];
+        int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+        return framebuffer[y * pitch_pixels + x];
     }
     return 0;
 }
 
 void framebuffer_copy_rect(int src_x, int src_y, int dst_x, int dst_y, int width, int height) {
+    // Оптимизированное копирование прямоугольника
+    if (src_x < 0 || src_y < 0 || dst_x < 0 || dst_y < 0) return;
+    if (src_x + width > framebuffer_width || src_y + height > framebuffer_height) return;
+    if (dst_x + width > framebuffer_width || dst_y + height > framebuffer_height) return;
+    
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
+    // Копируем построчно
     for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            uint32_t pixel = framebuffer_get_pixel(src_x + x, src_y + y);
-            framebuffer_put_pixel(dst_x + x, dst_y + y, pixel);
+        uint32_t* src_row = fb + (src_y + y) * pitch_pixels + src_x;
+        uint32_t* dst_row = fb + (dst_y + y) * pitch_pixels + dst_x;
+        
+        // Копируем по 4 пикселя
+        int x;
+        for (x = 0; x < width - 3; x += 4) {
+            dst_row[x] = src_row[x];
+            dst_row[x + 1] = src_row[x + 1];
+            dst_row[x + 2] = src_row[x + 2];
+            dst_row[x + 3] = src_row[x + 3];
+        }
+        // Остальные пиксели
+        for (; x < width; x++) {
+            dst_row[x] = src_row[x];
         }
     }
 }
@@ -186,14 +248,26 @@ void draw_pixel(int x, int y, uint32_t color) {
 }
 
 void draw_line(int x1, int y1, int x2, int y2, uint32_t color) {
+    // Оптимизированный алгоритм Брезенхема
     int dx = (x2 > x1) ? (x2 - x1) : (x1 - x2);
     int dy = (y2 > y1) ? (y2 - y1) : (y1 - y2);
     int sx = (x1 < x2) ? 1 : -1;
     int sy = (y1 < y2) ? 1 : -1;
     int err = dx - dy;
     
+    // Проверка границ
+    if (x1 < 0 || x1 >= framebuffer_width || y1 < 0 || y1 >= framebuffer_height) return;
+    if (x2 < 0 || x2 >= framebuffer_width || y2 < 0 || y2 >= framebuffer_height) return;
+    
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
     while (1) {
-        draw_pixel(x1, y1, color);
+        // Прямой доступ к framebuffer для скорости
+        if (x1 >= 0 && x1 < framebuffer_width && y1 >= 0 && y1 < framebuffer_height) {
+            fb[y1 * pitch_pixels + x1] = color;
+        }
+        
         if (x1 == x2 && y1 == y2) break;
         
         int e2 = 2 * err;
@@ -223,27 +297,61 @@ void draw_rect(int x, int y, int width, int height, uint32_t color) {
 }
 
 void fill_rect(int x, int y, int width, int height, uint32_t color) {
+    // Проверка границ
+    if (x < 0) { width += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (x + width > framebuffer_width) width = framebuffer_width - x;
+    if (y + height > framebuffer_height) height = framebuffer_height - y;
+    if (width <= 0 || height <= 0) return;
+    
+    // Оптимизированное заполнение - рисуем целые строки
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL; // Pitch в пикселях
+    
     for (int dy = y; dy < y + height; dy++) {
-        for (int dx = x; dx < x + width; dx++) {
-            draw_pixel(dx, dy, color);
+        uint32_t* row = fb + dy * pitch_pixels + x;
+        // Заполняем строку по 4 пикселя
+        int dx;
+        for (dx = 0; dx < width - 3; dx += 4) {
+            row[dx] = color;
+            row[dx + 1] = color;
+            row[dx + 2] = color;
+            row[dx + 3] = color;
+        }
+        // Остальные пиксели в строке
+        for (; dx < width; dx++) {
+            row[dx] = color;
         }
     }
 }
 
 void draw_circle(int cx, int cy, int radius, uint32_t color) {
+    // Оптимизированный алгоритм Брезенхема для круга
     int x = radius;
     int y = 0;
     int err = 0;
     
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
     while (x >= y) {
-        draw_pixel(cx + x, cy + y, color);
-        draw_pixel(cx + y, cy + x, color);
-        draw_pixel(cx - y, cy + x, color);
-        draw_pixel(cx - x, cy + y, color);
-        draw_pixel(cx - x, cy - y, color);
-        draw_pixel(cx - y, cy - x, color);
-        draw_pixel(cx + y, cy - x, color);
-        draw_pixel(cx + x, cy - y, color);
+        // Рисуем 8 симметричных точек с прямой записью в framebuffer
+        if (cx + x >= 0 && cx + x < framebuffer_width && cy + y >= 0 && cy + y < framebuffer_height)
+            fb[(cy + y) * pitch_pixels + (cx + x)] = color;
+        if (cx + y >= 0 && cx + y < framebuffer_width && cy + x >= 0 && cy + x < framebuffer_height)
+            fb[(cy + x) * pitch_pixels + (cx + y)] = color;
+        if (cx - y >= 0 && cx - y < framebuffer_width && cy + x >= 0 && cy + x < framebuffer_height)
+            fb[(cy + x) * pitch_pixels + (cx - y)] = color;
+        if (cx - x >= 0 && cx - x < framebuffer_width && cy + y >= 0 && cy + y < framebuffer_height)
+            fb[(cy + y) * pitch_pixels + (cx - x)] = color;
+        if (cx - x >= 0 && cx - x < framebuffer_width && cy - y >= 0 && cy - y < framebuffer_height)
+            fb[(cy - y) * pitch_pixels + (cx - x)] = color;
+        if (cx - y >= 0 && cx - y < framebuffer_width && cy - x >= 0 && cy - x < framebuffer_height)
+            fb[(cy - x) * pitch_pixels + (cx - y)] = color;
+        if (cx + y >= 0 && cx + y < framebuffer_width && cy - x >= 0 && cy - x < framebuffer_height)
+            fb[(cy - x) * pitch_pixels + (cx + y)] = color;
+        if (cx + x >= 0 && cx + x < framebuffer_width && cy - y >= 0 && cy - y < framebuffer_height)
+            fb[(cy - y) * pitch_pixels + (cx + x)] = color;
         
         if (err <= 0) {
             y += 1;
@@ -257,10 +365,25 @@ void draw_circle(int cx, int cy, int radius, uint32_t color) {
 }
 
 void fill_circle(int cx, int cy, int radius, uint32_t color) {
-    for (int y = -radius; y <= radius; y++) {
-        for (int x = -radius; x <= radius; x++) {
-            if (x*x + y*y <= radius*radius) {
-                draw_pixel(cx + x, cy + y, color);
+    // Оптимизированное заполнение круга
+    int radius_sq = radius * radius;
+    int min_x = (cx - radius > 0) ? cx - radius : 0;
+    int max_x = (cx + radius < framebuffer_width) ? cx + radius : framebuffer_width - 1;
+    int min_y = (cy - radius > 0) ? cy - radius : 0;
+    int max_y = (cy + radius < framebuffer_height) ? cy + radius : framebuffer_height - 1;
+    
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
+    for (int y = min_y; y <= max_y; y++) {
+        int dy = y - cy;
+        int dy_sq = dy * dy;
+        uint32_t* row = fb + y * pitch_pixels;
+        
+        for (int x = min_x; x <= max_x; x++) {
+            int dx = x - cx;
+            if (dx * dx + dy_sq <= radius_sq) {
+                row[x] = color;
             }
         }
     }
@@ -674,5 +797,91 @@ void hide_mouse_cursor(int x, int y) {
                 }
             }
         }
+    }
+}
+
+// ==================== ADVANCED GRAPHICS FUNCTIONS ====================
+
+// Градиентное заполнение прямоугольника
+void fill_rect_gradient(int x, int y, int width, int height, uint32_t color1, uint32_t color2, int vertical) {
+    if (x < 0) { width += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (x + width > framebuffer_width) width = framebuffer_width - x;
+    if (y + height > framebuffer_height) height = framebuffer_height - y;
+    if (width <= 0 || height <= 0) return;
+    
+    // Извлекаем компоненты цветов
+    uint8_t r1 = (color1 >> 16) & 0xFF;
+    uint8_t g1 = (color1 >> 8) & 0xFF;
+    uint8_t b1 = color1 & 0xFF;
+    uint8_t r2 = (color2 >> 16) & 0xFF;
+    uint8_t g2 = (color2 >> 8) & 0xFF;
+    uint8_t b2 = color2 & 0xFF;
+    
+    uint32_t* fb = framebuffer;
+    int pitch_pixels = framebuffer_pitch / BYTES_PER_PIXEL;
+    
+    if (vertical) {
+        // Вертикальный градиент
+        for (int dy = 0; dy < height; dy++) {
+            int t = (dy * 255) / (height - 1);
+            uint8_t r = r1 + ((r2 - r1) * t) / 255;
+            uint8_t g = g1 + ((g2 - g1) * t) / 255;
+            uint8_t b = b1 + ((b2 - b1) * t) / 255;
+            uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
+            
+            uint32_t* row = fb + (y + dy) * pitch_pixels + x;
+            for (int dx = 0; dx < width; dx++) {
+                row[dx] = color;
+            }
+        }
+    } else {
+        // Горизонтальный градиент
+        for (int dx = 0; dx < width; dx++) {
+            int t = (dx * 255) / (width - 1);
+            uint8_t r = r1 + ((r2 - r1) * t) / 255;
+            uint8_t g = g1 + ((g2 - g1) * t) / 255;
+            uint8_t b = b1 + ((b2 - b1) * t) / 255;
+            uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
+            
+            for (int dy = 0; dy < height; dy++) {
+                fb[(y + dy) * pitch_pixels + x + dx] = color;
+            }
+        }
+    }
+}
+
+// Улучшенная отрисовка символа с антиалиасингом (упрощенная версия)
+void draw_char_aa(int x, int y, char c, uint32_t color) {
+    if (c < 32 || c >= 127) return;
+    
+    extern unsigned char font_8x8[128][8];
+    unsigned char *char_data = font_8x8[(int)c];
+    
+    // Рисуем с небольшим размытием для антиалиасинга
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
+            if (char_data[row] & (1 << (7 - col))) {
+                // Основной пиксель
+                framebuffer_put_pixel(x + col, y + row, color);
+                // Небольшое размытие для сглаживания
+                if (col < 7 && !(char_data[row] & (1 << (6 - col)))) {
+                    framebuffer_blend_pixel(x + col + 1, y + row, (color & 0xFFFFFF) | 0x80000000);
+                }
+                if (row < 7 && !(char_data[row + 1] & (1 << (7 - col)))) {
+                    framebuffer_blend_pixel(x + col, y + row + 1, (color & 0xFFFFFF) | 0x80000000);
+                }
+            }
+        }
+    }
+}
+
+// Улучшенная отрисовка строки с антиалиасингом
+void draw_string_aa(int x, int y, const char *str, uint32_t color) {
+    int pos_x = x;
+    for (int i = 0; str[i] != '\0'; i++) {
+        draw_char_aa(pos_x, y, str[i], color);
+        pos_x += 8; // Ширина символа
+        if (pos_x >= framebuffer_width) break;
     }
 }

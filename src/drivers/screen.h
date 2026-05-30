@@ -114,6 +114,11 @@ window_t* desktop_get_active_window(desktop_t* desktop);
 void draw_mouse_cursor(int x, int y);
 void hide_mouse_cursor(int x, int y);
 
+// Advanced graphics functions
+void fill_rect_gradient(int x, int y, int width, int height, uint32_t color1, uint32_t color2, int vertical);
+void draw_char_aa(int x, int y, char c, uint32_t color); // Anti-aliased text
+void draw_string_aa(int x, int y, const char *str, uint32_t color);
+
 // Global framebuffer pointer
 extern uint32_t* framebuffer;
 extern int framebuffer_width;

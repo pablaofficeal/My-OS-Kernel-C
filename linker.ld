@@ -7,12 +7,12 @@ SECTIONS
     . = 0x100000;
 
     /* Multiboot заголовок ДОЛЖЕН быть в первых 8KB от начала файла */
-    .multiboot : {
+    .multiboot ALIGN(4) : {
         KEEP(*(.multiboot))
     }
     
     /* Multiboot2 заголовок для UEFI */
-    .multiboot2 : {
+    .multiboot2 ALIGN(8) : {
         KEEP(*(.multiboot2))
     }
 
@@ -29,6 +29,11 @@ SECTIONS
     .data BLOCK(4) : {
         *(.data)
         *(.data.*)
+    }
+    
+    /* Большие данные ядра */
+    .kernel_data BLOCK(4) : {
+        *(.kernel_data)
     }
 
     .bss BLOCK(4) : {

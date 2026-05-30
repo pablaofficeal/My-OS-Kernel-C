@@ -6,29 +6,41 @@
 #include "fs/disk.h"
 #include "drivers/usb/usb_driver.h"
 #include "drivers/wifi/wifi.h"
+// // #include "drivers/mouse/mouse.h"  // Временно отключено  // Временно отключено
 #include "lib/error_handler.h"
+#include "boot/lowlevel.h"
 
 void kernel_main() {
+    simple_print("kernel_main: Starting...\n");
+    
     // Initialize error handling
+    simple_print("kernel_main: Initializing error handling...\n");
     reset_error_count();
     
     // First try basic text output
+    simple_print("kernel_main: Clearing screen...\n");
     clear_screen();
+    simple_print("kernel_main: Calling printf...\n");
     printf("MyOS Kernel Starting...\n");
     printf("Built-in error handling enabled\n");
     printf("Error counter initialized\n");
     
     // Initialize framebuffer graphics with error handling
-    printf("Initializing framebuffer...\n");
-    if (!init_framebuffer()) {
-        handle_error("Framebuffer initialization failed, continuing in text mode", ERROR_WARNING);
+    simple_print("Initializing framebuffer...\n");
+    int fb_initialized = init_framebuffer();
+    if (!fb_initialized) {
+        simple_print("Framebuffer init failed - using text mode\n");
         printf("System will continue with limited graphics capabilities\n");
         // Continue with text mode if framebuffer fails - don't crash
-    } else {
-        printf("SUCCESS: Framebuffer initialized successfully\n");
+        printf("System ready in text mode\n");
+        init_shell();
+        return;
     }
+    simple_print("Framebuffer initialized successfully\n");
+    printf("SUCCESS: Framebuffer initialized successfully\n");
     
     // Create desktop with error handling
+    simple_print("Creating desktop environment...\n");
     printf("Creating desktop environment...\n");
     desktop_t* desktop = create_desktop();
     if (!desktop) {
@@ -42,14 +54,15 @@ void kernel_main() {
     printf("SUCCESS: Desktop created successfully\n");
     
     // Initialize disk and filesystem with error handling
-    printf("Initializing disk subsystem...\n");
-    if (safe_execute(disk_init, "Disk initialization") != 0) {
-        handle_error("Disk operations will be unavailable", ERROR_INFO);
-    } else {
-        if (safe_execute(fat16_init, "FAT16 filesystem initialization") != 0) {
-            handle_error("Filesystem operations will be limited", ERROR_INFO);
-        }
-    }
+    // ВРЕМЕННО ОТКЛЮЧЕНО - вызывает проблемы с памятью
+    // printf("Initializing disk subsystem...\n");
+    // if (safe_execute(disk_init, "Disk initialization") != 0) {
+    //     handle_error("Disk operations will be unavailable", ERROR_INFO);
+    // } else {
+    //     if (safe_execute(fat16_init, "FAT16 filesystem initialization") != 0) {
+    //         handle_error("Filesystem operations will be limited", ERROR_INFO);
+    //     }
+    // }
     
     // Initialize other drivers with error handling
     printf("Initializing USB controller...\n");
@@ -61,6 +74,14 @@ void kernel_main() {
     if (safe_execute(wifi_init, "WiFi initialization") != 0) {
         handle_error("Network features will not be available", ERROR_INFO);
     }
+    
+    // Initialize mouse driver - ВРЕМЕННО ОТКЛЮЧЕНО
+    // printf("Initializing mouse...\n");
+    // if (mouse_init() == 0) {
+    //     printf("SUCCESS: Mouse initialized successfully\n");
+    // } else {
+    //     handle_error("Mouse initialization failed, mouse will not be available", ERROR_WARNING);
+    // }
     
     // Create demo windows with error handling
     printf("Creating demo windows...\n");
@@ -90,6 +111,15 @@ void kernel_main() {
     printf("Rendering desktop...\n");
     desktop_paint(desktop);
     printf("Desktop rendered successfully\n");
+    
+    // Main loop - обновляем позицию мыши из драйвера - ВРЕМЕННО ОТКЛЮЧЕНО
+    // if (mouse_is_initialized()) {
+    //     // Обновляем позицию мыши из драйвера
+    //     int mouse_x = mouse_get_x();
+    //     int mouse_y = mouse_get_y();
+    //     uint8_t mouse_buttons = mouse_get_buttons();
+    //     desktop_handle_mouse(desktop, mouse_x, mouse_y, mouse_buttons);
+    // }
     
     // Show final status
     printf("\n=== System Initialization Complete ===\n");
