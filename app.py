@@ -32,10 +32,15 @@ def main():
 
     # List of source and output files
     files = [
+        ("src/start.c", "start.o"),
+        ("src/boot/lowlevel.c", "lowlevel.o"),
         ("src/kernel.c", "kernel.o"),
         ("src/drivers/screen.c", "screen.o"),
-        ("src/drivers/keyboard.c", "keyboard.o"),
+        ("src/drivers/text_output.c", "text_output.o"),
+        ("src/drivers/keyboard/keyboard.c", "keyboard.o"),
         ("src/lib/string.c", "string.o"),
+        ("src/lib/memory.c", "memory.o"),
+        ("src/lib/error_handler.c", "error_handler.o"),
         ("src/shell/shell.c", "shell.o"),
         ("src/shell/commands.c", "commands.o"),
         ("src/fs/disk.c", "disk.o"),
@@ -43,23 +48,24 @@ def main():
         ("src/tools/hexedit.c", "hexedit.o"),
         ("src/game/snake/snake.c", "snake.o"),
         ("src/game/tetris/tetris.c", "tetris.o"),
-        ("src/game/2048/game_common.c", "game_common.o"),
-        ("src/game/2048/field_4x4.c", "field_4x4.o"),
-        ("src/game/2048/field_8x8.c", "field_8x8.o"),
-        ("src/game/2048/field_16x16.c", "field_16x16.o"),
-        ("src/game/2048/game_start.c", "game_start.o"),
         ("src/drivers/pci/pci.c", "pci.o"),
         ("src/drivers/wifi/wifi.c", "wifi.o"),
         ("src/drivers/wifi/intel_ax210.c", "ax210.o"),
+        ("src/drivers/usb/usb_driver.c", "usb_driver.o"),
     ]
 
-    # Compile all files
+    # Compile all C files
     for src, out in files:
         compile_file(src, out)
+    
+    # Compile assembly files
+    run_command("nasm -f elf32 src/boot/lowlevel.asm -o lowlevel_asm.o", "❌ Failed to compile lowlevel.asm")
+    run_command("nasm -f elf32 src/drivers/mouse/mouse.asm -o mouse.o", "❌ Failed to compile mouse.asm")
 
     # Link object files
-    objects = " ".join(out for _, out in files)
-    cmd = f"ld -m elf_i386 -T linker.ld -o kernel.bin {objects}"
+    base_objects = " ".join(out for _, out in files)
+    all_objects = f"{base_objects} lowlevel_asm.o mouse.o"
+    cmd = f"ld -m elf_i386 -T linker.ld -o kernel.bin {all_objects}"
     run_command(cmd, "❌ Linking failed! Check for errors above.")
 
     # Verify kernel.bin exists

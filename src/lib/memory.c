@@ -14,9 +14,24 @@ void *malloc(size_t size) {
     return ptr;
 }
 
-void free(void *ptr) {
-    // Simple implementation - no freeing for now
-    // This is sufficient for our 2048 game
+void free(void* ptr) {
+    // Простая заглушка, не реализуем полную сборку мусора
+    (void)ptr;
 }
 
-// memset and memcpy are now in string.c
+void* memset(void* dest, int val, size_t len) {
+    unsigned char *ptr = (unsigned char*)dest;
+    for (size_t i = 0; i < len; i++) {
+        ptr[i] = (unsigned char)val;
+    }
+    return dest;
+}
+
+void* memcpy(void* dest, const void* src, size_t len) {
+    unsigned char *d = (unsigned char*)dest;
+    const unsigned char *s = (const unsigned char*)src;
+    for (size_t i = 0; i < len; i++) {
+        d[i] = s[i];
+    }
+    return dest;
+}
