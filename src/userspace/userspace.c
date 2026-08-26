@@ -289,6 +289,8 @@ void userspace_init(void){
     shell_len = 0;
     // мышь уже настроена, но нужно обновить границы под десктоп
     mouse_set_bounds(desktop_w, desktop_h);
+    // Boot screen stays clean; the dedicated mouse diagnostics live in userspace.
+    mouse_set_debug_overlay(true);
     mouse_redraw();
     // убедимся что klog на экран выключен
     klog_set_screen_enabled(false);

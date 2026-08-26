@@ -11,6 +11,8 @@
 #define PS2_DATA   0x60
 #define PS2_STATUS 0x64
 #define PS2_CMD    0x64
+#define PS2_STATUS_OUTPUT_FULL 0x01
+#define PS2_STATUS_AUX_DATA    0x20
 
 static inline void outb(uint16_t p, uint8_t v){ __asm__ volatile("outb %0,%1"::"a"(v),"Nd"(p)); }
 static inline uint8_t inb(uint16_t p){ uint8_t r; __asm__ volatile("inb %1,%0":"=a"(r):"Nd"(p)); return r; }
@@ -208,10 +210,12 @@ void ps2_mouse_handler(void){
     uint8_t status = inb(PS2_STATUS);
     debug_state.controller_status=status;
     debug_state.irq_count++;
-    if(status & 1){
-        process_mouse_byte(inb(PS2_DATA));
+    // IRQ12 should carry AUX data, but verify it before touching shared 0x60.
+    // A keyboard byte must remain available for keyboard_poll().
+    if((status & (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA))
+        == (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA)){
+        if(process_mouse_byte(inb(PS2_DATA))) refresh_mouse_ui();
     }
-    refresh_mouse_ui();
 }
 
 void ps2_mouse_poll(void){
@@ -220,10 +224,11 @@ void ps2_mouse_poll(void){
     debug_state.interrupts_enabled=(flags & (1ULL<<9)) != 0;
     uint8_t status=inb(PS2_STATUS);
     debug_state.controller_status=status;
-    if(status & 1){
+    // Port 0x60 is shared with the keyboard. Consume AUX bytes only.
+    if((status & (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA))
+        == (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA)){
         debug_state.poll_count++;
-        process_mouse_byte(inb(PS2_DATA));
-        refresh_mouse_ui();
+        if(process_mouse_byte(inb(PS2_DATA))) refresh_mouse_ui();
     }
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
 }

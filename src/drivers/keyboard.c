@@ -7,6 +7,8 @@
 #define KBD_DATA 0x60
 #define KBD_STATUS 0x64
 #define KBD_CMD 0x64
+#define KBD_STATUS_OUTPUT_FULL 0x01
+#define KBD_STATUS_AUX_DATA    0x20
 
 static inline void outb(uint16_t port, uint8_t val){ __asm__ volatile("outb %0,%1"::"a"(val),"Nd"(port)); }
 static inline uint8_t inb(uint16_t port){ uint8_t ret; __asm__ volatile("inb %1,%0":"=a"(ret):"Nd"(port)); return ret; }
@@ -90,7 +92,12 @@ static void handle_scancode(uint8_t sc){
 }
 
 void keyboard_poll(void){
-    while(inb(KBD_STATUS) & 1){
+    for(;;){
+        uint8_t status = inb(KBD_STATUS);
+        if(!(status & KBD_STATUS_OUTPUT_FULL)) break;
+        // Port 0x60 is shared with the PS/2 mouse. Leave AUX bytes for
+        // ps2_mouse_poll()/IRQ12 instead of decoding them as scan codes.
+        if(status & KBD_STATUS_AUX_DATA) break;
         uint8_t sc = inb(KBD_DATA);
         handle_scancode(sc);
     }
@@ -121,7 +128,13 @@ void keyboard_init(void){
     __asm__ volatile("cli");
     outb(KBD_CMD, 0xAE);
     io_wait();
-    while(inb(KBD_STATUS) & 1) inb(KBD_DATA);
+    // Discard stale keyboard bytes only. An AUX byte belongs to the mouse.
+    for(;;){
+        uint8_t status = inb(KBD_STATUS);
+        if(!(status & KBD_STATUS_OUTPUT_FULL)) break;
+        if(status & KBD_STATUS_AUX_DATA) break;
+        (void)inb(KBD_DATA);
+    }
     // оставляем IRQ1 замаскированным для polling (чтобы не триггерить vector 33 без handler)
     uint8_t mask = inb(0x21);
     mask |= (1<<1);
