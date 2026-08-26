@@ -77,6 +77,8 @@ void _start(void) {
     ps2_mouse_init();
     serial_write_string("[MOUSE] PS/2 ready\n");
 
+    __asm__ volatile("cli");
+    serial_write_string("[INT] before sti\n");
     __asm__ volatile("sti");
     serial_write_string("[INT] sti enabled\n");
 

@@ -19,9 +19,8 @@ header_start:
     ; entry tag
     dw 3
     dw 0
-    dd 12
+    dd 8
     dd multiboot_entry
-    dd 0
 
     ; end tag
     dw 0
@@ -56,9 +55,15 @@ multiboot_entry:
     ; PML4 at 0x70000, PDPT at 0x71000, PD at 0x72000
     mov dword [0x70000], 0x71003      ; PML4[0] -> PDPT
     mov dword [0x71000], 0x72003      ; PDPT[0] -> PD
-    ; PD[0] = 0x83 (2M huge page at 0x0)
-    mov dword [0x72000], 0x00000083
-    mov dword [0x72008], 0x00200083   ; PD[1] = 2M at 0x200000
+    ; Map 0-32M (16 x 2M) для mbi 0x1016D312 и ядра
+    mov ecx, 16
+    mov edi, 0x72000
+    mov eax, 0x00000083
+.map_loop:
+    mov [edi], eax
+    add eax, 0x200000
+    add edi, 8
+    loop .map_loop
 
     ; Enable PAE
     mov eax, cr4
