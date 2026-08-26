@@ -166,7 +166,8 @@ static void draw_cursor(int32_t x,int32_t y){
 static void ps2_handle_byte(uint8_t data, uint8_t status){
     debug_state.controller_status=status;
     debug_state.last_byte=data;
-    if(pkt_idx==0 && (data & 0x08)==0) return;
+    // В QEMU первый байт иногда приходит без 0x08 при эмуляции планшета
+    // Принимаем любые 3 байта, иначе курсор никогда не сдвинется
     packet[pkt_idx++] = data;
     if(pkt_idx==3){
         uint8_t b0 = packet[0];
@@ -193,13 +194,15 @@ void ps2_mouse_handler(void){
 }
 
 void ps2_mouse_poll(void){
-    for(int i=0;i<16;i++){
+    for(int i=0;i<32;i++){
         uint8_t status = inb(PS2_STATUS);
         if(!(status & 1)) break;
-        if(!(status & 0x20)) break; // bit5=0 keyboard, skip
-        debug_state.irq_count++;
+        // Не фильтруем по bit5 — QEMU/VBox часто не выставляет его
         uint8_t data = inb(PS2_DATA);
+        // Считаем poll тоже как IRQ для отладки
+        debug_state.irq_count++;
         ps2_handle_byte(data, status);
+        __asm__ volatile("pause");
     }
 }
 
