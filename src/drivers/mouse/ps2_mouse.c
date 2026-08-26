@@ -163,45 +163,44 @@ static void draw_cursor(int32_t x,int32_t y){
     old_x=x; old_y=y;
 }
 
+static void ps2_handle_byte(uint8_t data, uint8_t status){
+    debug_state.controller_status=status;
+    debug_state.last_byte=data;
+    if(pkt_idx==0 && (data & 0x08)==0) return;
+    packet[pkt_idx++] = data;
+    if(pkt_idx==3){
+        uint8_t b0 = packet[0];
+        int8_t dx = (int8_t)packet[1];
+        int8_t dy = (int8_t)packet[2];
+        mouse_apply_relative(dx, dy, b0 & 0x07);
+        debug_state.packet_count++;
+        if(!packet_seen){ packet_seen=true; serial_write_string("[MOUSE] IRQ12 packets active\n"); }
+        pkt_idx=0;
+        return;
+    }
+    draw_debug_overlay();
+}
+
 void ps2_mouse_handler(void){
     uint8_t status = inb(PS2_STATUS);
-    debug_state.controller_status=status;
     debug_state.irq_count++;
     if(!(status & 1)) return;
     // Проверяем что это от мыши (bit5 = mouse)
     // На некоторых эмуляторах bit5 не ставится, читаем в любом случае
     uint8_t data = inb(PS2_DATA);
-    debug_state.last_byte=data;
-
-    // Первый байт должен иметь bit3=1
-    if(pkt_idx==0 && (data & 0x08)==0){
-        // Десинхрон, сбросим
-        // Не сбрасываем если это ACK 0xFA во время init
-        return;
-    }
-    packet[pkt_idx++] = data;
-    if(pkt_idx==3){
-        // Декодируем как в Linux drivers/input/mouse/psmouse-base.c
-        uint8_t b0 = packet[0];
-        int8_t dx = (int8_t)packet[1];
-        int8_t dy = (int8_t)packet[2];
-        // Обработка переполнения
-        if(b0 & 0x40) {} // X overflow
-        if(b0 & 0x80) {} // Y overflow
-        // Движение
-        mouse_apply_relative(dx, dy, b0 & 0x07);
-        debug_state.packet_count++;
-
-        if(!packet_seen){
-            packet_seen=true;
-            serial_write_string("[MOUSE] IRQ12 packets active\n");
-        }
-
-        pkt_idx=0;
-        return;
-    }
-    draw_debug_overlay();
+    ps2_handle_byte(data, status);
     // EOI уже в isr_handler, но для IRQ12 нужно ещё pic_eoi
+}
+
+void ps2_mouse_poll(void){
+    for(int i=0;i<16;i++){
+        uint8_t status = inb(PS2_STATUS);
+        if(!(status & 1)) break;
+        if(!(status & 0x20)) break; // bit5=0 keyboard, skip
+        debug_state.irq_count++;
+        uint8_t data = inb(PS2_DATA);
+        ps2_handle_byte(data, status);
+    }
 }
 
 void ps2_mouse_init(void){

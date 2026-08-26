@@ -331,10 +331,13 @@ void i2c_hid_touchpad_init(uint64_t hhdm_offset, uint64_t kernel_phys_base, uint
 void i2c_hid_touchpad_poll(void){
     if(!debug_state.device_ready) return;
 
+    uint8_t reg[2] = { descriptor.input_register & 0xFF, descriptor.input_register >> 8 };
     uint8_t report[64];
-    if(!transfer(0, 0, report, sizeof(report))) return;
+    uint32_t len = descriptor.max_input_length ? descriptor.max_input_length : sizeof(report);
+    if(len > sizeof(report)) len = sizeof(report);
+    if(!transfer(reg, 2, report, len)) return;
     uint16_t report_length=le16(report);
-    if(report_length < 6 || report_length > sizeof(report)) return;
+    if(report_length < 6 || report_length > len) return;
 
     // ELAN 04F3:3289 report descriptor, report ID 1:
     // buttons, relative X, relative Y, wheel, consumer pan.
