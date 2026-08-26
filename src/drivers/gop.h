@@ -16,7 +16,7 @@ struct gop_state {
 
 enum gop_font_face {
     GOP_FONT_CLASSIC,
-    GOP_FONT_THIN,
+    GOP_FONT_CLEAN,
     GOP_FONT_BOLD
 };
 

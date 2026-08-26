@@ -69,7 +69,7 @@ static void configure_font(const char *arguments){
     if(!arguments[0]){
         terminal_printf("Font: %s, %u px\n",
                         terminal_get_font_face(),terminal_get_font_size());
-        terminal_write("Faces: classic, thin, bold\n");
+        terminal_write("Faces: classic, clean, bold\n");
         terminal_write("Use: font <8-16|face>\n");
         return;
     }
@@ -85,7 +85,7 @@ static void configure_font(const char *arguments){
     }
 
     if(!terminal_set_font_face(arguments)){
-        terminal_write("font: available faces are classic, thin and bold\n");
+        terminal_write("font: available faces are classic, clean and bold\n");
         return;
     }
     terminal_printf("Font face changed to %s for this session.\n",terminal_get_font_face());

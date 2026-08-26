@@ -233,7 +233,7 @@ bool terminal_set_font_face(const char *name){
     if(!name) return false;
     enum gop_font_face face;
     if(strcmp(name,"classic")==0) face=GOP_FONT_CLASSIC;
-    else if(strcmp(name,"thin")==0) face=GOP_FONT_THIN;
+    else if(strcmp(name,"clean")==0) face=GOP_FONT_CLEAN;
     else if(strcmp(name,"bold")==0) face=GOP_FONT_BOLD;
     else return false;
 
@@ -245,7 +245,7 @@ bool terminal_set_font_face(const char *name){
 
 const char *terminal_get_font_face(void){
     enum gop_font_face face=gop_get_font_face();
-    if(face==GOP_FONT_THIN) return "thin";
+    if(face==GOP_FONT_CLEAN) return "clean";
     if(face==GOP_FONT_BOLD) return "bold";
     return "classic";
 }
