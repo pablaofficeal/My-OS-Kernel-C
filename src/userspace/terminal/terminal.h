@@ -10,6 +10,8 @@ void terminal_write_colored(const char *text, uint32_t color);
 void terminal_printf(const char *format, ...);
 void terminal_clear(void);
 void terminal_prompt(void);
+bool terminal_set_font_size(uint32_t size);
+uint32_t terminal_get_font_size(void);
 
 uint32_t terminal_get_window_width(void);
 uint32_t terminal_get_window_height(void);

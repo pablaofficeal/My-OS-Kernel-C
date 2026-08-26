@@ -6,6 +6,7 @@
 
 static char cpu_name[CPU_NAME_CAPACITY] = "Unknown x86_64 CPU";
 static uint64_t usable_ram_bytes;
+static uint64_t tsc_frequency_hz=3000000000;
 
 static void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx,
                   uint32_t *ecx, uint32_t *edx){
@@ -58,6 +59,24 @@ static void detect_cpu_name(void){
     cpu_name[12]='\0';
 }
 
+static void detect_tsc_frequency(void){
+    uint32_t eax,ebx,ecx,edx;
+    cpuid(0,&eax,&ebx,&ecx,&edx);
+    uint32_t maximum_leaf=eax;
+
+    if(maximum_leaf>=0x15){
+        cpuid(0x15,&eax,&ebx,&ecx,&edx);
+        if(eax && ebx && ecx){
+            tsc_frequency_hz=((uint64_t)ecx*ebx)/eax;
+            return;
+        }
+    }
+    if(maximum_leaf>=0x16){
+        cpuid(0x16,&eax,&ebx,&ecx,&edx);
+        if(eax) tsc_frequency_hz=(uint64_t)eax*1000000;
+    }
+}
+
 static void detect_usable_ram(const struct limine_memmap_response *memory_map){
     usable_ram_bytes=0;
     if(!memory_map) return;
@@ -72,9 +91,12 @@ static void detect_usable_ram(const struct limine_memmap_response *memory_map){
 
 void system_info_init(const struct limine_memmap_response *memory_map){
     detect_cpu_name();
+    detect_tsc_frequency();
     detect_usable_ram(memory_map);
 }
 
 const char *system_info_cpu_name(void){ return cpu_name; }
 
 uint64_t system_info_usable_ram_bytes(void){ return usable_ram_bytes; }
+
+uint64_t system_info_tsc_frequency_hz(void){ return tsc_frequency_hz; }

@@ -5,6 +5,7 @@
 #include "../../kernel/klog.h"
 #include "../../kernel/system_info.h"
 #include "../../lib/string.h"
+#include "../games/snake.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -41,6 +42,37 @@ static void show_systeminfo(void){
     terminal_write("==========================\n");
 }
 
+static bool parse_font_size(const char *text, uint32_t *size){
+    while(is_space(*text)) text++;
+    if(*text<'0' || *text>'9') return false;
+
+    uint32_t value=0;
+    while(*text>='0' && *text<='9'){
+        value=value*10+(uint32_t)(*text-'0');
+        if(value>16) return false;
+        text++;
+    }
+    while(is_space(*text)) text++;
+    if(*text) return false;
+    *size=value;
+    return true;
+}
+
+static void configure_font(const char *arguments){
+    if(!arguments[0]){
+        terminal_printf("Font size: %u px (available: 8-16)\n",terminal_get_font_size());
+        terminal_write("Use: font <size>\n");
+        return;
+    }
+
+    uint32_t size;
+    if(!parse_font_size(arguments,&size) || !terminal_set_font_size(size)){
+        terminal_write("font: size must be between 8 and 16\n");
+        return;
+    }
+    terminal_printf("Terminal font changed to %u px for this session.\n",size);
+}
+
 static void show_help(void){
     terminal_write("Commands:\n");
     terminal_write("  help              show this command list\n");
@@ -50,6 +82,8 @@ static void show_help(void){
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
     terminal_write("  systeminfo        show detailed CPU and RAM info\n");
+    terminal_write("  font [8-16]       show or change session font size\n");
+    terminal_write("  snake             start the Snake game\n");
     terminal_write("  mouse             show PS/2 mouse state\n");
     terminal_write("  debug [on|off]    control mouse debug panel\n");
     terminal_write("  reboot            reboot through the 8042\n");
@@ -100,10 +134,15 @@ void commands_execute(const char *line){
     } else if(strcmp(command,"about")==0){
         terminal_printf("PureC userspace 0.2.0, framebuffer %ux%u\n",
                         userspace_get_width(),userspace_get_height());
-        terminal_printf("Terminal module: %ux%u window, 10x10 glyphs\n",
-                        terminal_get_window_width(),terminal_get_window_height());
+        terminal_printf("Terminal module: %ux%u window, %ux%u glyphs\n",
+                        terminal_get_window_width(),terminal_get_window_height(),
+                        terminal_get_font_size(),terminal_get_font_size());
     } else if(strcmp(command,"systeminfo")==0){
         show_systeminfo();
+    } else if(strcmp(command,"font")==0){
+        configure_font(arguments);
+    } else if(strcmp(command,"snake")==0){
+        snake_run();
     } else if(strcmp(command,"mouse")==0){
         show_mouse();
     } else if(strcmp(command,"debug")==0){

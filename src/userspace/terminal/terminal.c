@@ -17,8 +17,9 @@
 #define MINIMIZE_BG     0xF9E2AF
 
 #define TITLE_HEIGHT    34
-#define GLYPH_SIZE      10
-#define LINE_HEIGHT     13
+#define DEFAULT_GLYPH_SIZE 10
+#define MIN_GLYPH_SIZE      8
+#define MAX_GLYPH_SIZE      16
 #define WINDOW_TOP      140
 #define WINDOW_MAX_W    960
 #define WINDOW_MAX_H    580
@@ -30,16 +31,20 @@ static uint32_t text_x, text_y, text_w, text_h;
 static uint32_t cursor_x, cursor_y;
 static char input_buffer[SHELL_BUFFER_SIZE];
 static uint32_t input_length;
+static uint32_t glyph_size=DEFAULT_GLYPH_SIZE;
+
+static uint32_t line_height(void){ return glyph_size+3; }
 
 static void terminal_scroll(void){
-    if(text_h<=LINE_HEIGHT) return;
-    gop_scroll_rect_up(text_x, text_y, text_w, text_h, LINE_HEIGHT, TERM_BG);
-    if(cursor_y>=text_y+LINE_HEIGHT) cursor_y-=LINE_HEIGHT;
+    uint32_t height=line_height();
+    if(text_h<=height) return;
+    gop_scroll_rect_up(text_x,text_y,text_w,text_h,height,TERM_BG);
+    if(cursor_y>=text_y+height) cursor_y-=height;
     else cursor_y=text_y;
 }
 
 static void ensure_cursor_visible(void){
-    if(cursor_y+GLYPH_SIZE>text_y+text_h) terminal_scroll();
+    if(cursor_y+glyph_size>text_y+text_h) terminal_scroll();
 }
 
 static void putc_colored(char c, uint32_t color){
@@ -49,14 +54,14 @@ static void putc_colored(char c, uint32_t color){
     }
     if(c=='\n'){
         cursor_x=text_x;
-        cursor_y+=LINE_HEIGHT;
+        cursor_y+=line_height();
         ensure_cursor_visible();
         return;
     }
     if(c=='\b'){
         if(cursor_x>text_x){
-            cursor_x-=GLYPH_SIZE;
-            gop_draw_rect(cursor_x, cursor_y, GLYPH_SIZE, GLYPH_SIZE, TERM_BG);
+            cursor_x-=glyph_size;
+            gop_draw_rect(cursor_x,cursor_y,glyph_size,glyph_size,TERM_BG);
         }
         return;
     }
@@ -64,14 +69,14 @@ static void putc_colored(char c, uint32_t color){
         for(uint32_t i=0;i<4;i++) putc_colored(' ',color);
         return;
     }
-    if(cursor_x+GLYPH_SIZE>text_x+text_w){
+    if(cursor_x+glyph_size>text_x+text_w){
         cursor_x=text_x;
-        cursor_y+=LINE_HEIGHT;
+        cursor_y+=line_height();
         ensure_cursor_visible();
     }
     char glyph[2]={c,0};
-    gop_draw_text_sized_at(cursor_x,cursor_y,glyph,color,TERM_BG,GLYPH_SIZE);
-    cursor_x+=GLYPH_SIZE;
+    gop_draw_text_sized_at(cursor_x,cursor_y,glyph,color,TERM_BG,glyph_size);
+    cursor_x+=glyph_size;
 }
 
 static void write_unsigned(uint64_t value, uint32_t base, bool uppercase){
@@ -101,7 +106,7 @@ static void draw_window(void){
     gop_draw_rect(window_x+1,window_y+1,window_w-2,window_h-2,WINDOW_BG);
     gop_draw_rect(window_x+1,window_y+1,window_w-2,TITLE_HEIGHT,TITLE_BG);
     gop_draw_text_sized_at(window_x+14,window_y+11,"Terminal - purec@os",
-                           TITLE_FG,TITLE_BG,GLYPH_SIZE);
+                           TITLE_FG,TITLE_BG,10);
 
     gop_draw_rect(window_x+window_w-58,window_y+8,18,18,CLOSE_BG);
     gop_draw_rect(window_x+window_w-34,window_y+8,18,18,MINIMIZE_BG);
@@ -212,6 +217,16 @@ void terminal_clear(void){
 }
 
 void terminal_prompt(void){ terminal_write_colored(PROMPT_TEXT,PROMPT_FG); }
+
+bool terminal_set_font_size(uint32_t size){
+    if(size<MIN_GLYPH_SIZE || size>MAX_GLYPH_SIZE) return false;
+    glyph_size=size;
+    input_length=0;
+    draw_window();
+    return true;
+}
+
+uint32_t terminal_get_font_size(void){ return glyph_size; }
 
 uint32_t terminal_get_window_width(void){ return window_w; }
 uint32_t terminal_get_window_height(void){ return window_h; }

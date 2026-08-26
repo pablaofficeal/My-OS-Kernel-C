@@ -6,3 +6,4 @@
 void system_info_init(const struct limine_memmap_response *memory_map);
 const char *system_info_cpu_name(void);
 uint64_t system_info_usable_ram_bytes(void);
+uint64_t system_info_tsc_frequency_hz(void);
