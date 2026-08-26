@@ -11,3 +11,4 @@ iso_limine/limine-bios.sys
 iso_limine/boot/limine-bios.sys
 iso_limine/boot/limine/limine-bios.sys
 *.log
+*.elf

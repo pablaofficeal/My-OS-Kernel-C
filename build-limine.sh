@@ -4,10 +4,24 @@ set -e
 # Требует: limine (pacman -S limine), xorriso, mtools
 # Использует kernel.elf из ./build.sh (hybrid ENTRY _start + multiboot)
 
-if [ ! -f kernel.elf ]; then
-  echo "⚠️  kernel.elf не найден — запускаю ./build.sh"
-  bash ./build.sh
-fi
+echo "🔨 Building Limine kernel (higher half, GOP)..."
+# Пересобираем kernel-limine.elf с higher half (0xffffffff80000000)
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/gdt.c -o gdt_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/idt.c -o idt_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/syscall.c -o syscall_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/serial.c -o serial_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/vga.c -o vga_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/pic.c -o pic_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/fb.c -o fb_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/gop.c -o gop_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/lib/string.c -o string_limine.o
+nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm_limine.o
+nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm_limine.o
+x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o gdt_limine.o idt_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o fb_limine.o gop_limine.o string_limine.o gdt_asm_limine.o idt_asm_limine.o
+echo "✅ kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
+x86_64-elf-readelf -l kernel-limine.elf | head -n12
 
 LIMINE_SHARE=""
 for p in /usr/share/limine /tmp/limine-pkg/usr/share/limine; do
@@ -27,7 +41,7 @@ echo "📦 Limine: $LIMINE_SHARE"
 rm -rf iso_limine
 mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT
 
-cp kernel.elf iso_limine/boot/kernel.elf
+cp kernel-limine.elf iso_limine/boot/kernel.elf
 cat > iso_limine/boot/limine/limine.conf <<'EOF'
 timeout: 0
 verbose: yes
@@ -58,8 +72,8 @@ echo "🔧 limine bios-install..."
 chmod +x "$LIMINE_BIN" 2>/dev/null || true
 "$LIMINE_BIN" bios-install purec_limine.iso 2>&1 | tail -5
 
-ls -lh purec_limine.iso kernel.elf
-echo "✅ purec_limine.iso готов"
+ls -lh purec_limine.iso kernel-limine.elf
+echo "✅ purec_limine.iso готов (higher half, no Lower half PHDR panic)"
 echo "🚀 BIOS QEMU:  qemu-system-x86_64 -cdrom purec_limine.iso -m 512M -nographic"
 echo "🚀 UEFI QEMU:  qemu-system-x86_64 -bios /usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd -drive if=pflash,format=raw,file=/tmp/ovmf_vars.fd -cdrom purec_limine.iso -m 512M -nographic -serial file:serial.log"
 echo "   GOP активен только в UEFI Limine (framebuffer), в BIOS fallback на VGA"
