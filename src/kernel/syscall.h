@@ -16,6 +16,9 @@
 #define SYS_FILE_DELETE 202
 #define SYS_FILE_RENAME 203
 #define SYS_FILE_MOVE   204
+#define SYS_DIR_LIST    205
+#define SYS_FILE_CREATE 206
+#define SYS_DIR_CREATE  207
 
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;

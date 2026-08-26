@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "fs_types.h"
 
 #define FS_ERROR_IO          -1
 #define FS_ERROR_NOT_FOUND   -2
@@ -22,3 +23,7 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count);
 int32_t fat32_delete(const char *path);
 int32_t fat32_rename(const char *path, const char *new_name);
 int32_t fat32_move(const char *path, const char *destination_directory);
+int32_t fat32_list(const char *path, struct fs_directory_entry *entries,
+                   uint32_t capacity);
+int32_t fat32_create_file(const char *path);
+int32_t fat32_create_directory(const char *path);

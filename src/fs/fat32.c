@@ -55,6 +55,11 @@ static uint16_t read_u16(const uint8_t *data){
     return (uint16_t)data[0]|((uint16_t)data[1]<<8);
 }
 
+static void write_u16(uint8_t *data, uint16_t value){
+    data[0]=(uint8_t)value;
+    data[1]=(uint8_t)(value>>8);
+}
+
 static uint32_t read_u32(const uint8_t *data){
     return (uint32_t)data[0]|((uint32_t)data[1]<<8)
         |((uint32_t)data[2]<<16)|((uint32_t)data[3]<<24);
@@ -107,6 +112,22 @@ static bool make_short_name(const char *component, uint8_t output[11]){
         }
     }
     return base_length>0 && (!extension || extension_length>0);
+}
+
+static void short_name_to_text(const uint8_t input[11], char output[13]){
+    uint8_t length=0;
+    for(uint8_t index=0;index<8 && input[index]!=' ';index++){
+        output[length++]=(char)input[index];
+    }
+    uint8_t extension_length=0;
+    while(extension_length<3 && input[8+extension_length]!=' ') extension_length++;
+    if(extension_length){
+        output[length++]='.';
+        for(uint8_t index=0;index<extension_length;index++){
+            output[length++]=(char)input[8+index];
+        }
+    }
+    output[length]='\0';
 }
 
 static bool next_component(const char **path, char component[FAT32_MAX_COMPONENT+1],
@@ -250,6 +271,57 @@ static int32_t resolve_directory(const char *path, uint32_t *cluster){
     return 0;
 }
 
+static int32_t resolve_creation_parent(const char *path, uint32_t *parent,
+                                       uint8_t short_name[11]){
+    if(!volume.mounted || !path || !path[0] || !parent) return FS_ERROR_INVALID;
+    uint32_t directory=volume.root_cluster;
+    const char *cursor=path;
+    char component[FAT32_MAX_COMPONENT+1];
+    bool has_more;
+
+    while(next_component(&cursor,component,&has_more)){
+        uint8_t current_name[11];
+        if(!make_short_name(component,current_name)) return FS_ERROR_UNSUPPORTED;
+        if(!has_more){
+            *parent=directory;
+            memcpy(short_name,current_name,11);
+            return 0;
+        }
+
+        struct fat32_entry_ref entry;
+        int32_t status=find_entry(directory,current_name,&entry);
+        if(status<0) return status;
+        if(!(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY)) return FS_ERROR_NOT_DIR;
+        if(!valid_cluster(entry.first_cluster)) return FS_ERROR_INVALID;
+        directory=entry.first_cluster;
+    }
+    return FS_ERROR_INVALID;
+}
+
+static int32_t allocate_cluster(uint32_t *cluster_result){
+    if(!cluster_result) return FS_ERROR_INVALID;
+    for(uint32_t cluster=2;cluster<volume.cluster_count+2;cluster++){
+        uint32_t value;
+        int32_t status=fat_next_cluster(cluster,&value);
+        if(status<0) return status;
+        if(value!=0) continue;
+
+        status=fat_write_entry(cluster,0x0FFFFFFF);
+        if(status<0) return status;
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            if(!block_device_write(first_lba+sector,sector_buffer)){
+                (void)fat_write_entry(cluster,0);
+                return FS_ERROR_IO;
+            }
+        }
+        *cluster_result=cluster;
+        return 0;
+    }
+    return FS_ERROR_NO_SPACE;
+}
+
 static int32_t find_free_entry(uint32_t directory_cluster, uint32_t *lba_result,
                                uint16_t *offset_result){
     uint32_t cluster=directory_cluster;
@@ -269,11 +341,45 @@ static int32_t find_free_entry(uint32_t directory_cluster, uint32_t *lba_result,
         uint32_t next;
         int32_t status=fat_next_cluster(cluster,&next);
         if(status<0) return status;
-        if(next>=FAT32_END_OF_CHAIN) return FS_ERROR_NO_SPACE;
+        if(next>=FAT32_END_OF_CHAIN){
+            uint32_t new_cluster;
+            status=allocate_cluster(&new_cluster);
+            if(status<0) return status;
+            status=fat_write_entry(cluster,new_cluster);
+            if(status<0){
+                (void)fat_write_entry(new_cluster,0);
+                return status;
+            }
+            *lba_result=cluster_lba(new_cluster);
+            *offset_result=0;
+            return 0;
+        }
         if(!valid_cluster(next)) return FS_ERROR_INVALID;
         cluster=next;
     }
     return FS_ERROR_INVALID;
+}
+
+static void fill_directory_entry(uint8_t *entry, const uint8_t short_name[11],
+                                 uint8_t attributes, uint32_t first_cluster){
+    memset(entry,0,32);
+    memcpy(entry,short_name,11);
+    entry[11]=attributes;
+    write_u16(&entry[20],(uint16_t)(first_cluster>>16));
+    write_u16(&entry[26],(uint16_t)first_cluster);
+}
+
+static int32_t create_directory_entry(uint32_t parent, const uint8_t short_name[11],
+                                      uint8_t attributes, uint32_t first_cluster){
+    uint32_t lba;
+    uint16_t offset;
+    int32_t status=find_free_entry(parent,&lba,&offset);
+    if(status<0) return status;
+    if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+    bool was_end_marker=sector_buffer[offset]==0;
+    fill_directory_entry(&sector_buffer[offset],short_name,attributes,first_cluster);
+    if(was_end_marker && offset+32<BLOCK_SECTOR_SIZE) sector_buffer[offset+32]=0;
+    return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
 }
 
 static int32_t clear_cluster_chain(uint32_t first_cluster){
