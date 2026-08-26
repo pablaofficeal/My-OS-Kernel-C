@@ -214,6 +214,8 @@ void i2c_hid_touchpad_poll(void){
     draw_debug();
 }
 
+void i2c_hid_touchpad_redraw(void){ draw_debug(); }
+
 bool i2c_hid_touchpad_is_active(void){ return debug_state.device_ready; }
 
 struct i2c_hid_debug_state i2c_hid_touchpad_get_debug_state(void){

@@ -60,6 +60,7 @@ void kernel_main(struct limine_framebuffer *fb) {
     // kernel_main очищает framebuffer после инициализации PS/2.
     // Восстанавливаем курсор и его диагностику поверх готового интерфейса.
     mouse_redraw();
+    i2c_hid_touchpad_redraw();
 
     serial_write_string("[KERNEL] halt\n");
     halt_forever();

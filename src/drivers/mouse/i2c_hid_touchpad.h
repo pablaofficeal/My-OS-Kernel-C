@@ -17,5 +17,6 @@ struct i2c_hid_debug_state {
 
 void i2c_hid_touchpad_init(uint64_t hhdm_offset);
 void i2c_hid_touchpad_poll(void);
+void i2c_hid_touchpad_redraw(void);
 bool i2c_hid_touchpad_is_active(void);
 struct i2c_hid_debug_state i2c_hid_touchpad_get_debug_state(void);
