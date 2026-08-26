@@ -111,10 +111,15 @@ void syscall_init(void){
         filesystem_checked=true;
         storage_probe_init();
         (void)block_device_init();
+        struct ahci_probe_stats ahci_stats;
+        ahci_get_probe_stats(&ahci_stats);
         klogf(KLOG_INFO,"pci-storage: %u AHCI/NVMe controller(s) detected",
               storage_controller_count());
         klogf(KLOG_INFO,"ata: %u disk(s) detected",block_device_count());
         klogf(KLOG_INFO,"ahci: %u SATA disk(s) identified",ahci_device_count());
+        klogf(KLOG_DEBUG,"ahci: controllers=%u ports=%u sata=%u identify_failures=%u",
+              ahci_stats.controllers,ahci_stats.implemented_ports,
+              ahci_stats.sata_ports,ahci_stats.identify_failures);
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from ATA %s",fat32_device_name());
         } else {

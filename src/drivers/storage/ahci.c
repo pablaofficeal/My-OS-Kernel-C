@@ -74,6 +74,7 @@ static uint16_t identify_words[256] __attribute__((aligned(512)));
 static uint64_t hhdm_offset;
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
+static struct ahci_probe_stats probe_stats;
 static uint8_t device_count;
 static bool mapping_ready;
 static bool probe_complete;
@@ -231,6 +232,7 @@ bool ahci_init(uint32_t linux_name_base){
     uint8_t ahci_index=0;
     for(int32_t index=0;index<count && device_count<AHCI_DEVICE_LIMIT;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_AHCI) continue;
+        probe_stats.controllers++;
         uint64_t abar=controllers[index].register_base;
         if(abar==0 || abar>0xFFFFFFFFULL){ ahci_index++; continue; }
 
@@ -245,8 +247,14 @@ bool ahci_init(uint32_t linux_name_base){
         for(uint8_t port_index=0;port_index<AHCI_PORT_LIMIT
             && device_count<AHCI_DEVICE_LIMIT;port_index++){
             if(!(implemented_ports&(1U<<port_index))) continue;
+            probe_stats.implemented_ports++;
             volatile uint32_t *port=port_registers(hba,port_index);
-            if(!port_has_sata_disk(port) || !issue_identify(port)) continue;
+            if(!port_has_sata_disk(port)) continue;
+            probe_stats.sata_ports++;
+            if(!issue_identify(port)){
+                probe_stats.identify_failures++;
+                continue;
+            }
             fill_device_info(&devices[device_count],
                              (uint8_t)(linux_name_base+device_count),
                              ahci_index,port_index);
@@ -263,4 +271,8 @@ bool ahci_get_device_info(uint32_t index, struct storage_device_info *info){
     if(!info || index>=device_count) return false;
     *info=devices[index];
     return true;
+}
+
+void ahci_get_probe_stats(struct ahci_probe_stats *stats){
+    if(stats) *stats=probe_stats;
 }
