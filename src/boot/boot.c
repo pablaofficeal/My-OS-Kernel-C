@@ -31,11 +31,19 @@ static volatile struct limine_hhdm_request hhdm_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
 // for fb/serial access from other units
 struct limine_framebuffer *fb_ptr = 0;
+// export memmap request response for kernel use
+struct limine_memmap_response *memmap_response_ptr = 0;
 
 void _start(void) {
     // Limine already in 64-bit long mode, paging enabled
@@ -48,6 +56,7 @@ void _start(void) {
     }
 
     fb_ptr = framebuffer_request.response->framebuffers[0];
+    memmap_response_ptr = memmap_request.response;
 
     serial_init();
 

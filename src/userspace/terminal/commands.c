@@ -3,6 +3,7 @@
 #include "../userspace.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../kernel/klog.h"
+#include "../../kernel/kernel.h"
 #include "../../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -32,6 +33,14 @@ static void split_command(const char *line, char *command, uint32_t capacity,
     *arguments=line;
 }
 
+static void show_systeminfo(void){
+    uint64_t ram_mb = total_ram_bytes / (1024 * 1024);
+    terminal_write("=== System Information ===\n");
+    terminal_printf("Processor: %s\n", cpu_brand_string);
+    terminal_printf("Total RAM:  %lu MB (%lu GB)\n", ram_mb, ram_mb / 1024);
+    terminal_write("==========================\n");
+}
+
 static void show_help(void){
     terminal_write("Commands:\n");
     terminal_write("  help              show this command list\n");
@@ -40,6 +49,7 @@ static void show_help(void){
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
+    terminal_write("  systeminfo        show detailed CPU and RAM info\n");
     terminal_write("  mouse             show PS/2 mouse state\n");
     terminal_write("  debug [on|off]    control mouse debug panel\n");
     terminal_write("  reboot            reboot through the 8042\n");
@@ -92,6 +102,8 @@ void commands_execute(const char *line){
                         userspace_get_width(),userspace_get_height());
         terminal_printf("Terminal module: %ux%u window, 10x10 glyphs\n",
                         terminal_get_window_width(),terminal_get_window_height());
+    } else if(strcmp(command,"systeminfo")==0){
+        show_systeminfo();
     } else if(strcmp(command,"mouse")==0){
         show_mouse();
     } else if(strcmp(command,"debug")==0){
