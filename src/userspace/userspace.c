@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// цвета как в Catppuccin, как у boot log
 #define DESKTOP_BG  0x181825
 #define TOPBAR_BG   0x313244
 #define TOPBAR_FG   0xCDD6F4
@@ -22,7 +21,6 @@
 #define PROMPT_FG   0xA6E3A1
 #define PROMPT_STR  "purec@os:~$ "
 
-// окно терминала
 static uint32_t win_x, win_y, win_w, win_h;
 static uint32_t term_x, term_y, term_w, term_h;
 static uint32_t term_cur_x, term_cur_y;
@@ -35,13 +33,10 @@ static void draw_desktop(void){
     if(desktop_w==0) desktop_w=1280;
     if(desktop_h==0) desktop_h=800;
     gop_clear(DESKTOP_BG);
-    // topbar как в GNOME/KDE
     gop_draw_rect(0, 0, desktop_w, TOPBAR_H, TOPBAR_BG);
     gop_draw_text_at(12, 8, "PureC OS", 0x89B4FA, TOPBAR_BG);
     gop_draw_text_at(120, 8, "Userspace v0.1.0", TOPBAR_FG, TOPBAR_BG);
-    // справа - статус
     const char *status = " [ boot log hidden ]  help:dmesg  clear  debug";
-    // вычисляем x справа
     uint32_t status_len = strlen(status);
     uint32_t status_x = desktop_w - status_len*8 - 12;
     if(status_x < 200) status_x = 200;
