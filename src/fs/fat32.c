@@ -39,6 +39,8 @@ struct fat32_entry_ref {
 
 struct fat32_handle {
     uint32_t first_cluster;
+    uint32_t current_cluster;
+    uint32_t cluster_index;
     uint32_t size;
     uint32_t position;
     bool used;
@@ -339,16 +341,19 @@ bool fat32_init(void){
     if(!block_device_init()) return false;
     if(!block_device_read(0,sector_buffer)) return false;
 
-    uint32_t partition_lba=0;
+    uint32_t partition_lbas[4];
+    uint8_t partition_count=0;
     for(uint8_t index=0;index<4;index++){
         uint16_t offset=(uint16_t)(446+index*16);
         uint8_t type=sector_buffer[offset+4];
         if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
-            partition_lba=read_u32(&sector_buffer[offset+8]);
-            break;
+            uint32_t lba=read_u32(&sector_buffer[offset+8]);
+            if(lba) partition_lbas[partition_count++]=lba;
         }
     }
-    if(partition_lba && mount_boot_sector(partition_lba)) return true;
+    for(uint8_t index=0;index<partition_count;index++){
+        if(mount_boot_sector(partition_lbas[index])) return true;
+    }
     return mount_boot_sector(0);
 }
 
@@ -368,6 +373,8 @@ int32_t fat32_open(const char *path){
         if(!handles[index].used){
             handles[index].used=true;
             handles[index].first_cluster=entry.first_cluster;
+            handles[index].current_cluster=entry.first_cluster;
+            handles[index].cluster_index=0;
             handles[index].size=entry.size;
             handles[index].position=0;
             return FAT32_DESCRIPTOR_BASE+index;
@@ -378,6 +385,7 @@ int32_t fat32_open(const char *path){
 
 int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     if(!buffer && count) return FS_ERROR_INVALID;
+    if(count>0x7FFFFFFF) return FS_ERROR_INVALID;
     int32_t index=descriptor-FAT32_DESCRIPTOR_BASE;
     if(index<0 || index>=FAT32_MAX_OPEN_FILES || !handles[index].used){
         return FS_ERROR_INVALID;
@@ -392,13 +400,13 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     uint32_t total_read=0;
     uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
     while(total_read<count && handle->position<handle->size){
-        uint32_t cluster=handle->first_cluster;
+        uint32_t cluster=handle->current_cluster;
         if(!valid_cluster(cluster)){
             handle->used=false;
             return FS_ERROR_INVALID;
         }
-        uint32_t cluster_index=handle->position/cluster_size;
-        for(uint32_t step=0;step<cluster_index;step++){
+        uint32_t target_cluster_index=handle->position/cluster_size;
+        while(handle->cluster_index<target_cluster_index){
             uint32_t next;
             int32_t status=fat_next_cluster(cluster,&next);
             if(status<0){ handle->used=false; return status; }
@@ -407,6 +415,8 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
                 return FS_ERROR_INVALID;
             }
             cluster=next;
+            handle->current_cluster=next;
+            handle->cluster_index++;
         }
 
         uint32_t offset_in_cluster=handle->position%cluster_size;

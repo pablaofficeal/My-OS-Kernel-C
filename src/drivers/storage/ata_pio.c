@@ -26,6 +26,7 @@ struct ata_device {
     uint16_t io_base;
     uint16_t control_base;
     uint8_t drive;
+    uint32_t sector_count;
     const char *name;
     bool available;
 };
@@ -99,17 +100,21 @@ static bool identify_device(struct ata_device *device){
        || inb(device->io_base+ATA_REG_LBA_HIGH)!=0) return false;
     if(!wait_for_data(device)) return false;
 
-    for(uint16_t word=0;word<256;word++) (void)inw(device->io_base+ATA_REG_DATA);
+    uint16_t identify_data[256];
+    for(uint16_t word=0;word<256;word++) identify_data[word]=inw(device->io_base+ATA_REG_DATA);
+    if(!(identify_data[49]&(1<<9))) return false;
+    device->sector_count=(uint32_t)identify_data[60]|((uint32_t)identify_data[61]<<16);
+    if(device->sector_count==0) return false;
     device->available=true;
     return true;
 }
 
 bool ata_pio_init(void){
     static const struct ata_device candidates[] = {
-        {0x1F0,0x3F6,0,"primary master",false},
-        {0x1F0,0x3F6,1,"primary slave",false},
-        {0x170,0x376,0,"secondary master",false},
-        {0x170,0x376,1,"secondary slave",false}
+        {0x1F0,0x3F6,0,0,"primary master",false},
+        {0x1F0,0x3F6,1,0,"primary slave",false},
+        {0x170,0x376,0,0,"secondary master",false},
+        {0x170,0x376,1,0,"secondary slave",false}
     };
 
     if(active_device.available) return true;
@@ -124,7 +129,8 @@ bool ata_pio_init(void){
 }
 
 static bool select_lba(uint32_t lba, uint8_t command){
-    if(!active_device.available || lba>0x0FFFFFFF) return false;
+    if(!active_device.available || lba>0x0FFFFFFF
+       || lba>=active_device.sector_count) return false;
     if(!wait_not_busy(&active_device)) return false;
 
     outb(active_device.io_base+ATA_REG_DRIVE,
@@ -151,6 +157,7 @@ bool ata_pio_write_sector(uint32_t lba, const void *buffer){
     if(!buffer || !select_lba(lba,ATA_CMD_WRITE)) return false;
     const uint16_t *words=(const uint16_t*)buffer;
     for(uint16_t index=0;index<256;index++) outw(active_device.io_base+ATA_REG_DATA,words[index]);
+    if(!wait_for_completion(&active_device)) return false;
 
     outb(active_device.io_base+ATA_REG_COMMAND,ATA_CMD_FLUSH);
     return wait_for_completion(&active_device);
