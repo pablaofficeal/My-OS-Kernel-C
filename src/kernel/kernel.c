@@ -14,7 +14,10 @@ static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t 
     return ret;
 }
 
-static void halt_forever(void){ for(;;) __asm__ volatile("cli; hlt"); }
+static void halt_forever(void){
+    // HLT возвращает управление после IRQ12; cli здесь отключал мышь навсегда.
+    for(;;) __asm__ volatile("sti; hlt");
+}
 
 void kernel_main(struct limine_framebuffer *fb) {
     // Limine уже в long mode, gdt/idt уже настроены в boot.c, но переинициализируем для консистентности
