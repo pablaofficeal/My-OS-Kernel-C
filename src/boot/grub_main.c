@@ -31,8 +31,11 @@ void kernel_main_grub(uint32_t magic, uint32_t *mbi) {
     if(magic == 0x36d76289){ serial_write_string("[GRUB] multiboot2 magic OK\n"); vga_write("multiboot2 OK\n"); }
     else { serial_write_string("[GRUB] bad magic\n"); vga_write("bad magic\n"); }
 
-    // GOP через multiboot2 (если GRUB дал framebuffer) — пробуем
+    serial_write_string("[GOP] init start mbi="); 
+    // print mbi hex
+    { char buf[17]; const char *h="0123456789ABCDEF"; uint64_t v=(uint64_t)mbi; for(int i=15;i>=0;i--) buf[15-i]=h[(v>> (i*4))&0xF]; buf[16]=0; serial_write_string(buf); serial_write_string("\n"); }
     gop_init_from_multiboot(mbi);
+    serial_write_string("[GOP] init done\n");
     if(gop_is_available()){
         serial_write_string("[GOP] framebuffer from multiboot2 available\n");
         vga_write("[GOP] FB available\n");

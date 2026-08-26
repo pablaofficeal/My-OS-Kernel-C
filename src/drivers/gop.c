@@ -57,27 +57,34 @@ void gop_init_from_limine(struct limine_framebuffer *fb){
 
 void gop_init_from_multiboot(void *mbi){
     if(!mbi){ gop.available=false; return; }
-    uint32_t *p = (uint32_t*)mbi;
-    uint32_t total = p[0]; (void)total;
-    uint8_t *tag = (uint8_t*)(p + 2);
-    uint8_t *end = (uint8_t*)mbi + p[0];
-    while(tag < end){
+    // Защита от битых mbi (как в QEMU с GRUB без framebuffer)
+    // total_size должен быть разумным < 64K
+    uint32_t total = *(uint32_t*)mbi;
+    if(total < 8 || total > 32768){ gop.available=false; return; }
+    uint32_t reserved = *((uint32_t*)mbi + 1);
+    if(reserved != 0){ gop.available=false; return; }
+    uint8_t *tag = (uint8_t*)mbi + 8;
+    uint8_t *end = (uint8_t*)mbi + total;
+    int cnt=0;
+    while(tag + 8 <= end && cnt++ < 32){
         uint32_t type = *(uint32_t*)tag;
         uint32_t size = *(uint32_t*)(tag+4);
+        if(size < 8 || tag + size > end) break;
         if(type==8 && size>=20){
             uint64_t addr = *(uint64_t*)(tag+8);
             uint32_t pitch = *(uint32_t*)(tag+16);
             uint32_t w = *(uint32_t*)(tag+20);
             uint32_t h = *(uint32_t*)(tag+24);
             uint8_t bpp = *(uint8_t*)(tag+28);
-            gop.addr = (uint32_t*)(uintptr_t)addr;
-            gop.width = w; gop.height = h; gop.pitch = pitch/4; gop.bpp=bpp;
-            gop.available = (w && h && addr);
-            cur_x=12; cur_y=12;
-            return;
+            if(w && h && addr && pitch){
+                gop.addr = (uint32_t*)(uintptr_t)addr;
+                gop.width = w; gop.height = h; gop.pitch = pitch/4; gop.bpp=bpp;
+                gop.available = true;
+                cur_x=12; cur_y=12;
+                return;
+            }
         }
         if(type==0) break;
-        // tags 8-byte aligned
         uint32_t step = (size + 7) & ~7;
         if(step==0) break;
         tag += step;

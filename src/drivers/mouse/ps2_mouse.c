@@ -15,8 +15,8 @@ static inline void outb(uint16_t p, uint8_t v){ __asm__ volatile("outb %0,%1"::"
 static inline uint8_t inb(uint16_t p){ uint8_t r; __asm__ volatile("inb %1,%0":"=a"(r):"Nd"(p)); return r; }
 static inline void io_wait(void){ outb(0x80,0); }
 
-static void ps2_wait_input(void){ while(inb(PS2_STATUS)&2) {} }
-static void ps2_wait_output(void){ while(!(inb(PS2_STATUS)&1)) {} }
+static void ps2_wait_input(void){ for(int i=0;i<100000;i++){ if(!(inb(PS2_STATUS)&2)) return; } }
+static void ps2_wait_output(void){ for(int i=0;i<100000;i++){ if(inb(PS2_STATUS)&1) return; } }
 
 static void ps2_write_cmd(uint8_t cmd){
     ps2_wait_input();
