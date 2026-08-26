@@ -24,8 +24,13 @@ void kvprintf(const char *fmt, va_list ap);
 // сервисные
 void klog_set_verbose(bool v);
 bool klog_is_verbose(void);
+void klog_set_screen_enabled(bool enabled);
+bool klog_is_screen_enabled(void);
 void klog_clear(void);
 void klog_dump(void); // dmesg в serial
+void klog_dump_to_screen(void); // dmesg на экран (если включён)
+void klog_foreach(void (*cb)(char c));
+void klog_dump_with(void (*cb)(char c));
 
 // цвета для GOP/VGA
 #define KLOG_BG        0x1E1E2E

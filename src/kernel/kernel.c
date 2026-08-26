@@ -43,22 +43,26 @@ void kernel_main(struct limine_framebuffer *fb) {
     do_syscall(SYS_WRITE, (uint64_t)msg, strlen(msg), 1,0,0);
     klog(KLOG_OK, "syscall WRITE done");
 
-    // GOP тесты через syscalls - рисуем внизу чтобы не перекрывать boot log (linux fb test)
-    klog(KLOG_INFO, "Testing GOP via syscalls: DRAW_RECT...");
-    uint32_t fb_h = gop_get_height();
-    uint32_t rect_y = fb_h > 120 ? fb_h - 100 : 500;
-    do_syscall(SYS_DRAW_RECT, 50, rect_y, 300,60, 0xFF0000);
-    do_syscall(SYS_DRAW_RECT, 400, rect_y, 300,60, 0x00FF00);
-    klog(KLOG_OK, "DRAW_RECT via syscall done (red+green at bottom)");
+    // GOP тест откладываем в userspace чтобы не перекрывать boot log
+    klog(KLOG_INFO, "GOP test deferred to userspace");
 
-    // показываем что весь boot лог виден, как в linux dmesg
-    klog(KLOG_INFO, "Boot log complete, dumping klog info...");
+    klog(KLOG_INFO, "Boot log complete");
     klogf(KLOG_DEBUG, "Verbose mode: %s (debug visible)", klog_is_verbose() ? "on" : "off");
-    klog(KLOG_INFO, "System ready, entering idle loop");
+    klog(KLOG_OK, "Booting userspace...");
 
-    // восстанавливаем курсор поверх логов
+    // короткая пауза чтобы пользователь увидел boot log как в Linux (3 сек)
+    for(volatile uint64_t i=0;i<200000000ULL;i++) __asm__ volatile("pause");
+
+    // скрываем boot log и переключаемся в userspace (как в Linux: boot splash -> login)
+    klog_set_screen_enabled(false);
+    extern void userspace_init(void);
+    extern void userspace_run(void);
+    userspace_init();
+    userspace_run();
+
+    // fallback если userspace вернётся
     mouse_redraw();
-
-    klog(KLOG_OK, "Idle loop started, interrupts enabled");
+    klog_set_screen_enabled(true);
+    klog(KLOG_WARN, "Userspace exited, fallback to idle");
     idle_forever();
 }

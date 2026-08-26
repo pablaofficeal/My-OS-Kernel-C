@@ -57,6 +57,7 @@ static volatile struct mouse_debug_state debug_state;
 static uint32_t bg_buf[CURS_W*CURS_H];
 static uint32_t cursor_color = 0xFFFFFF;
 static uint32_t cursor_border = 0x000000;
+static bool debug_overlay_enabled = false; // выключено чтобы не перекрывать boot log, как в linux - boot screen чистый
 
 static void draw_cursor(int32_t x,int32_t y);
 static void refresh_mouse_ui(void);
@@ -70,6 +71,7 @@ static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
 }
 
 static void draw_debug_overlay(void){
+    if(!debug_overlay_enabled) return;
     if(!gop_is_available()) return;
     const uint32_t x=12, y=100, bg=0x313244;
     gop_draw_rect(x, y, 380, 84, bg);
@@ -106,12 +108,15 @@ void mouse_set_bounds(int32_t w,int32_t h){ bound_w=w; bound_h=h; if(state.x>=w)
 struct mouse_state mouse_get_state(void){ return state; }
 struct mouse_debug_state mouse_get_debug_state(void){ return *(const struct mouse_debug_state *)&debug_state; }
 
+void mouse_set_debug_overlay(bool enabled){ debug_overlay_enabled = enabled; }
+bool mouse_get_debug_overlay(void){ return debug_overlay_enabled; }
+
 void mouse_redraw(void){
     uint64_t flags;
     __asm__ volatile("pushfq; pop %0":"=r"(flags));
     debug_state.interrupts_enabled=(flags & (1ULL<<9)) != 0;
     first_draw=true;
-    draw_debug_overlay();
+    if(debug_overlay_enabled) draw_debug_overlay();
     draw_cursor(state.x, state.y);
 }
 
@@ -195,7 +200,7 @@ static bool process_mouse_byte(uint8_t data){
 static void refresh_mouse_ui(void){
     if(gop_is_available() && !first_draw) restore_bg(old_x, old_y);
     first_draw=true;
-    draw_debug_overlay();
+    if(debug_overlay_enabled) draw_debug_overlay();
     draw_cursor(state.x, state.y);
 }
 

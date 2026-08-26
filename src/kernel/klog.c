@@ -13,6 +13,7 @@ static char klog_ring[KLOG_RING_SIZE];
 static uint32_t klog_ring_pos = 0;
 static bool klog_ring_wrapped = false;
 static bool klog_verbose = true;
+static bool klog_screen_enabled = true; // если false, логи идут только в serial+ring, не на экран (для userspace)
 static bool klog_inited = false;
 static uint64_t klog_boot_tsc = 0;
 
@@ -25,9 +26,10 @@ static inline uint64_t rdtsc(void){
 // низкоуровневый вывод одного символа в три приёмника: serial + gop/vga + ring
 static void klog_putc_raw(char c){
     serial_putc(c);
-    if(gop_is_available()) gop_putc(c);
-    else vga_putc(c);
-
+    if(klog_screen_enabled){
+        if(gop_is_available()) gop_putc(c);
+        else vga_putc(c);
+    }
     klog_ring[klog_ring_pos % KLOG_RING_SIZE] = c;
     klog_ring_pos++;
     if(klog_ring_pos >= KLOG_RING_SIZE) klog_ring_wrapped = true;
@@ -169,6 +171,8 @@ void klog_init(void){
 
 void klog_set_verbose(bool v){ klog_verbose = v; }
 bool klog_is_verbose(void){ return klog_verbose; }
+void klog_set_screen_enabled(bool e){ klog_screen_enabled = e; }
+bool klog_is_screen_enabled(void){ return klog_screen_enabled; }
 
 void klog_clear(void){
     if(gop_is_available()){
@@ -342,4 +346,39 @@ void klog_dump(void){
         }
     }
     serial_write_string("\n--- end dump ---\n");
+}
+
+void klog_dump_to_screen(void){
+    bool prev = klog_screen_enabled;
+    klog_screen_enabled = true;
+    if(gop_is_available()){
+        gop_set_color(KLOG_FG, KLOG_BG);
+    }
+    if(!klog_ring_wrapped){
+        for(uint32_t i=0;i<klog_ring_pos;i++){
+            char c = klog_ring[i % KLOG_RING_SIZE];
+            if(gop_is_available()) gop_putc(c); else vga_putc(c);
+        }
+    } else {
+        uint32_t start = klog_ring_pos % KLOG_RING_SIZE;
+        for(uint32_t i=0;i<KLOG_RING_SIZE;i++){
+            char c = klog_ring[(start + i) % KLOG_RING_SIZE];
+            if(gop_is_available()) gop_putc(c); else vga_putc(c);
+        }
+    }
+    klog_screen_enabled = prev;
+}
+
+void klog_foreach(void (*cb)(char c)){
+    if(!cb) return;
+    if(!klog_ring_wrapped){
+        for(uint32_t i=0;i<klog_ring_pos;i++) cb(klog_ring[i % KLOG_RING_SIZE]);
+    } else {
+        uint32_t start = klog_ring_pos % KLOG_RING_SIZE;
+        for(uint32_t i=0;i<KLOG_RING_SIZE;i++) cb(klog_ring[(start + i) % KLOG_RING_SIZE]);
+    }
+}
+
+void klog_dump_with(void (*cb)(char c)){
+    klog_foreach(cb);
 }
