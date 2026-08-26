@@ -247,7 +247,7 @@ static void show_help(void){
     terminal_write("  ls [directory]    list a FAT32 directory\n");
     terminal_write("  touch <file>      create an empty FAT32 file\n");
     terminal_write("  mkdir <directory> create a FAT32 directory\n");
-    terminal_write("  disks             list detected ATA disks\n");
+    terminal_write("  disks             list disks and storage controllers\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
