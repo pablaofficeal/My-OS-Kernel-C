@@ -85,16 +85,9 @@ static void draw_window_chrome(void){
 }
 
 static void term_scroll(void){
-    // скрываем курсор мыши на время скролла чтобы не испортить save_bg
-    // делаем сдвиг внутри term area на 10px вверх
     const uint32_t line_h = 10;
     if(term_h <= line_h) return;
 
-    // копируем пиксели внутри окна (только term area)
-    // используем gop_get_pixel/put_pixel для простоты, но можно memcpy по строкам
-    // для скорости делаем построчно через gop.addr напрямую если доступно
-    // но используем gop API с проверкой available
-    // делаем ручной сдвиг: для каждой y в term area копируем строку y+line_h -> y
     for(uint32_t y = 0; y + line_h < term_h; y++){
         for(uint32_t x = 0; x < term_w; x++){
             uint32_t c = gop_get_pixel(term_x + x, term_y + y + line_h);
@@ -144,10 +137,6 @@ static void term_write(const char *s){
 }
 
 static void term_write_colored(const char *s, uint32_t fg){
-    // временно меняем цвет через gop_set_color не подходит, так как term_putc использует gop_draw_text_at с TERM_FG
-    // для цветного вывода делаем ручной draw
-    // упростим: меняем глобальный TERM_FG временно через замену в gop_draw_text_at вызовах
-    // но term_putc хардкодит TERM_FG, поэтому для цвета выводим напрямую
     while(*s){
         if(*s=='\n' || *s=='\r' || *s=='\b'){
             term_putc(*s++);
@@ -306,20 +295,9 @@ void userspace_run(void){
         // обработка клавиатуры
         char c;
         while(keyboard_try_getc(&c)){
-            // handle F-keys: F1=dmesg, F2=clear, F12=debug (scancodes: F1 0x3B, F2 0x3C, F12 0x58? но через polling scancode без 0xE0)
-            // scancodes F1=0x3B, F2=0x3C, F12=0x58 (make), break = +0x80
-            // наш keyboard driver транслирует только printable, F-keys игнорируются (возвращают 0)
-            // поэтому они не попадут сюда. Для F-keys нужно отдельная обработка в keyboard.c
-            // пока обрабатываем обычные символы
             shell_handle_input(c);
         }
-
-        // можно добавить обработку нажатий мыши: клик в окне фокус и т.д.
-        // пока просто держим курсор
-
-        // лёгкая задержка чтобы не грузить CPU
         __asm__ volatile("pause");
-        // небольшой sleep чтобы не спамить
         for(volatile int i=0;i<10000;i++) __asm__ volatile("nop");
     }
 }

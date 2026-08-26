@@ -143,6 +143,21 @@ static void draw_char(char c, uint32_t x, uint32_t y){
     }}
 }
 
+static void draw_char_sized(char c, uint32_t x, uint32_t y, uint32_t size,
+                            uint32_t text_fg, uint32_t text_bg){
+    if(size==0) return;
+    uint8_t ch=(uint8_t)c; if(ch>=128) ch='?';
+    for(uint32_t py=0; py<size; py++){
+        uint32_t source_row=(py*8)/size;
+        uint8_t bits=font[ch][source_row];
+        for(uint32_t px=0; px<size; px++){
+            uint32_t source_col=(px*8)/size;
+            uint32_t color=(bits & (1<<(7-source_col))) ? text_fg : text_bg;
+            put_pixel(x+px, y+py, color);
+        }
+    }
+}
+
 void gop_putc(char c){
     if(!gop.available){ vga_putc(c); return; }
     if(c=='\n'){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); return; }
@@ -164,8 +179,39 @@ void gop_draw_text_at(uint32_t x, uint32_t y, const char *text, uint32_t text_fg
     }
     fg=saved_fg; bg=saved_bg;
 }
+void gop_draw_text_sized_at(uint32_t x, uint32_t y, const char *text,
+                            uint32_t text_fg, uint32_t text_bg, uint32_t size){
+    if(!gop.available || !text || size==0) return;
+    uint32_t initial_x=x;
+    while(*text){
+        if(*text=='\n'){
+            x=initial_x;
+            y+=size+3;
+        } else {
+            draw_char_sized(*text, x, y, size, text_fg, text_bg);
+            x+=size;
+        }
+        text++;
+    }
+}
 void gop_draw_rect(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t c){
     for(uint32_t dy=0;dy<h;dy++) for(uint32_t dx=0;dx<w;dx++) put_pixel(x+dx,y+dy,c);
+}
+void gop_scroll_rect_up(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                        uint32_t amount, uint32_t fill_color){
+    if(!gop.available || !gop.addr || x>=gop.width || y>=gop.height || w==0 || h==0) return;
+    if(w>gop.width-x) w=gop.width-x;
+    if(h>gop.height-y) h=gop.height-y;
+    if(amount>=h){
+        gop_draw_rect(x,y,w,h,fill_color);
+        return;
+    }
+    for(uint32_t row=0; row+amount<h; row++){
+        memcpy(&gop.addr[(y+row)*gop.pitch+x],
+               &gop.addr[(y+row+amount)*gop.pitch+x],
+               w*sizeof(uint32_t));
+    }
+    gop_draw_rect(x, y+h-amount, w, amount, fill_color);
 }
 void gop_draw_line(uint32_t x0,uint32_t y0,uint32_t x1,uint32_t y1,uint32_t c){
     int dx = (x1>x0)?x1-x0:x0-x1, dy=(y1>y0)?y1-y0:y0-y1;
