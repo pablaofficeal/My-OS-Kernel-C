@@ -1,6 +1,7 @@
 #include "idt.h"
 #include "../../drivers/serial.h"
 #include "../../drivers/fb.h"
+#include "../../kernel/syscall.h"
 #include <stdint.h>
 
 struct idt_entry {
@@ -27,6 +28,7 @@ extern void isr_stub_8(void);
 extern void isr_stub_13(void);
 extern void isr_stub_14(void);
 extern void isr_stub_32(void);
+extern void isr_stub_80(void);
 extern void idt_load(uint64_t);
 
 void idt_set_gate(int n, uint64_t handler, uint8_t flags) {
@@ -48,7 +50,21 @@ static void print_hex(uint64_t v){
     serial_write_string(buf);
 }
 
-void isr_handler(uint64_t vector, uint64_t err, uint64_t rip, uint64_t cs, uint64_t rflags) {
+struct isr_regs {
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;
+    uint64_t vector, err;
+    uint64_t rip, cs, rflags;
+};
+
+void isr_handler(uint64_t vector, uint64_t err, uint64_t rip, uint64_t cs, uint64_t rflags, struct isr_regs *regs) {
+    if (vector == 0x80) {
+        // syscall via int 0x80: rax=n, rbx, rcx, rdx, rsi, rdi
+        // regs уже содержит сохраненные регистры, вызовем syscall_handler
+        // Переиспользуем struct syscall_regs layout (совпадает)
+        int64_t ret = syscall_handler((struct syscall_regs*)regs);
+        regs->rax = (uint64_t)ret;
+        return;
+    }
     if (vector == 3) {
         serial_write_string("[IDT] #BP (int3) caught, vector=3 rip=");
         print_hex(rip); serial_write_string(" cs="); print_hex(cs); serial_write_string(" rflags="); print_hex(rflags); serial_write_string("\n");
@@ -88,6 +104,7 @@ void idt_init(void) {
     idt_set_gate(13, (uint64_t)isr_stub_13, 0x8E);
     idt_set_gate(14, (uint64_t)isr_stub_14, 0x8E);
     idt_set_gate(32, (uint64_t)isr_stub_32, 0x8E);
+    idt_set_gate(0x80, (uint64_t)isr_stub_80, 0xEE); // DPL3 для syscalls
     idtp.limit = sizeof(idt)-1;
     idtp.base  = (uint64_t)&idt;
     idt_load((uint64_t)&idtp);

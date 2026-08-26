@@ -1,10 +1,14 @@
 #include "limine.h"
 #include <stddef.h>
 #include <stdbool.h>
+#include "../drivers/gop.h"
+#include "../drivers/vga.h"
 #include "../drivers/fb.h"
 #include "../drivers/serial.h"
+#include "../drivers/pic.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
+#include "../kernel/syscall.h"
 #include "../kernel/kernel.h"
 
 __attribute__((used, section(".requests")))
@@ -37,19 +41,23 @@ void _start(void) {
 
     fb_ptr = framebuffer_request.response->framebuffers[0];
 
-    // init serial early for QEMU -serial debugging
     serial_init();
-    serial_write_string("[BOOT] 64-bit long mode entered via Limine (UEFI/BIOS)\n");
+    serial_write_string("[BOOT] 64-bit long mode via Limine (UEFI/BIOS)\n");
+    vga_init();
+    gop_init_from_limine(fb_ptr);
+    if(gop_is_available()){ gop_clear(0x1E1E2E); gop_set_color(0xCDD6F4,0x1E1E2E); gop_write("Limine GOP OK\n"); }
+    serial_write_string("[GOP] init done\n");
 
-    // Init GDT64
+    pic_remap(0x20,0x28); pic_mask_all();
+    serial_write_string("[PIC] remapped\n");
+
     gdt_init();
     serial_write_string("[GDT] loaded\n");
 
-    // Init IDT64
     idt_init();
+    syscall_init();
     serial_write_string("[IDT] loaded\n");
 
-    // Enable interrupts
     __asm__ volatile("sti");
     serial_write_string("[INT] sti enabled\n");
 

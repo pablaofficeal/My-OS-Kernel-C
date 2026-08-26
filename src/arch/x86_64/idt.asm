@@ -7,6 +7,7 @@ global isr_stub_8
 global isr_stub_13
 global isr_stub_14
 global isr_stub_32
+global isr_stub_80
 
 extern isr_handler
 
@@ -33,6 +34,7 @@ ISR_ERR   8
 ISR_ERR   13
 ISR_ERR   14
 ISR_NOERR 32
+ISR_NOERR 0x80
 
 isr_common:
     push rax
@@ -55,6 +57,7 @@ isr_common:
     mov rdx, [rsp + 17*8]      ; rip
     mov rcx, [rsp + 18*8]      ; cs
     mov r8,  [rsp + 19*8]      ; rflags
+    mov r9, rsp                 ; regs pointer (r15 at top)
     ; align stack
     sub rsp, 8
     call isr_handler
