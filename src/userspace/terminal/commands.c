@@ -181,29 +181,59 @@ static void create_path(const char *command, const char *path,
 
 static void show_disks(void){
     struct storage_device_info devices[4];
-    int64_t count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,4,0);
-    if(count<0){
+    struct storage_controller_info controllers[8];
+    int64_t disk_count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,4,0);
+    int64_t controller_count=invoke_syscall(SYS_STORAGE_CONTROLLERS,
+                                            (uint64_t)controllers,8,0);
+    if(disk_count<0 || controller_count<0){
         terminal_write("disks: device enumeration failed\n");
         return;
     }
-    if(count==0){
-        terminal_write("No ATA disks detected.\n");
+    if(disk_count==0 && controller_count==0){
+        terminal_write("No supported storage hardware detected.\n");
         return;
     }
 
-    terminal_write("Detected ATA disks:\n");
-    for(int64_t index=0;index<count;index++){
-        uint64_t size_mib=devices[index].sector_count/2048;
-        const char *channel=devices[index].channel ? "secondary" : "primary";
-        const char *drive=devices[index].drive ? "slave" : "master";
-        terminal_printf("%s  %lu MiB  %s%s\n",devices[index].name,size_mib,
-                        devices[index].writable ? "rw" : "ro",
-                        devices[index].selected ? "  [active]" : "");
-        terminal_printf("  bus: %s %s\n",channel,drive);
-        terminal_printf("  model: %s\n",
-                        devices[index].model[0] ? devices[index].model : "ATA disk");
-        if(devices[index].serial[0]){
-            terminal_printf("  serial: %s\n",devices[index].serial);
+    if(disk_count>0){
+        terminal_write("Block devices:\n");
+        for(int64_t index=0;index<disk_count;index++){
+            uint64_t size_mib=devices[index].sector_count/2048;
+            const char *channel=devices[index].channel ? "secondary" : "primary";
+            const char *drive=devices[index].drive ? "slave" : "master";
+            terminal_printf("%s  %lu MiB  %s%s\n",devices[index].name,size_mib,
+                            devices[index].writable ? "rw" : "ro",
+                            devices[index].selected ? "  [active]" : "");
+            terminal_printf("  bus: ATA %s %s\n",channel,drive);
+            terminal_printf("  model: %s\n",
+                            devices[index].model[0]
+                                ? devices[index].model : "ATA disk");
+            if(devices[index].serial[0]){
+                terminal_printf("  serial: %s\n",devices[index].serial);
+            }
+        }
+    }
+
+    if(controller_count>0){
+        terminal_write("PCI storage controllers (detection only):\n");
+        for(int64_t index=0;index<controller_count;index++){
+            const char *type=controllers[index].type==STORAGE_CONTROLLER_AHCI
+                ? "AHCI" : "NVMe";
+            terminal_printf("%s  %s  pci %u:%u.%u  id %x:%x\n",
+                            controllers[index].name,type,
+                            (unsigned int)controllers[index].bus,
+                            (unsigned int)controllers[index].slot,
+                            (unsigned int)controllers[index].function,
+                            (unsigned int)controllers[index].vendor_id,
+                            (unsigned int)controllers[index].device_id);
+            if(controllers[index].register_base<=0xFFFFFFFFULL){
+                terminal_printf("  registers: 0x%x\n",
+                                (unsigned int)controllers[index].register_base);
+            } else {
+                terminal_printf("  registers high:low = 0x%x:0x%x\n",
+                                (unsigned int)(controllers[index].register_base>>32),
+                                (unsigned int)controllers[index].register_base);
+            }
+            terminal_write("  block I/O: driver not initialized\n");
         }
     }
 }
