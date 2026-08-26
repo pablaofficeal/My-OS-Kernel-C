@@ -18,7 +18,8 @@ struct i2c_hid_debug_state {
     uint8_t last_report_id;
 };
 
-void i2c_hid_touchpad_init(uint64_t hhdm_offset);
+struct limine_memmap_response;
+void i2c_hid_touchpad_init(uint64_t hhdm_offset, uint64_t kernel_phys_base, uint64_t kernel_virt_base, struct limine_memmap_response *memmap);
 void i2c_hid_touchpad_poll(void);
 void i2c_hid_touchpad_redraw(void);
 bool i2c_hid_touchpad_is_active(void);

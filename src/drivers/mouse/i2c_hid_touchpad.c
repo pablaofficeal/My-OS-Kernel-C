@@ -1,5 +1,6 @@
 #include "i2c_hid_touchpad.h"
 #include "ps2_mouse.h"
+#include "../../boot/limine.h"
 #include "../gop.h"
 #include "../serial.h"
 
@@ -44,6 +45,12 @@ struct i2c_hid_descriptor {
 static volatile uint32_t *controller;
 static struct i2c_hid_descriptor descriptor;
 static volatile struct i2c_hid_debug_state debug_state;
+static uint64_t hhdm_base_global;
+static uint64_t kernel_phys_global;
+static uint64_t kernel_virt_global;
+static struct limine_memmap_response *memmap_global;
+static uint64_t mmio_pt_pool[3][512] __attribute__((aligned(4096)));
+static int mmio_pool_next;
 
 static inline uint32_t readl(uint32_t reg){ return controller[reg / 4]; }
 static inline void writel(uint32_t reg, uint32_t value){ controller[reg / 4] = value; }
@@ -144,7 +151,85 @@ static bool write_command(uint8_t opcode, const uint8_t *args, uint32_t arg_len)
     return transfer(command, 4+arg_len, 0, 0);
 }
 
-void i2c_hid_touchpad_init(uint64_t hhdm_offset){
+static uint64_t virt_to_phys(uint64_t virt){
+    if(!kernel_virt_global || !kernel_phys_global) return 0;
+    return virt - kernel_virt_global + kernel_phys_global;
+}
+
+static uint64_t *alloc_pt(void){
+    if(mmio_pool_next >= 3) return 0;
+    uint64_t *pt = mmio_pt_pool[mmio_pool_next++];
+    for(int i=0;i<512;i++) pt[i]=0;
+    return pt;
+}
+
+static bool map_mmio_4k(uint64_t phys, uint64_t virt){
+    if(!hhdm_base_global || !kernel_virt_global || !kernel_phys_global) return false;
+    uint64_t cr3; __asm__ volatile("mov %%cr3,%0":"=r"(cr3));
+    uint64_t cr4; __asm__ volatile("mov %%cr4,%0":"=r"(cr4));
+    if(cr4 & (1ULL<<12)) return false; // LA57 not supported in this path
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)(hhdm_base_global + (cr3 & ~0xFFFULL));
+    uint64_t pml4_idx = (virt >> 39) & 0x1FF;
+    uint64_t pdpt_idx = (virt >> 30) & 0x1FF;
+    uint64_t pd_idx   = (virt >> 21) & 0x1FF;
+    uint64_t pt_idx   = (virt >> 12) & 0x1FF;
+    uint64_t pml4e = pml4[pml4_idx];
+    uint64_t *pdpt;
+    if(!(pml4e & 1)){
+        pdpt = alloc_pt(); if(!pdpt) return false;
+        pml4[pml4_idx] = virt_to_phys((uint64_t)(uintptr_t)pdpt) | 0x3;
+        pdpt = (uint64_t *)(uintptr_t)(hhdm_base_global + virt_to_phys((uint64_t)(uintptr_t)pdpt));
+    } else {
+        pdpt = (uint64_t *)(uintptr_t)(hhdm_base_global + (pml4e & ~0xFFFULL));
+    }
+    uint64_t pdpte = pdpt[pdpt_idx];
+    uint64_t *pd;
+    if(!(pdpte & 1)){
+        pd = alloc_pt(); if(!pd) return false;
+        pdpt[pdpt_idx] = virt_to_phys((uint64_t)(uintptr_t)pd) | 0x3;
+        pd = (uint64_t *)(uintptr_t)(hhdm_base_global + virt_to_phys((uint64_t)(uintptr_t)pd));
+    } else {
+        if(pdpte & (1ULL<<7)) return false; // 1G page
+        pd = (uint64_t *)(uintptr_t)(hhdm_base_global + (pdpte & ~0xFFFULL));
+    }
+    uint64_t pde = pd[pd_idx];
+    uint64_t *pt;
+    if(!(pde & 1)){
+        pt = alloc_pt(); if(!pt) return false;
+        pd[pd_idx] = virt_to_phys((uint64_t)(uintptr_t)pt) | 0x3;
+        pt = (uint64_t *)(uintptr_t)(hhdm_base_global + virt_to_phys((uint64_t)(uintptr_t)pt));
+    } else {
+        if(pde & (1ULL<<7)) return false; // 2M page
+        pt = (uint64_t *)(uintptr_t)(hhdm_base_global + (pde & ~0xFFFULL));
+    }
+    pt[pt_idx] = (phys & ~0xFFFULL) | 0x13; // P+W+PCD for MMIO
+    __asm__ volatile("invlpg (%0)"::"r"(virt):"memory");
+    return true;
+}
+
+static uint64_t alloc_mmio_window(uint64_t size){
+    // Prefer the exact window Linux used on this ASUS board.
+    const uint64_t preferred = 0x4017001000ULL;
+    if(memmap_global){
+        for(uint64_t i=0;i<memmap_global->entry_count;i++){
+            struct limine_memmap_entry *e = memmap_global->entries[i];
+            if(e->base <= preferred && preferred + size <= e->base + e->length){
+                // Do not steal usable RAM.
+                if(e->type == 0) return 0; // LIMINE_MEMMAP_USABLE
+            }
+        }
+        // Preferred is not inside usable RAM -> safe to use if still free.
+        return preferred;
+    }
+    return preferred;
+}
+
+void i2c_hid_touchpad_init(uint64_t hhdm_offset, uint64_t kernel_phys_base, uint64_t kernel_virt_base, struct limine_memmap_response *memmap){
+    hhdm_base_global = hhdm_offset;
+    kernel_phys_global = kernel_phys_base;
+    kernel_virt_global = kernel_virt_base;
+    memmap_global = memmap;
+    mmio_pool_next = 0;
     // PCI 00:15.1 is Intel Alder Lake LPSS I2C #1. Do not touch a fixed
     // physical address on emulators or unrelated machines.
     debug_state.pci_id=pci_read32(0x15, 1, 0x00);
@@ -155,16 +240,53 @@ void i2c_hid_touchpad_init(uint64_t hhdm_offset){
         draw_debug();
         return;
     }
-    debug_state.bar_low=pci_read32(0x15, 1, 0x10);
-    debug_state.bar_high=pci_read32(0x15, 1, 0x14);
+    // Size the BAR to know how much window we need.
+    uint32_t orig_low = pci_read32(0x15, 1, 0x10);
+    uint32_t orig_high = pci_read32(0x15, 1, 0x14);
+    pci_write32(0x15, 1, 0x10, 0xFFFFFFFF);
+    pci_write32(0x15, 1, 0x14, 0xFFFFFFFF);
+    uint32_t size_low = pci_read32(0x15, 1, 0x10);
+    uint32_t size_high = pci_read32(0x15, 1, 0x14);
+    pci_write32(0x15, 1, 0x10, orig_low);
+    pci_write32(0x15, 1, 0x14, orig_high);
+    uint64_t size = 0;
+    if((orig_low & 0x6) == 0x4){ // 64-bit BAR
+        uint64_t mask = ((uint64_t)size_high << 32) | (size_low & ~0xFU);
+        size = (~mask + 1) & ~0xFFFULL;
+    } else {
+        size = (~(size_low & ~0xFU) + 1) & ~0xFFFULL;
+    }
+    if(!size) size = 0x1000;
+
+    debug_state.bar_low=orig_low;
+    debug_state.bar_high=orig_high;
     uint64_t bar=(uint64_t)(debug_state.bar_low & ~0xFU);
     bar|=(uint64_t)debug_state.bar_high << 32;
     if(!bar){
-        serial_write_string("[I2C-HID] I2C1 BAR is not assigned\n");
+        uint64_t alloc = alloc_mmio_window(size);
+        if(!alloc){
+            serial_write_string("[I2C-HID] no MMIO window\n");
+            draw_debug();
+            return;
+        }
+        uint32_t cmd = pci_read32(0x15, 1, 0x04);
+        pci_write32(0x15, 1, 0x04, cmd & ~0x2U); // disable MEM decode while programming BAR
+        pci_write32(0x15, 1, 0x10, (uint32_t)(alloc & 0xFFFFFFFFULL) | 0x4);
+        pci_write32(0x15, 1, 0x14, (uint32_t)(alloc >> 32));
+        bar = alloc;
+        debug_state.bar_low=pci_read32(0x15, 1, 0x10);
+        debug_state.bar_high=pci_read32(0x15, 1, 0x14);
+    }
+    // Enable MEM + Bus Master after BAR is valid.
+    uint32_t cmd = pci_read32(0x15, 1, 0x04);
+    pci_write32(0x15, 1, 0x04, cmd | 0x6U);
+    const uint64_t I2C_VIRT = 0xFFFFFD8000000000ULL;
+    if(!map_mmio_4k(bar & ~0xFFFULL, I2C_VIRT)){
+        serial_write_string("[I2C-HID] cannot map I2C1 MMIO\n");
         draw_debug();
         return;
     }
-    controller=(volatile uint32_t *)(uintptr_t)(hhdm_offset + bar);
+    controller=(volatile uint32_t *)(uintptr_t)I2C_VIRT;
     debug_state.controller_ready=true;
 
     uint8_t register_address[2]={HID_DESC_REG & 0xFF, HID_DESC_REG >> 8};

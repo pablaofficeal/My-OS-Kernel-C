@@ -31,6 +31,18 @@ static volatile struct limine_hhdm_request hhdm_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST,
+    .revision = 0
+};
+
+__attribute__((used, section(".requests")))
+static volatile struct limine_kernel_address_request kernel_address_request = {
+    .id = LIMINE_KERNEL_ADDRESS_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
@@ -75,7 +87,11 @@ void _start(void) {
     syscall_init();
     serial_write_string("[IDT] loaded\n");
 
-    i2c_hid_touchpad_init(hhdm_request.response ? hhdm_request.response->offset : 0);
+    i2c_hid_touchpad_init(
+        hhdm_request.response ? hhdm_request.response->offset : 0,
+        kernel_address_request.response ? kernel_address_request.response->physical_base : 0,
+        kernel_address_request.response ? kernel_address_request.response->virtual_base : 0,
+        memmap_request.response ? memmap_request.response : 0);
     ps2_mouse_init();
     serial_write_string("[MOUSE] PS/2 ready\n");
 
