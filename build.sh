@@ -13,6 +13,7 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/gdt.c -o gdt.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/idt.c -o idt.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/serial.c -o serial.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/vga.c -o vga.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/pic.c -o pic.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/fb.c -o fb.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/lib/string.c -o string.o
@@ -25,7 +26,7 @@ cat > /tmp/linker_grub.ld <<'LD'
 ENTRY(multiboot_entry)
 SECTIONS { . = 0x100000; .multiboot : { KEEP(*(.multiboot)) } .requests : { KEEP(*(.requests*)) } .text : { *(.text*) } .rodata : { *(.rodata*) } .data : { *(.data*) } .bss : { *(COMMON) *(.bss*) } /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) } }
 LD
-x86_64-elf-ld -T /tmp/linker_grub.ld -o kernel.elf multiboot.o grub_main.o gdt.o idt.o serial.o pic.o fb.o string.o gdt_asm.o idt_asm.o
+x86_64-elf-ld -T /tmp/linker_grub.ld -o kernel.elf multiboot.o grub_main.o gdt.o idt.o serial.o vga.o pic.o fb.o string.o gdt_asm.o idt_asm.o
 echo "✅ kernel.elf: $(file kernel.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel.elf | head -n12
 
