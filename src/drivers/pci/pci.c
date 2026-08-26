@@ -25,6 +25,14 @@ uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t function,
     return inl(PCI_CONFIG_DATA);
 }
 
+void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t function,
+                        uint8_t offset, uint32_t value){
+    uint32_t address=0x80000000U|((uint32_t)bus<<16)|((uint32_t)slot<<11)
+        |((uint32_t)function<<8)|(offset&0xFC);
+    outl(PCI_CONFIG_ADDRESS,address);
+    outl(PCI_CONFIG_DATA,value);
+}
+
 uint64_t pci_read_bar(uint8_t bus, uint8_t slot, uint8_t function,
                       uint8_t bar_index){
     if(bar_index>=6) return 0;

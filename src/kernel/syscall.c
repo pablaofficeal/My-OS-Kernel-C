@@ -5,6 +5,7 @@
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/storage/block_device.h"
+#include "../drivers/storage/ahci.h"
 #include "../drivers/storage/storage_probe.h"
 #include "../fs/fat32.h"
 #include <stdint.h>
@@ -109,9 +110,11 @@ void syscall_init(void){
     if(!filesystem_checked){
         filesystem_checked=true;
         storage_probe_init();
+        (void)block_device_init();
         klogf(KLOG_INFO,"pci-storage: %u AHCI/NVMe controller(s) detected",
               storage_controller_count());
         klogf(KLOG_INFO,"ata: %u disk(s) detected",block_device_count());
+        klogf(KLOG_INFO,"ahci: %u SATA disk(s) identified",ahci_device_count());
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from ATA %s",fat32_device_name());
         } else {

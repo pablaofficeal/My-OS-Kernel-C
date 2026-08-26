@@ -9,6 +9,8 @@
 
 #define STORAGE_CONTROLLER_AHCI 1
 #define STORAGE_CONTROLLER_NVME 2
+#define STORAGE_TRANSPORT_ATA_PIO 1
+#define STORAGE_TRANSPORT_AHCI    2
 
 struct storage_device_info {
     char name[STORAGE_DEVICE_NAME_CAPACITY];
@@ -20,6 +22,10 @@ struct storage_device_info {
     uint8_t drive;
     uint8_t writable;
     uint8_t selected;
+    uint8_t transport;
+    uint8_t controller;
+    uint8_t port;
+    uint8_t operational;
 };
 
 struct storage_controller_info {

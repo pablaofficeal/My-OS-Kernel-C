@@ -160,6 +160,10 @@ static bool identify_device(struct ata_device *device){
     device->info.sector_count=sectors;
     device->info.sector_size=512;
     device->info.writable=1;
+    device->info.transport=STORAGE_TRANSPORT_ATA_PIO;
+    device->info.controller=device->info.channel;
+    device->info.port=device->info.drive;
+    device->info.operational=1;
     copy_identify_text(device->info.serial,STORAGE_SERIAL_CAPACITY,
                        identify_data,10,10);
     copy_identify_text(device->info.model,STORAGE_MODEL_CAPACITY,

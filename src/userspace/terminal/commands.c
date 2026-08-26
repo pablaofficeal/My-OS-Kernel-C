@@ -180,9 +180,9 @@ static void create_path(const char *command, const char *path,
 }
 
 static void show_disks(void){
-    struct storage_device_info devices[4];
+    struct storage_device_info devices[12];
     struct storage_controller_info controllers[8];
-    int64_t disk_count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,4,0);
+    int64_t disk_count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,12,0);
     int64_t controller_count=invoke_syscall(SYS_STORAGE_CONTROLLERS,
                                             (uint64_t)controllers,8,0);
     if(disk_count<0 || controller_count<0){
@@ -198,12 +198,20 @@ static void show_disks(void){
         terminal_write("Block devices:\n");
         for(int64_t index=0;index<disk_count;index++){
             uint64_t size_mib=devices[index].sector_count/2048;
-            const char *channel=devices[index].channel ? "secondary" : "primary";
-            const char *drive=devices[index].drive ? "slave" : "master";
             terminal_printf("%s  %lu MiB  %s%s\n",devices[index].name,size_mib,
-                            devices[index].writable ? "rw" : "ro",
+                            devices[index].operational
+                                ? (devices[index].writable ? "rw" : "ro")
+                                : "identify-only",
                             devices[index].selected ? "  [active]" : "");
-            terminal_printf("  bus: ATA %s %s\n",channel,drive);
+            if(devices[index].transport==STORAGE_TRANSPORT_AHCI){
+                terminal_printf("  bus: AHCI controller %u port %u\n",
+                                (unsigned int)devices[index].controller,
+                                (unsigned int)devices[index].port);
+            } else {
+                const char *channel=devices[index].channel ? "secondary" : "primary";
+                const char *drive=devices[index].drive ? "slave" : "master";
+                terminal_printf("  bus: ATA %s %s\n",channel,drive);
+            }
             terminal_printf("  model: %s\n",
                             devices[index].model[0]
                                 ? devices[index].model : "ATA disk");
@@ -233,7 +241,9 @@ static void show_disks(void){
                                 (unsigned int)(controllers[index].register_base>>32),
                                 (unsigned int)controllers[index].register_base);
             }
-            terminal_write("  block I/O: driver not initialized\n");
+            terminal_write(controllers[index].type==STORAGE_CONTROLLER_AHCI
+                ? "  block I/O: IDENTIFY only\n"
+                : "  block I/O: driver not initialized\n");
         }
     }
 }

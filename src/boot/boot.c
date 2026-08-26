@@ -7,6 +7,7 @@
 #include "../drivers/serial.h"
 #include "../drivers/pic.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/storage/ahci.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -17,7 +18,7 @@ __attribute__((used, section(".requests_start_marker")))
 static volatile LIMINE_REQUESTS_START_MARKER;
 
 __attribute__((used, section(".requests")))
-static volatile LIMINE_BASE_REVISION(2);
+static volatile LIMINE_BASE_REVISION(0);
 
 __attribute__((used, section(".requests")))
 static volatile struct limine_framebuffer_request framebuffer_request = {
@@ -28,6 +29,12 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 __attribute__((used, section(".requests")))
 static volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST,
+    .revision = 0
+};
+
+__attribute__((used, section(".requests")))
+static volatile struct limine_kernel_address_request kernel_address_request = {
+    .id = LIMINE_KERNEL_ADDRESS_REQUEST,
     .revision = 0
 };
 
@@ -69,6 +76,11 @@ void _start(void) {
     // HHDM для VGA 0xB8000 в higher half (иначе #PF и ребут)
     if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
     else vga_set_hhdm(0);
+    if(hhdm_request.response && kernel_address_request.response){
+        ahci_set_address_mapping(hhdm_request.response->offset,
+                                 kernel_address_request.response->physical_base,
+                                 kernel_address_request.response->virtual_base);
+    }
 
     // GOP сначала, VGA только если GOP нет
     uint64_t firmware_type=firmware_type_request.response
