@@ -37,14 +37,17 @@ static void split_command(const char *line, char *command, uint32_t capacity,
 
 static void show_systeminfo(void){
     uint64_t ram_mb=system_info_usable_ram_bytes()/(1024*1024);
-    uint64_t framebuffer_kib=gop_get_framebuffer_size_bytes()/1024;
+    uint64_t framebuffer_bytes=gop_get_framebuffer_size_bytes();
+    uint64_t framebuffer_kib=framebuffer_bytes/1024;
+    uint64_t framebuffer_mib=(framebuffer_bytes+1024*1024-1)/(1024*1024);
     terminal_write("=== System Information ===\n");
     terminal_printf("Processor:  %s\n",system_info_cpu_name());
     terminal_printf("Usable RAM: %lu MB\n",ram_mb);
     terminal_printf("Graphics:   %s\n",gop_get_protocol_name());
     terminal_printf("Video mode: %ux%u, %u bpp\n",
                     gop_get_width(),gop_get_height(),(unsigned int)gop_get_bpp());
-    terminal_printf("Framebuffer memory: %lu KiB (mapped)\n",framebuffer_kib);
+    terminal_printf("Framebuffer: %lu MiB mapped (%lu KiB exact)\n",
+                    framebuffer_mib,framebuffer_kib);
     terminal_write("Total VRAM: not exposed by boot protocol\n");
     terminal_write("==========================\n");
 }
