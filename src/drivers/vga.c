@@ -1,9 +1,15 @@
 #include "vga.h"
 #include <stdint.h>
 
+static uint64_t hhdm_offset = 0;
 static volatile uint16_t *VGA = (volatile uint16_t*)0xB8000;
 static uint8_t cur_x=0, cur_y=0;
 static const uint8_t COLOR=0x0F;
+
+void vga_set_hhdm(uint64_t offset){
+    hhdm_offset = offset;
+    VGA = (volatile uint16_t*)(uintptr_t)(hhdm_offset ? hhdm_offset + 0xB8000 : 0xB8000);
+}
 
 static void scroll(void){
     for(int y=1;y<25;y++) for(int x=0;x<80;x++) VGA[(y-1)*80+x]=VGA[y*80+x];

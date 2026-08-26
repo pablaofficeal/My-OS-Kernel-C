@@ -49,9 +49,18 @@ void _start(void) {
 
     serial_init();
     serial_write_string("[BOOT] 64-bit long mode via Limine (UEFI/BIOS)\n");
-    vga_init();
+
+    // HHDM для VGA 0xB8000 в higher half (иначе #PF и ребут)
+    if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
+    else vga_set_hhdm(0);
+
+    // GOP сначала, VGA только если GOP нет (иначе double init 0xB8000 ломает Limine)
     gop_init_from_limine(fb_ptr);
-    if(gop_is_available()){ gop_clear(0x1E1E2E); gop_set_color(0xCDD6F4,0x1E1E2E); gop_write("Limine GOP OK\n"); }
+    if(gop_is_available()){
+        gop_clear(0x1E1E2E); gop_set_color(0xCDD6F4,0x1E1E2E); gop_write("Limine GOP OK\n");
+    } else {
+        vga_init();
+    }
     serial_write_string("[GOP] init done\n");
 
     pic_remap(0x20,0x28); pic_mask_all();

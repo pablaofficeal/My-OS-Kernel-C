@@ -43,7 +43,7 @@ mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT
 
 cp kernel-limine.elf iso_limine/boot/kernel.elf
 cat > iso_limine/boot/limine/limine.conf <<'EOF'
-timeout: 0
+timeout: 3
 verbose: yes
 serial: yes
 /PureC OS 64-bit Limine+GOP

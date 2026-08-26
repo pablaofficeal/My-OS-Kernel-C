@@ -30,7 +30,7 @@ x86_64-elf-readelf -l kernel.elf | head -n12
 echo "📦 ISO (GRUB Hybrid BIOS+UEFI, GOP via Limine, VGA via BIOS)..."
 cp kernel.elf iso/boot/kernel.elf
 cat > iso/boot/grub/grub.cfg <<'EOF'
-set timeout=0
+set timeout=3
 set default=0
 terminal_output console
 menuentry "PureC OS 64-bit" {
