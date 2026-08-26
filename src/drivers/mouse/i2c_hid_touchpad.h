@@ -10,6 +10,9 @@ struct i2c_hid_debug_state {
     uint16_t vendor_id;
     uint16_t product_id;
     uint16_t max_input_length;
+    uint32_t pci_id;
+    uint32_t bar_low;
+    uint32_t bar_high;
     uint32_t transfer_errors;
     uint32_t input_reports;
     uint8_t last_report_id;

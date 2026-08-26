@@ -71,7 +71,7 @@ static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
 static void draw_debug(void){
     if(!gop_is_available()) return;
     const uint32_t x=320, y=100, bg=0x313244;
-    gop_draw_rect(x, y, 310, 62, bg);
+    gop_draw_rect(x, y, 310, 86, bg);
     gop_draw_text_at(x+6, y+5, "I2C HID DEBUG", 0xA6E3A1, bg);
     gop_draw_text_at(x+6, y+17, "CTRL DESC READY ERR", 0xCDD6F4, bg);
     draw_hex(x+6,   y+27, debug_state.controller_ready, 2);
@@ -82,6 +82,11 @@ static void draw_debug(void){
     draw_hex(x+6,  y+49, debug_state.vendor_id, 4);
     draw_hex(x+46, y+49, debug_state.product_id, 4);
     draw_hex(x+96, y+49, debug_state.max_input_length, 4);
+    gop_draw_text_at(x+6, y+61, "PCI", 0xCDD6F4, bg);
+    draw_hex(x+46, y+61, debug_state.pci_id, 8);
+    gop_draw_text_at(x+6, y+73, "BAR", 0xCDD6F4, bg);
+    draw_hex(x+46, y+73, debug_state.bar_high, 8);
+    draw_hex(x+126, y+73, debug_state.bar_low, 8);
 }
 
 static bool wait_for(uint32_t reg, uint32_t mask, bool set){
@@ -141,15 +146,20 @@ static bool write_command(uint8_t opcode, const uint8_t *args, uint32_t arg_len)
 void i2c_hid_touchpad_init(uint64_t hhdm_offset){
     // PCI 00:15.1 is Intel Alder Lake LPSS I2C #1. Do not touch a fixed
     // physical address on emulators or unrelated machines.
-    if(pci_read32(0x15, 1, 0x00) != 0x51E98086U){
-        serial_write_string("[I2C-HID] Alder Lake I2C1 not present\n");
+    debug_state.pci_id=pci_read32(0x15, 1, 0x00);
+    // Intel LPSS I2C device IDs vary between BIOS revisions. The vendor and
+    // the DSDT path identify this controller; do not reject a valid revision.
+    if((debug_state.pci_id & 0xFFFFU) != 0x8086U){
+        serial_write_string("[I2C-HID] Intel I2C1 not present\n");
         draw_debug();
         return;
     }
     uint32_t pci_command=pci_read32(0x15, 1, 0x04);
     pci_write32(0x15, 1, 0x04, pci_command | 0x00000006U);
-    uint64_t bar=(uint64_t)(pci_read32(0x15, 1, 0x10) & ~0xFU);
-    bar|=(uint64_t)pci_read32(0x15, 1, 0x14) << 32;
+    debug_state.bar_low=pci_read32(0x15, 1, 0x10);
+    debug_state.bar_high=pci_read32(0x15, 1, 0x14);
+    uint64_t bar=(uint64_t)(debug_state.bar_low & ~0xFU);
+    bar|=(uint64_t)debug_state.bar_high << 32;
     if(!bar){
         serial_write_string("[I2C-HID] I2C1 has no MMIO BAR\n");
         draw_debug();
