@@ -1,9 +1,9 @@
-/* linker.ld - 64-bit higher-half Limine kernel */
+/* linker.ld - 64-bit Limine kernel at 1M physical = virtual (simple base) */
 ENTRY(_start)
 
 SECTIONS
 {
-    . = 0xffffffff80000000;
+    . = 0x100000;
 
     .requests : {
         KEEP(*(.requests))

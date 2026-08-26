@@ -5,3 +5,4 @@
 *.idea/
 kernel.elf
 qemu_logs.txt
+hdd.img
