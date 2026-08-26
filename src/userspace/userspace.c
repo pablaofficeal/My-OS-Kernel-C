@@ -40,7 +40,7 @@ static void draw_desktop(void){
     gop_draw_text_at(12, 8, "PureC OS", 0x89B4FA, TOPBAR_BG);
     gop_draw_text_at(120, 8, "Userspace v0.1.0", TOPBAR_FG, TOPBAR_BG);
     // справа - статус
-    const char *status = " [ boot log hidden ]  F1:dmesg  F2:clear  F12:debug";
+    const char *status = " [ boot log hidden ]  help:dmesg  clear  debug";
     // вычисляем x справа
     uint32_t status_len = strlen(status);
     uint32_t status_x = desktop_w - status_len*8 - 12;

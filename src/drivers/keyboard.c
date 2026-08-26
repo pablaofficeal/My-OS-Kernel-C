@@ -1,6 +1,6 @@
 #include "keyboard.h"
 #include "../kernel/klog.h"
-#include "../drivers/serial.h"
+#include "serial.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -86,9 +86,6 @@ static void handle_scancode(uint8_t sc){
     }
     if(c){
         kbd_push(c);
-        // debug serial for userspace shell
-        serial_putc(c);
-        serial_putc(' ');
     }
 }
 
@@ -131,7 +128,6 @@ void keyboard_init(void){
     outb(0x21, mask);
     __asm__ volatile("sti");
     klog(KLOG_INFO, "keyboard: PS/2 polling ready (US layout)");
-    serial_write_string("[KBD] init done, polling mode\n");
 }
 
 void keyboard_set_leds(bool caps, bool num, bool scroll){
