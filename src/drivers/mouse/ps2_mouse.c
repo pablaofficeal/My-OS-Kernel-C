@@ -106,6 +106,13 @@ void mouse_redraw(void){
 }
 
 void mouse_apply_relative(int8_t dx, int8_t dy, uint8_t buttons){
+    char tmp[32]; tmp[0]=0;
+    // serial debug для QEMU проверки
+    serial_write_string("[MOUSE] move dx="); 
+    // inline hex for dx/dy
+    const char *h="0123456789ABCDEF";
+    char b[5]; b[0]= (dx<0?'-':' '); b[1]= h[(dx>>4)&0xF]; b[2]= h[dx&0xF]; b[3]=0; serial_write_string(b);
+    serial_write_string(" dy="); b[0]= (dy<0?'-':' '); b[1]= h[(dy>>4)&0xF]; b[2]= h[dy&0xF]; b[3]=0; serial_write_string(b); serial_write_string("\n");
     state.dx=dx;
     state.dy=-dy;
     state.x += dx;
