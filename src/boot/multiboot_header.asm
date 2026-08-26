@@ -46,20 +46,19 @@ multiboot_entry:
     push ebx
     push eax
 
-    ; setup paging for long mode: identity map 0-2M + higher?
-    ; Use 4-level paging at 0x1000
-    ; Zero page tables
-    mov edi, 0x1000
+    ; setup paging for long mode: identity map 0-4M
+    ; Используем 0x70000 чтобы не затирать BIOS память 0x0-0x1000 (критично для VirtualBox)
+    mov edi, 0x70000
     mov ecx, 4096
     xor eax, eax
     rep stosd
 
-    ; PML4 at 0x1000, PDPT at 0x2000, PD at 0x3000
-    mov dword [0x1000], 0x2003      ; PML4[0] -> PDPT
-    mov dword [0x2000], 0x3003      ; PDPT[0] -> PD
+    ; PML4 at 0x70000, PDPT at 0x71000, PD at 0x72000
+    mov dword [0x70000], 0x71003      ; PML4[0] -> PDPT
+    mov dword [0x71000], 0x72003      ; PDPT[0] -> PD
     ; PD[0] = 0x83 (2M huge page at 0x0)
-    mov dword [0x3000], 0x00000083
-    mov dword [0x3008], 0x00200083   ; PD[1] = 2M at 0x200000
+    mov dword [0x72000], 0x00000083
+    mov dword [0x72008], 0x00200083   ; PD[1] = 2M at 0x200000
 
     ; Enable PAE
     mov eax, cr4
@@ -67,7 +66,7 @@ multiboot_entry:
     mov cr4, eax
 
     ; Set CR3
-    mov eax, 0x1000
+    mov eax, 0x70000
     mov cr3, eax
 
     ; Enable EFER.LME

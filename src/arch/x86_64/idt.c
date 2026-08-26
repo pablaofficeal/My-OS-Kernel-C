@@ -81,7 +81,8 @@ void idt_init(void) {
         idt[i].offset_low=0; idt[i].selector=0; idt[i].ist=0;
         idt[i].type_attr=0; idt[i].offset_mid=0; idt[i].offset_high=0; idt[i].zero=0;
     }
-    idt_set_gate(0,  (uint64_t)isr_stub_0,  0x8E);
+    // Заполняем ВСЕ 256 векторов дефолтом, иначе любой неожиданный IRQ => triple fault => Guru Meditation в VBox
+    for(int i=0;i<256;i++) idt_set_gate(i, (uint64_t)isr_stub_0, 0x8E);
     idt_set_gate(3,  (uint64_t)isr_stub_3,  0x8E);
     idt_set_gate(8,  (uint64_t)isr_stub_8,  0x8E);
     idt_set_gate(13, (uint64_t)isr_stub_13, 0x8E);
