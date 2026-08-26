@@ -6,6 +6,7 @@
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
+#include "../kernel/klog.h"
 #include "../lib/string.h"
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
@@ -23,41 +24,41 @@ static void idle_forever(void){
 }
 
 void kernel_main(struct limine_framebuffer *fb) {
-    // Limine уже в long mode, gdt/idt уже настроены в boot.c, но переинициализируем для консистентности
-    gop_init_from_limine(fb);
-    // serial уже init в boot.c, но на всякий
-    serial_write_string("[KERNEL] Limine GOP init\n");
-    if(gop_is_available()){
-        gop_clear(0x1E1E2E);
-        gop_set_color(0xCDD6F4, 0x1E1E2E);
-        gop_write("PureC OS 64-bit [Limine+GOP]\n");
-        gop_write("================================\n");
-        gop_write("GDT64: OK  IDT64: OK  GOP: OK\n");
-    } else {
-        vga_write("PureC OS 64-bit [Limine] no GOP, VGA\n");
-    }
+    (void)fb;
+    klog(KLOG_INFO, "Entering kernel_main...");
+    klog(KLOG_INFO, "Kernel: 64-bit long mode, GOP active");
+    klogf(KLOG_INFO, "Framebuffer: %dx%d", gop_get_width(), gop_get_height());
 
-    // GDT/IDT уже, но проверим
-    serial_write_string("[TEST] int3\n");
+    // GDT/IDT уже настроены в boot.c, но проверяем инт3 как linux-like selftest
+    klog(KLOG_INFO, "Testing IDT: int3 breakpoint...");
     __asm__ volatile("int3");
-    if(gop_is_available()) gop_write("[OK] int3 handled\n");
-    serial_write_string("[OK] int3\n");
+    klog(KLOG_OK, "int3 handled, IDT working");
 
+    klog(KLOG_INFO, "Initializing syscall layer...");
     syscall_init();
+    klog(KLOG_OK, "Syscall int 0x80 ready");
+
     const char *msg="Hello from syscall (Limine)!\n";
-    do_syscall(SYS_WRITE, (uint64_t)msg, 27, 1,0,0);
-    if(gop_is_available()) gop_write("syscall WRITE done\n");
+    klog(KLOG_INFO, "Testing syscall WRITE...");
+    do_syscall(SYS_WRITE, (uint64_t)msg, strlen(msg), 1,0,0);
+    klog(KLOG_OK, "syscall WRITE done");
 
-    // GOP тесты через syscalls
-    do_syscall(SYS_DRAW_RECT, 50,50,300,80, 0xFF0000); // но helper ждет 5 args, последний цвет в rdi, h в rsi
-    // Правильно: x=50,y=50,w=300,h=80,color=0x00FF00
-    __asm__ volatile("mov $100, %%rbx; mov $50, %%rcx; mov $300, %%rdx; mov $80, %%rsi; mov $0x00FF00, %%rdi; mov $100, %%rax; int $0x80" ::: "rax","rbx","rcx","rdx","rsi","rdi","r10","r8","memory");
-    if(gop_is_available()) gop_write("DRAW_RECT via syscall done\n");
+    // GOP тесты через syscalls - рисуем внизу чтобы не перекрывать boot log (linux fb test)
+    klog(KLOG_INFO, "Testing GOP via syscalls: DRAW_RECT...");
+    uint32_t fb_h = gop_get_height();
+    uint32_t rect_y = fb_h > 120 ? fb_h - 100 : 500;
+    do_syscall(SYS_DRAW_RECT, 50, rect_y, 300,60, 0xFF0000);
+    do_syscall(SYS_DRAW_RECT, 400, rect_y, 300,60, 0x00FF00);
+    klog(KLOG_OK, "DRAW_RECT via syscall done (red+green at bottom)");
 
-    // kernel_main очищает framebuffer после инициализации PS/2.
-    // Восстанавливаем курсор и его диагностику поверх готового интерфейса.
+    // показываем что весь boot лог виден, как в linux dmesg
+    klog(KLOG_INFO, "Boot log complete, dumping klog info...");
+    klogf(KLOG_DEBUG, "Verbose mode: %s (debug visible)", klog_is_verbose() ? "on" : "off");
+    klog(KLOG_INFO, "System ready, entering idle loop");
+
+    // восстанавливаем курсор поверх логов
     mouse_redraw();
 
-    serial_write_string("[KERNEL] idle, interrupts enabled\n");
+    klog(KLOG_OK, "Idle loop started, interrupts enabled");
     idle_forever();
 }

@@ -1,4 +1,5 @@
 #include "fb.h"
+#include "../lib/string.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -161,6 +162,20 @@ void fb_clear(uint32_t color){
 
 void fb_set_color(uint32_t f, uint32_t b){ fg=f; bg=b; }
 
+static void fb_scroll(void){
+    if(!fb_addr) return;
+    const uint32_t line_h = 10;
+    if(fb_height <= line_h){ fb_clear(bg); return; }
+    for(uint32_t y=0; y + line_h < fb_height; y++){
+        memcpy(&fb_addr[y * fb_pitch], &fb_addr[(y + line_h) * fb_pitch], fb_pitch * sizeof(uint32_t));
+    }
+    for(uint32_t y = fb_height - line_h; y < fb_height; y++){
+        for(uint32_t x=0; x < fb_pitch; x++) fb_addr[y * fb_pitch + x] = bg;
+    }
+    if(cur_y >= line_h) cur_y -= line_h;
+    else cur_y = 12;
+}
+
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
     if (!fb_addr) return;
     if(x>=fb_width || y>=fb_height) return;
@@ -183,10 +198,10 @@ static void draw_char(char c, uint32_t x, uint32_t y){
 
 void fb_putc(char c){
     if (!fb_addr) return;
-    if(c=='\n'){ cur_x=12; cur_y+=10; return; }
+    if(c=='\n'){ cur_x=12; cur_y+=10; if(cur_y + 8 >= fb_height) fb_scroll(); return; }
     if(c=='\r'){ cur_x=12; return; }
-    if(cur_x + 8 >= fb_width){ cur_x=12; cur_y+=10; }
-    if(cur_y + 8 >= fb_height){ fb_clear(bg); }
+    if(cur_x + 8 >= fb_width){ cur_x=12; cur_y+=10; if(cur_y + 8 >= fb_height) fb_scroll(); }
+    if(cur_y + 8 >= fb_height) fb_scroll();
     draw_char(c, cur_x, cur_y);
     cur_x+=8;
 }

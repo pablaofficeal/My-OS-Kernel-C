@@ -1,9 +1,11 @@
 #include "syscall.h"
+#include "klog.h"
 #include "../drivers/serial.h"
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 static void print_hex(uint64_t v){
     const char *h="0123456789ABCDEF";
@@ -70,5 +72,8 @@ int64_t syscall_handler(struct syscall_regs *r){
 
 void syscall_init(void){
     // IDT 0x80 уже настроен в idt_init с DPL3 (0xEE)
-    serial_write_string("[SYSCALL] init, int 0x80 ready\n");
+    // используем klog если уже инициализирован, иначе fallback на serial
+    // klog_inited проверяется через verbose флаг (если false после init, всё равно работает)
+    // просто пишем DEBUG чтобы не спамить primary screen дважды (boot.c уже логирует)
+    klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
 }

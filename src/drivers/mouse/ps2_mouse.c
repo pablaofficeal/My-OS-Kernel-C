@@ -3,6 +3,7 @@
 #include "../serial.h"
 #include "../gop.h"
 #include "../vga.h"
+#include "../../kernel/klog.h"
 #include <stdint.h>
 
 // Linux psmouse упрощённо: 8042 + IRQ12, 3-байтный пакет
@@ -182,7 +183,7 @@ static bool process_mouse_byte(uint8_t data){
 
         if(!packet_seen){
             packet_seen=true;
-            serial_write_string("[MOUSE] PS/2 packets active\n");
+            klog(KLOG_INFO, "psmouse: packets active, mouse moving");
         }
 
         pkt_idx=0;
@@ -223,7 +224,7 @@ void ps2_mouse_poll(void){
 }
 
 void ps2_mouse_init(void){
-    serial_write_string("[MOUSE] init PS/2 (Linux psmouse style)...\n");
+    klog(KLOG_INFO, "psmouse: initializing PS/2 mouse (Linux psmouse style)");
 
     // Включаем мышь через 8042, как в Linux
     // 1. Включить AUX
@@ -233,7 +234,7 @@ void ps2_mouse_init(void){
     ps2_write_cmd(0x20);
     ps2_wait_output();
     uint8_t status = inb(PS2_DATA);
-    serial_write_string("[MOUSE] cmd byte read\n");
+    klogf(KLOG_DEBUG, "psmouse: command byte=0x%x", status);
     // Включить IRQ12 (bit1), отключить clock мыши? bit5
     status |= 0x02; // enable IRQ12
     status &= ~0x20; // enable mouse
@@ -247,11 +248,12 @@ void ps2_mouse_init(void){
     uint8_t ack = mouse_read_ack();
     debug_state.reset_ack=ack;
     if(ack==0xFA){
-        // Ждём自检 0xAA 0x00
         uint8_t bat = ps2_read_data(); // 0xAA
         uint8_t id = ps2_read_data(); // 0x00
         (void)bat; (void)id;
-        serial_write_string("[MOUSE] reset ok\n");
+        klog(KLOG_OK, "psmouse: reset OK (BAT 0xAA)");
+    } else {
+        klogf(KLOG_WARN, "psmouse: reset ack=0x%x", ack);
     }
     // 4. Set defaults
     mouse_write(0xF6);
@@ -263,9 +265,9 @@ void ps2_mouse_init(void){
     if(ack2==0xFA){
         has_mouse=true;
         debug_state.enabled=true;
-        serial_write_string("[MOUSE] enabled, IRQ12 active\n");
+        klog(KLOG_OK, "psmouse: enabled, IRQ12 active");
     } else {
-        serial_write_string("[MOUSE] enable fail\n");
+        klogf(KLOG_ERROR, "psmouse: enable failed ack=0x%x", ack2);
     }
 
     // Размаскировать IRQ12 (и каскад IRQ2)
@@ -277,7 +279,7 @@ void ps2_mouse_init(void){
     m2 &= ~(1<<4); // IRQ12 -> slave bit4
     outb(0x21, m1);
     outb(0xA1, m2);
-    serial_write_string("[MOUSE] PIC unmasked 2+12\n");
+    klog(KLOG_DEBUG, "psmouse: PIC unmasked IRQ2+IRQ12");
 
     if(gop_is_available()){
         bound_w = gop_get_width();

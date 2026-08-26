@@ -1,5 +1,6 @@
 #include "gop.h"
 #include "vga.h"
+#include "../lib/string.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -96,6 +97,23 @@ bool gop_is_available(void){ return gop.available; }
 uint32_t gop_get_width(void){ return gop.width; }
 uint32_t gop_get_height(void){ return gop.height; }
 
+static void gop_scroll(void){
+    if(!gop.available || !gop.addr) return;
+    const uint32_t line_h = 10;
+    if(gop.height <= line_h) { gop_clear(bg); return; }
+    // сдвиг фреймбуфера вверх на line_h пиксельных строк (linux-like scroll)
+    for(uint32_t y=0; y + line_h < gop.height; y++){
+        // копируем целую строку (pitch пикселей)
+        memcpy(&gop.addr[y * gop.pitch], &gop.addr[(y + line_h) * gop.pitch], gop.pitch * sizeof(uint32_t));
+    }
+    // очищаем освободившиеся строки внизу
+    for(uint32_t y = gop.height - line_h; y < gop.height; y++){
+        for(uint32_t x=0; x < gop.pitch; x++) gop.addr[y * gop.pitch + x] = bg;
+    }
+    if(cur_y >= line_h) cur_y -= line_h;
+    else cur_y = 12;
+}
+
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
     if(!gop.available || !gop.addr) return;
     if(x>=gop.width || y>=gop.height) return;
@@ -127,10 +145,10 @@ static void draw_char(char c, uint32_t x, uint32_t y){
 
 void gop_putc(char c){
     if(!gop.available){ vga_putc(c); return; }
-    if(c=='\n'){ cur_x=12; cur_y+=10; return; }
+    if(c=='\n'){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); return; }
     if(c=='\r'){ cur_x=12; return; }
-    if(cur_x+8 >= gop.width){ cur_x=12; cur_y+=10; }
-    if(cur_y+8 >= gop.height){ gop_clear(bg); }
+    if(cur_x+8 >= gop.width){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); }
+    if(cur_y+8 >= gop.height) gop_scroll();
     draw_char(c,cur_x,cur_y); cur_x+=8;
 }
 void gop_write(const char *s){ while(*s) gop_putc(*s++); }
