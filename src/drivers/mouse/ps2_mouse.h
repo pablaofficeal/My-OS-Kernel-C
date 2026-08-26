@@ -11,6 +11,7 @@ struct mouse_state {
 
 struct mouse_debug_state {
     uint32_t irq_count;
+    uint32_t poll_count;
     uint32_t packet_count;
     uint8_t controller_status;
     uint8_t last_byte;
@@ -18,10 +19,12 @@ struct mouse_debug_state {
     uint8_t enable_ack;
     bool initialized;
     bool enabled;
+    bool interrupts_enabled;
 };
 
 void ps2_mouse_init(void);
 void ps2_mouse_handler(void); // вызывается из IRQ12
+void ps2_mouse_poll(void);
 void mouse_redraw(void);
 struct mouse_state mouse_get_state(void);
 struct mouse_debug_state mouse_get_debug_state(void);

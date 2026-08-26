@@ -16,7 +16,10 @@ static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t 
 
 static void idle_forever(void){
     __asm__ volatile("sti");
-    for(;;) __asm__ volatile("hlt");
+    for(;;){
+        ps2_mouse_poll();
+        __asm__ volatile("pause");
+    }
 }
 
 void kernel_main(struct limine_framebuffer *fb) {

@@ -58,6 +58,7 @@ static uint32_t cursor_color = 0xFFFFFF;
 static uint32_t cursor_border = 0x000000;
 
 static void draw_cursor(int32_t x,int32_t y);
+static void refresh_mouse_ui(void);
 
 static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
     char text[9];
@@ -70,18 +71,23 @@ static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
 static void draw_debug_overlay(void){
     if(!gop_is_available()) return;
     const uint32_t x=12, y=100, bg=0x313244;
-    gop_draw_rect(x, y, 300, 62, bg);
+    gop_draw_rect(x, y, 380, 84, bg);
     gop_draw_text_at(x+6, y+5, "MOUSE DEBUG", 0x89DCEB, bg);
-    gop_draw_text_at(x+6, y+17, "INIT EN IRQ PKT", 0xCDD6F4, bg);
+    gop_draw_text_at(x+6, y+17, "INIT EN IF MIM SIM", 0xCDD6F4, bg);
     draw_hex(x+6,   y+27, debug_state.initialized, 2);
     draw_hex(x+46,  y+27, debug_state.enabled, 2);
-    draw_hex(x+76,  y+27, debug_state.irq_count, 8);
-    draw_hex(x+156, y+27, debug_state.packet_count, 8);
-    gop_draw_text_at(x+6, y+39, "STAT BYTE POS", 0xCDD6F4, bg);
-    draw_hex(x+6,  y+49, debug_state.controller_status, 2);
-    draw_hex(x+46, y+49, debug_state.last_byte, 2);
-    draw_hex(x+86, y+49, (uint32_t)state.x, 4);
-    draw_hex(x+126,y+49, (uint32_t)state.y, 4);
+    draw_hex(x+76,  y+27, debug_state.interrupts_enabled, 2);
+    draw_hex(x+106, y+27, inb(0x21), 2);
+    draw_hex(x+146, y+27, inb(0xA1), 2);
+    gop_draw_text_at(x+6, y+39, "IRQ      POLL     PKT", 0xCDD6F4, bg);
+    draw_hex(x+6,   y+49, debug_state.irq_count, 8);
+    draw_hex(x+86,  y+49, debug_state.poll_count, 8);
+    draw_hex(x+166, y+49, debug_state.packet_count, 8);
+    gop_draw_text_at(x+6, y+61, "STAT BYTE X    Y", 0xCDD6F4, bg);
+    draw_hex(x+6,   y+71, debug_state.controller_status, 2);
+    draw_hex(x+46,  y+71, debug_state.last_byte, 2);
+    draw_hex(x+86,  y+71, (uint32_t)state.x, 4);
+    draw_hex(x+134, y+71, (uint32_t)state.y, 4);
 }
 
 static void save_bg(int32_t x,int32_t y){
@@ -100,6 +106,9 @@ struct mouse_state mouse_get_state(void){ return state; }
 struct mouse_debug_state mouse_get_debug_state(void){ return *(const struct mouse_debug_state *)&debug_state; }
 
 void mouse_redraw(void){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0":"=r"(flags));
+    debug_state.interrupts_enabled=(flags & (1ULL<<9)) != 0;
     first_draw=true;
     draw_debug_overlay();
     draw_cursor(state.x, state.y);
@@ -148,34 +157,19 @@ static void draw_cursor(int32_t x,int32_t y){
     old_x=x; old_y=y;
 }
 
-void ps2_mouse_handler(void){
-    uint8_t status = inb(PS2_STATUS);
-    debug_state.controller_status=status;
-    debug_state.irq_count++;
-    if(!(status & 1)) return;
-    // Проверяем что это от мыши (bit5 = mouse)
-    // На некоторых эмуляторах bit5 не ставится, читаем в любом случае
-    uint8_t data = inb(PS2_DATA);
+static bool process_mouse_byte(uint8_t data){
     debug_state.last_byte=data;
 
-    // Первый байт должен иметь bit3=1
     if(pkt_idx==0 && (data & 0x08)==0){
-        // Десинхрон, сбросим
-        // Не сбрасываем если это ACK 0xFA во время init
-        return;
+        return false;
     }
     packet[pkt_idx++] = data;
     if(pkt_idx==3){
-        // Декодируем как в Linux drivers/input/mouse/psmouse-base.c
         uint8_t b0 = packet[0];
         int8_t dx = (int8_t)packet[1];
         int8_t dy = (int8_t)packet[2];
-        // Обработка переполнения
-        if(b0 & 0x40) {} // X overflow
-        if(b0 & 0x80) {} // Y overflow
-        // Движение
         state.dx = dx;
-        state.dy = -dy; // Y инвертируем (мышь даёт - при движении вверх)
+        state.dy = -dy;
         state.x += dx;
         state.y += -dy;
         if(state.x<0) state.x=0;
@@ -188,16 +182,44 @@ void ps2_mouse_handler(void){
 
         if(!packet_seen){
             packet_seen=true;
-            serial_write_string("[MOUSE] IRQ12 packets active\n");
+            serial_write_string("[MOUSE] PS/2 packets active\n");
         }
 
         pkt_idx=0;
-        draw_debug_overlay();
-        draw_cursor(state.x, state.y);
-        return;
+        return true;
     }
+    return false;
+}
+
+static void refresh_mouse_ui(void){
+    if(gop_is_available() && !first_draw) restore_bg(old_x, old_y);
+    first_draw=true;
     draw_debug_overlay();
-    // EOI уже в isr_handler, но для IRQ12 нужно ещё pic_eoi
+    draw_cursor(state.x, state.y);
+}
+
+void ps2_mouse_handler(void){
+    uint8_t status = inb(PS2_STATUS);
+    debug_state.controller_status=status;
+    debug_state.irq_count++;
+    if(status & 1){
+        process_mouse_byte(inb(PS2_DATA));
+    }
+    refresh_mouse_ui();
+}
+
+void ps2_mouse_poll(void){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
+    debug_state.interrupts_enabled=(flags & (1ULL<<9)) != 0;
+    uint8_t status=inb(PS2_STATUS);
+    debug_state.controller_status=status;
+    if(status & 1){
+        debug_state.poll_count++;
+        process_mouse_byte(inb(PS2_DATA));
+        refresh_mouse_ui();
+    }
+    if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
 
 void ps2_mouse_init(void){
