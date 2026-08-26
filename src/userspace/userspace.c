@@ -64,7 +64,7 @@ static void draw_window_chrome(void){
     gop_draw_rect(win_x+1, win_y+1, win_w-2, win_h-2, WINDOW_BG);
     // title bar
     gop_draw_rect(win_x+1, win_y+1, win_w-2, TITLE_H, TITLE_BG);
-    gop_draw_text_at(win_x+12, win_y+8, "Terminal — purec@os", TITLE_FG, TITLE_BG);
+    gop_draw_text_at(win_x+12, win_y+8, "Terminal - purec@os", TITLE_FG, TITLE_BG);
     // кнопки окна (декор)
     gop_draw_rect(win_x+win_w-52, win_y+7, 16, 16, 0xF38BA8); // close red
     gop_draw_rect(win_x+win_w-32, win_y+7, 16, 16, 0xF9E2AF); // min yellow

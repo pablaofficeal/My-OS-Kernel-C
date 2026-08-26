@@ -1,5 +1,6 @@
 #include "keyboard.h"
 #include "../kernel/klog.h"
+#include "../drivers/serial.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -55,6 +56,8 @@ static bool kbd_pop(char *out){
 }
 
 static void handle_scancode(uint8_t sc){
+    // debug: log scancode to serial for QMP sendkey debugging
+    // serial_write_string("[KBD] sc=0x"); // too noisy, only for first few
     if(sc == 0x2A || sc == 0x36){ // LSHIFT / RSHIFT press
         shift_pressed = true;
         return;
@@ -73,9 +76,7 @@ static void handle_scancode(uint8_t sc){
     }
     if(sc >= 128) return;
     char c = 0;
-    bool upper = shift_pressed ^ caps_lock; // caps ^ shift for letters, but for now simple
-    // для букв учитывать shift/caps, для символов - только shift
-    // упростим: если буква, то upper определяет регистр, иначе shift
+    bool upper = shift_pressed ^ caps_lock;
     char base = scancode_map[sc];
     if(base >= 'a' && base <= 'z'){
         c = upper ? scancode_shift_map[sc] : base;
@@ -85,6 +86,9 @@ static void handle_scancode(uint8_t sc){
     }
     if(c){
         kbd_push(c);
+        // debug serial for userspace shell
+        serial_putc(c);
+        serial_putc(' ');
     }
 }
 
@@ -115,16 +119,19 @@ char keyboard_getc(void){
 }
 
 void keyboard_init(void){
-    // 8042 уже настроен в ps2_mouse_init, но убедимся что клавиатура включена
-    // Включаем клавиатуру: команда 0xAE (enable first PS/2 port)
-    // Но так как мы уже трогали 8042 для мыши, просто сбросим и очистим буфер
+    // включаем клавиатуру через 8042 (как в Linux atkbd)
+    // 0xAE = enable first PS/2 port (keyboard)
+    __asm__ volatile("cli");
+    outb(KBD_CMD, 0xAE);
+    io_wait();
     while(inb(KBD_STATUS) & 1) inb(KBD_DATA);
-    // Включаем сканирование (необязательно, по дефолту включено)
-    // Убедимся что IRQ1 размаскирован? Для polling не нужно, но для будущего IRQ - размаскируем
+    // оставляем IRQ1 замаскированным для polling (чтобы не триггерить vector 33 без handler)
     uint8_t mask = inb(0x21);
-    mask &= ~(1<<1); // unmask IRQ1
+    mask |= (1<<1);
     outb(0x21, mask);
+    __asm__ volatile("sti");
     klog(KLOG_INFO, "keyboard: PS/2 polling ready (US layout)");
+    serial_write_string("[KBD] init done, polling mode\n");
 }
 
 void keyboard_set_leds(bool caps, bool num, bool scroll){
