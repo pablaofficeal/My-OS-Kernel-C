@@ -7,7 +7,7 @@ global isr_stub_8
 global isr_stub_13
 global isr_stub_14
 global isr_stub_32
-global isr_stub_80
+global isr_stub_128
 
 extern isr_handler
 
@@ -34,7 +34,7 @@ ISR_ERR   8
 ISR_ERR   13
 ISR_ERR   14
 ISR_NOERR 32
-ISR_NOERR 0x80
+ISR_NOERR 128
 
 isr_common:
     push rax

@@ -28,7 +28,7 @@ extern void isr_stub_8(void);
 extern void isr_stub_13(void);
 extern void isr_stub_14(void);
 extern void isr_stub_32(void);
-extern void isr_stub_80(void);
+extern void isr_stub_128(void);
 extern void idt_load(uint64_t);
 
 void idt_set_gate(int n, uint64_t handler, uint8_t flags) {
@@ -104,7 +104,7 @@ void idt_init(void) {
     idt_set_gate(13, (uint64_t)isr_stub_13, 0x8E);
     idt_set_gate(14, (uint64_t)isr_stub_14, 0x8E);
     idt_set_gate(32, (uint64_t)isr_stub_32, 0x8E);
-    idt_set_gate(0x80, (uint64_t)isr_stub_80, 0xEE); // DPL3 для syscalls
+    idt_set_gate(0x80, (uint64_t)isr_stub_128, 0xEE); // DPL3 для syscalls
     idtp.limit = sizeof(idt)-1;
     idtp.base  = (uint64_t)&idt;
     idt_load((uint64_t)&idtp);
