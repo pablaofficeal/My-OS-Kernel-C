@@ -4,6 +4,7 @@
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../kernel/klog.h"
+#include "../../kernel/syscall.h"
 #include "../../kernel/system_info.h"
 #include "../../lib/string.h"
 #include "../games/snake.h"
@@ -18,6 +19,18 @@ static inline uint8_t inb(uint16_t port){
 
 static inline void outb(uint16_t port, uint8_t value){
     __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
+}
+
+static int64_t invoke_syscall(uint64_t number, uint64_t argument1,
+                              uint64_t argument2, uint64_t argument3){
+    int64_t result;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a"(result)
+        : "a"(number),"b"(argument1),"c"(argument2),"d"(argument3)
+        : "r10","r8","memory"
+    );
+    return result;
 }
 
 static bool is_space(char c){ return c==' ' || c=='\t'; }
@@ -94,11 +107,44 @@ static void configure_font(const char *arguments){
     terminal_printf("Font face changed to %s for this session.\n",terminal_get_font_face());
 }
 
+static void show_file(const char *path){
+    if(!path[0]){
+        terminal_write("cat: missing file path\n");
+        return;
+    }
+
+    int64_t descriptor=invoke_syscall(SYS_FILE_OPEN,(uint64_t)path,0,0);
+    if(descriptor<0){
+        terminal_printf("cat: cannot open file (error %d)\n",(int)descriptor);
+        return;
+    }
+
+    char buffer[256];
+    bool wrote_data=false;
+    char last_character='\0';
+    for(;;){
+        int64_t count=invoke_syscall(SYS_FILE_READ,(uint64_t)descriptor,
+                                     (uint64_t)buffer,sizeof(buffer));
+        if(count<0){
+            terminal_printf("cat: read failed (error %d)\n",(int)count);
+            return;
+        }
+        if(count==0) break;
+        for(int64_t index=0;index<count;index++){
+            terminal_putc(buffer[index]);
+            last_character=buffer[index];
+        }
+        wrote_data=true;
+    }
+    if(wrote_data && last_character!='\n') terminal_putc('\n');
+}
+
 static void show_help(void){
     terminal_write("Commands:\n");
     terminal_write("  help              show this command list\n");
     terminal_write("  clear | cls       clear terminal output\n");
     terminal_write("  echo <text>       print text\n");
+    terminal_write("  cat <file>        read a FAT32 file through syscalls\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -146,6 +192,8 @@ void commands_execute(const char *line){
     } else if(strcmp(command,"echo")==0){
         terminal_write(arguments);
         terminal_putc('\n');
+    } else if(strcmp(command,"cat")==0){
+        show_file(arguments);
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);

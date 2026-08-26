@@ -4,6 +4,7 @@
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../fs/fat32.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -57,6 +58,18 @@ int64_t syscall_handler(struct syscall_regs *r){
             *out = mouse_get_state();
             return 0;
         }
+        case SYS_FILE_OPEN:
+            return fat32_open((const char*)(uintptr_t)a1);
+        case SYS_FILE_READ:
+            return fat32_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_FILE_DELETE:
+            return fat32_delete((const char*)(uintptr_t)a1);
+        case SYS_FILE_RENAME:
+            return fat32_rename((const char*)(uintptr_t)a1,
+                                (const char*)(uintptr_t)a2);
+        case SYS_FILE_MOVE:
+            return fat32_move((const char*)(uintptr_t)a1,
+                              (const char*)(uintptr_t)a2);
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");
@@ -71,9 +84,18 @@ int64_t syscall_handler(struct syscall_regs *r){
 }
 
 void syscall_init(void){
+    static bool filesystem_checked;
     // IDT 0x80 уже настроен в idt_init с DPL3 (0xEE)
     // используем klog если уже инициализирован, иначе fallback на serial
     // klog_inited проверяется через verbose флаг (если false после init, всё равно работает)
     // просто пишем DEBUG чтобы не спамить primary screen дважды (boot.c уже логирует)
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
+    if(!filesystem_checked){
+        filesystem_checked=true;
+        if(fat32_init()){
+            klogf(KLOG_OK,"fat32: mounted from ATA %s",fat32_device_name());
+        } else {
+            klog(KLOG_WARN,"fat32: no supported ATA FAT32 volume found");
+        }
+    }
 }
