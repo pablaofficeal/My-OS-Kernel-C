@@ -75,7 +75,7 @@ static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
 static void draw_debug_overlay(void){
     if(!debug_overlay_enabled) return;
     if(!gop_is_available()) return;
-    const uint32_t x=12, y=100, bg=0x313244;
+    const uint32_t x=12, y=38, bg=0x313244;
     gop_draw_rect(x, y, 380, 84, bg);
     gop_draw_text_at(x+6, y+5, "MOUSE DEBUG", 0x89DCEB, bg);
     gop_draw_text_at(x+6, y+17, "INIT EN IF MIM SIM", 0xCDD6F4, bg);
@@ -110,7 +110,12 @@ void mouse_set_bounds(int32_t w,int32_t h){ bound_w=w; bound_h=h; if(state.x>=w)
 struct mouse_state mouse_get_state(void){ return state; }
 struct mouse_debug_state mouse_get_debug_state(void){ return *(const struct mouse_debug_state *)&debug_state; }
 
-void mouse_set_debug_overlay(bool enabled){ debug_overlay_enabled = enabled; }
+void mouse_set_debug_overlay(bool enabled){
+    if(enabled==debug_overlay_enabled) return;
+    if(gop_is_available() && !first_draw) restore_bg(old_x,old_y);
+    debug_overlay_enabled=enabled;
+    first_draw=true;
+}
 bool mouse_get_debug_overlay(void){ return debug_overlay_enabled; }
 
 void mouse_redraw(void){
