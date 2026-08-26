@@ -12,6 +12,8 @@ void terminal_clear(void);
 void terminal_prompt(void);
 bool terminal_set_font_size(uint32_t size);
 uint32_t terminal_get_font_size(void);
+bool terminal_set_font_face(const char *name);
+const char *terminal_get_font_face(void);
 
 uint32_t terminal_get_window_width(void);
 uint32_t terminal_get_window_height(void);

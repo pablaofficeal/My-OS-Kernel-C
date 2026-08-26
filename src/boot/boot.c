@@ -80,7 +80,8 @@ void _start(void) {
     klog(KLOG_OK, "Limine boot: 64-bit long mode, paging enabled");
     klogf(KLOG_INFO, "HHDM offset: 0x%llx", hhdm_request.response ? hhdm_request.response->offset : 0);
     if(gop_is_available()){
-        klogf(KLOG_OK, "GOP initialized: %dx%d bpp=%d", fb_ptr->width, fb_ptr->height, fb_ptr->bpp);
+        klogf(KLOG_OK, "%s initialized: %dx%d bpp=%d",
+              gop_get_protocol_name(),fb_ptr->width,fb_ptr->height,fb_ptr->bpp);
     } else {
         klog(KLOG_WARN, "GOP unavailable, fallback to VGA text 80x25");
     }

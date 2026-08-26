@@ -1,6 +1,7 @@
 #include "commands.h"
 #include "terminal.h"
 #include "../userspace.h"
+#include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/system_info.h"
@@ -36,9 +37,15 @@ static void split_command(const char *line, char *command, uint32_t capacity,
 
 static void show_systeminfo(void){
     uint64_t ram_mb=system_info_usable_ram_bytes()/(1024*1024);
+    uint64_t framebuffer_kib=gop_get_framebuffer_size_bytes()/1024;
     terminal_write("=== System Information ===\n");
     terminal_printf("Processor:  %s\n",system_info_cpu_name());
     terminal_printf("Usable RAM: %lu MB\n",ram_mb);
+    terminal_printf("Graphics:   %s\n",gop_get_protocol_name());
+    terminal_printf("Video mode: %ux%u, %u bpp\n",
+                    gop_get_width(),gop_get_height(),(unsigned int)gop_get_bpp());
+    terminal_printf("Framebuffer memory: %lu KiB (mapped)\n",framebuffer_kib);
+    terminal_write("Total VRAM: not exposed by boot protocol\n");
     terminal_write("==========================\n");
 }
 
@@ -60,17 +67,28 @@ static bool parse_font_size(const char *text, uint32_t *size){
 
 static void configure_font(const char *arguments){
     if(!arguments[0]){
-        terminal_printf("Font size: %u px (available: 8-16)\n",terminal_get_font_size());
-        terminal_write("Use: font <size>\n");
+        terminal_printf("Font: %s, %u px\n",
+                        terminal_get_font_face(),terminal_get_font_size());
+        terminal_write("Faces: classic, thin, bold\n");
+        terminal_write("Use: font <8-16|face>\n");
         return;
     }
 
-    uint32_t size;
-    if(!parse_font_size(arguments,&size) || !terminal_set_font_size(size)){
-        terminal_write("font: size must be between 8 and 16\n");
+    if(arguments[0]>='0' && arguments[0]<='9'){
+        uint32_t size;
+        if(!parse_font_size(arguments,&size) || !terminal_set_font_size(size)){
+            terminal_write("font: size must be between 8 and 16\n");
+            return;
+        }
+        terminal_printf("Font size changed to %u px for this session.\n",size);
         return;
     }
-    terminal_printf("Terminal font changed to %u px for this session.\n",size);
+
+    if(!terminal_set_font_face(arguments)){
+        terminal_write("font: available faces are classic, thin and bold\n");
+        return;
+    }
+    terminal_printf("Font face changed to %s for this session.\n",terminal_get_font_face());
 }
 
 static void show_help(void){
@@ -82,7 +100,7 @@ static void show_help(void){
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
     terminal_write("  systeminfo        show detailed CPU and RAM info\n");
-    terminal_write("  font [8-16]       show or change session font size\n");
+    terminal_write("  font [SIZE|FACE]  change session font\n");
     terminal_write("  snake             start the Snake game\n");
     terminal_write("  mouse             show PS/2 mouse state\n");
     terminal_write("  debug [on|off]    control mouse debug panel\n");
@@ -134,8 +152,9 @@ void commands_execute(const char *line){
     } else if(strcmp(command,"about")==0){
         terminal_printf("PureC userspace 0.2.0, framebuffer %ux%u\n",
                         userspace_get_width(),userspace_get_height());
-        terminal_printf("Terminal module: %ux%u window, %ux%u glyphs\n",
+        terminal_printf("Terminal module: %ux%u window, %s %ux%u glyphs\n",
                         terminal_get_window_width(),terminal_get_window_height(),
+                        terminal_get_font_face(),
                         terminal_get_font_size(),terminal_get_font_size());
     } else if(strcmp(command,"systeminfo")==0){
         show_systeminfo();

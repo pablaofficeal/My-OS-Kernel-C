@@ -81,7 +81,7 @@ void gop_init_from_multiboot(void *mbi){
         uint32_t type = *(uint32_t*)tag;
         uint32_t size = *(uint32_t*)(tag+4);
         if(size < 8 || tag + size > end) break;
-        if(type==8 && size>=20){
+        if(type==8 && size>=32){
             uint64_t addr = *(uint64_t*)(tag+8);
             uint32_t pitch = *(uint32_t*)(tag+16);
             uint32_t w = *(uint32_t*)(tag+20);

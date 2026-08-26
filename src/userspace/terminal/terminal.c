@@ -1,6 +1,7 @@
 #include "terminal.h"
 #include "commands.h"
 #include "../../drivers/gop.h"
+#include "../../lib/string.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -227,6 +228,27 @@ bool terminal_set_font_size(uint32_t size){
 }
 
 uint32_t terminal_get_font_size(void){ return glyph_size; }
+
+bool terminal_set_font_face(const char *name){
+    if(!name) return false;
+    enum gop_font_face face;
+    if(strcmp(name,"classic")==0) face=GOP_FONT_CLASSIC;
+    else if(strcmp(name,"thin")==0) face=GOP_FONT_THIN;
+    else if(strcmp(name,"bold")==0) face=GOP_FONT_BOLD;
+    else return false;
+
+    gop_set_font_face(face);
+    input_length=0;
+    draw_window();
+    return true;
+}
+
+const char *terminal_get_font_face(void){
+    enum gop_font_face face=gop_get_font_face();
+    if(face==GOP_FONT_THIN) return "thin";
+    if(face==GOP_FONT_BOLD) return "bold";
+    return "classic";
+}
 
 uint32_t terminal_get_window_width(void){ return window_w; }
 uint32_t terminal_get_window_height(void){ return window_h; }
