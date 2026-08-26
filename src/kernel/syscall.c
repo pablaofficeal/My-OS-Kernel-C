@@ -4,6 +4,7 @@
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/storage/block_device.h"
 #include "../fs/fat32.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -78,6 +79,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return fat32_create_file((const char*)(uintptr_t)a1);
         case SYS_DIR_CREATE:
             return fat32_create_directory((const char*)(uintptr_t)a1);
+        case SYS_DISK_LIST:
+            return block_device_list((struct storage_device_info*)(uintptr_t)a1,
+                                     (uint32_t)a2);
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");
@@ -100,10 +104,11 @@ void syscall_init(void){
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
     if(!filesystem_checked){
         filesystem_checked=true;
+        klogf(KLOG_INFO,"ata: %u disk(s) detected",block_device_count());
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from ATA %s",fat32_device_name());
         } else {
-            klog(KLOG_WARN,"fat32: no supported ATA FAT32 volume found");
+            klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found");
         }
     }
 }

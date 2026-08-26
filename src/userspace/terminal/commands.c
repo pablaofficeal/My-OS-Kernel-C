@@ -3,6 +3,7 @@
 #include "../userspace.h"
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
+#include "../../drivers/storage/storage_types.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"
@@ -178,6 +179,35 @@ static void create_path(const char *command, const char *path,
     terminal_printf("%s: created %s\n",command,path);
 }
 
+static void show_disks(void){
+    struct storage_device_info devices[4];
+    int64_t count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,4,0);
+    if(count<0){
+        terminal_write("disks: device enumeration failed\n");
+        return;
+    }
+    if(count==0){
+        terminal_write("No ATA disks detected.\n");
+        return;
+    }
+
+    terminal_write("Detected ATA disks:\n");
+    for(int64_t index=0;index<count;index++){
+        uint64_t size_mib=devices[index].sector_count/2048;
+        const char *channel=devices[index].channel ? "secondary" : "primary";
+        const char *drive=devices[index].drive ? "slave" : "master";
+        terminal_printf("%s  %lu MiB  %s%s\n",devices[index].name,size_mib,
+                        devices[index].writable ? "rw" : "ro",
+                        devices[index].selected ? "  [active]" : "");
+        terminal_printf("  bus: %s %s\n",channel,drive);
+        terminal_printf("  model: %s\n",
+                        devices[index].model[0] ? devices[index].model : "ATA disk");
+        if(devices[index].serial[0]){
+            terminal_printf("  serial: %s\n",devices[index].serial);
+        }
+    }
+}
+
 static void show_help(void){
     terminal_write("Commands:\n");
     terminal_write("  help              show this command list\n");
@@ -187,6 +217,7 @@ static void show_help(void){
     terminal_write("  ls [directory]    list a FAT32 directory\n");
     terminal_write("  touch <file>      create an empty FAT32 file\n");
     terminal_write("  mkdir <directory> create a FAT32 directory\n");
+    terminal_write("  disks             list detected ATA disks\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -242,6 +273,8 @@ void commands_execute(const char *line){
         create_path("touch",arguments,SYS_FILE_CREATE);
     } else if(strcmp(command,"mkdir")==0){
         create_path("mkdir",arguments,SYS_DIR_CREATE);
+    } else if(strcmp(command,"disks")==0){
+        show_disks();
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);

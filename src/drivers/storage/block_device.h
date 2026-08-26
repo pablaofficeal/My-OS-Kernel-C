@@ -2,10 +2,14 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "storage_types.h"
 
 #define BLOCK_SECTOR_SIZE 512
 
 bool block_device_init(void);
+uint32_t block_device_count(void);
+int32_t block_device_list(struct storage_device_info *devices, uint32_t capacity);
+bool block_device_select(uint32_t index);
 bool block_device_read(uint32_t lba, void *buffer);
 bool block_device_write(uint32_t lba, const void *buffer);
 const char *block_device_name(void);

@@ -15,6 +15,10 @@
 #define FAT32_DESCRIPTOR_BASE     3
 #define FAT32_MAX_COMPONENT       12
 
+static const uint8_t required_volume_label[11]={
+    'P','U','R','E','C','O','S',' ',' ',' ',' '
+};
+
 struct fat32_volume {
     uint32_t partition_lba;
     uint32_t fat_lba;
@@ -402,6 +406,7 @@ static int32_t clear_cluster_chain(uint32_t first_cluster){
 static bool mount_boot_sector(uint32_t partition_lba){
     if(!block_device_read(partition_lba,sector_buffer)) return false;
     if(sector_buffer[510]!=0x55 || sector_buffer[511]!=0xAA) return false;
+    if(memcmp(&sector_buffer[71],required_volume_label,11)!=0) return false;
 
     uint16_t bytes_per_sector=read_u16(&sector_buffer[11]);
     uint8_t sectors_per_cluster=sector_buffer[13];
@@ -446,22 +451,27 @@ static bool mount_boot_sector(uint32_t partition_lba){
 bool fat32_init(void){
     if(volume.mounted) return true;
     if(!block_device_init()) return false;
-    if(!block_device_read(0,sector_buffer)) return false;
 
-    uint32_t partition_lbas[4];
-    uint8_t partition_count=0;
-    for(uint8_t index=0;index<4;index++){
-        uint16_t offset=(uint16_t)(446+index*16);
-        uint8_t type=sector_buffer[offset+4];
-        if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
-            uint32_t lba=read_u32(&sector_buffer[offset+8]);
-            if(lba) partition_lbas[partition_count++]=lba;
+    uint32_t disk_count=block_device_count();
+    for(uint32_t disk=0;disk<disk_count;disk++){
+        if(!block_device_select(disk) || !block_device_read(0,sector_buffer)) continue;
+
+        uint32_t partition_lbas[4];
+        uint8_t partition_count=0;
+        for(uint8_t index=0;index<4;index++){
+            uint16_t offset=(uint16_t)(446+index*16);
+            uint8_t type=sector_buffer[offset+4];
+            if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
+                uint32_t lba=read_u32(&sector_buffer[offset+8]);
+                if(lba) partition_lbas[partition_count++]=lba;
+            }
         }
+        for(uint8_t index=0;index<partition_count;index++){
+            if(mount_boot_sector(partition_lbas[index])) return true;
+        }
+        if(mount_boot_sector(0)) return true;
     }
-    for(uint8_t index=0;index<partition_count;index++){
-        if(mount_boot_sector(partition_lbas[index])) return true;
-    }
-    return mount_boot_sector(0);
+    return false;
 }
 
 bool fat32_is_mounted(void){ return volume.mounted; }
