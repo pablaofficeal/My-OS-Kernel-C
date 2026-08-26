@@ -8,6 +8,7 @@
 #define SYS_EXIT    60
 #define SYS_DRAW_RECT 100
 #define SYS_DRAW_LINE 101
+#define SYS_GET_MOUSE 102
 
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;

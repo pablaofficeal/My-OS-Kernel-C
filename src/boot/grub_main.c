@@ -2,6 +2,7 @@
 #include "../drivers/vga.h"
 #include "../drivers/gop.h"
 #include "../drivers/pic.h"
+#include "../drivers/mouse/ps2_mouse.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -56,6 +57,11 @@ void kernel_main_grub(uint32_t magic, uint32_t *mbi) {
     serial_write_string("[IDT] loaded\n");
     vga_write("[IDT] OK\n");
 
+    // Мышь как в Linux: psmouse + evdev (упрощённо)
+    ps2_mouse_init();
+    if(gop_is_available()) gop_write("[MOUSE] PS/2 ready\n");
+    vga_write("[MOUSE] ready\n");
+
     __asm__ volatile("sti");
     serial_write_string("[INT] sti\n");
     vga_write("[INT] sti\n");
@@ -97,6 +103,23 @@ void kernel_main_grub(uint32_t magic, uint32_t *mbi) {
         serial_write_string("[SYSCALL] DRAW_RECT done\n");
         vga_write("DRAW_RECT done\n");
         if(gop_is_available()) gop_write("DRAW_RECT done\n");
+    }
+
+    // Тест мыши как в Linux: evdev -> read /dev/input/mice ~ syscall GET_MOUSE
+    serial_write_string("[TEST] mouse via syscall GET_MOUSE (move mouse now)\n");
+    vga_write("Move mouse...\n");
+    if(gop_is_available()) gop_write("Move mouse to see cursor via GOP\n");
+    for(int i=0;i<3;i++){
+        struct mouse_state ms;
+        do_syscall(SYS_GET_MOUSE, (uint64_t)&ms,0,0,0,0);
+        // print via serial
+        serial_write_string("[MOUSE] x="); 
+        // simple decimal print
+        char tmp[12]; int t=0; int32_t v=ms.x; if(v==0) serial_putc('0'); else { char b[12]; int n=0; while(v){b[n++]= '0'+v%10; v/=10;} while(n--) serial_putc(b[n]);}
+        serial_write_string(" y="); v=ms.y; if(v==0) serial_putc('0'); else { char b[12]; int n=0; while(v){b[n++]= '0'+v%10; v/=10;} while(n--) serial_putc(b[n]);}
+        serial_write_string(" btn="); serial_putc('0'+ms.buttons); serial_write_string("\n");
+        // sleep ~500ms
+        for(volatile int k=0;k<5000000;k++) __asm__ volatile("nop");
     }
 
     // halt

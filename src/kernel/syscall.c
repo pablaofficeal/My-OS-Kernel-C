@@ -2,6 +2,7 @@
 #include "../drivers/serial.h"
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
+#include "../drivers/mouse/ps2_mouse.h"
 #include <stdint.h>
 
 static void print_hex(uint64_t v){
@@ -48,6 +49,12 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_GETPID:
             return 42;
+        case SYS_GET_MOUSE: {
+            struct mouse_state *out = (struct mouse_state*)(uintptr_t)a1;
+            if(!out) return -1;
+            *out = mouse_get_state();
+            return 0;
+        }
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");

@@ -17,13 +17,14 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/pic.c -o pic.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/fb.c -o fb.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/gop.c -o gop.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/mouse/ps2_mouse.c -o ps2_mouse.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/lib/string.c -o string.o
 nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm.o
 nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm.o
 nasm -f elf64 src/boot/multiboot_header.asm -o multiboot.o
 
 echo "🔗 Linking (ENTRY=_start, hybrid Limine+Multiboot2 @0x100000)..."
-x86_64-elf-ld -T linker.ld -o kernel.elf boot.o multiboot.o grub_main.o kernel.o gdt.o idt.o syscall.o serial.o vga.o pic.o fb.o gop.o string.o gdt_asm.o idt_asm.o
+x86_64-elf-ld -T linker.ld -o kernel.elf boot.o multiboot.o grub_main.o kernel.o gdt.o idt.o syscall.o serial.o vga.o pic.o fb.o gop.o ps2_mouse.o string.o gdt_asm.o idt_asm.o
 echo "✅ kernel.elf: $(file kernel.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel.elf | head -n12
 

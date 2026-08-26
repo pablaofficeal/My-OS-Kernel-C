@@ -86,6 +86,8 @@ void gop_init_from_multiboot(void *mbi){
 }
 
 bool gop_is_available(void){ return gop.available; }
+uint32_t gop_get_width(void){ return gop.width; }
+uint32_t gop_get_height(void){ return gop.height; }
 
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
     if(!gop.available || !gop.addr) return;

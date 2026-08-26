@@ -6,6 +6,7 @@
 #include "../drivers/fb.h"
 #include "../drivers/serial.h"
 #include "../drivers/pic.h"
+#include "../drivers/mouse/ps2_mouse.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -72,6 +73,9 @@ void _start(void) {
     idt_init();
     syscall_init();
     serial_write_string("[IDT] loaded\n");
+
+    ps2_mouse_init();
+    serial_write_string("[MOUSE] PS/2 ready\n");
 
     __asm__ volatile("sti");
     serial_write_string("[INT] sti enabled\n");

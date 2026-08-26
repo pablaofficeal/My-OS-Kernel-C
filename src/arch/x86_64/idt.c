@@ -28,6 +28,7 @@ extern void isr_stub_8(void);
 extern void isr_stub_13(void);
 extern void isr_stub_14(void);
 extern void isr_stub_32(void);
+extern void isr_stub_44(void);
 extern void isr_stub_128(void);
 extern void idt_load(uint64_t);
 
@@ -56,19 +57,34 @@ struct isr_regs {
     uint64_t rip, cs, rflags;
 };
 
+static inline void pic_eoi(uint8_t irq){
+    if(irq>=8) __asm__ volatile("outb %0,%1"::"a"((uint8_t)0x20),"Nd"((uint16_t)0xA0));
+    __asm__ volatile("outb %0,%1"::"a"((uint8_t)0x20),"Nd"((uint16_t)0x20));
+}
+extern void ps2_mouse_handler(void);
+
 void isr_handler(uint64_t vector, uint64_t err, uint64_t rip, uint64_t cs, uint64_t rflags, struct isr_regs *regs) {
     if (vector == 0x80) {
-        // syscall via int 0x80: rax=n, rbx, rcx, rdx, rsi, rdi
-        // regs уже содержит сохраненные регистры, вызовем syscall_handler
-        // Переиспользуем struct syscall_regs layout (совпадает)
         int64_t ret = syscall_handler((struct syscall_regs*)regs);
         regs->rax = (uint64_t)ret;
+        return;
+    }
+    if (vector == 44) { // IRQ12 mouse
+        ps2_mouse_handler();
+        pic_eoi(12);
+        return;
+    }
+    if (vector == 32) { // IRQ0 timer
+        pic_eoi(0);
+        return;
+    }
+    if (vector >= 32 && vector < 48) { // другие IRQ
+        pic_eoi(vector-32);
         return;
     }
     if (vector == 3) {
         serial_write_string("[IDT] #BP (int3) caught, vector=3 rip=");
         print_hex(rip); serial_write_string(" cs="); print_hex(cs); serial_write_string(" rflags="); print_hex(rflags); serial_write_string("\n");
-        // fb_write_string("[IDT] #BP handled\n");
         return;
     }
     serial_write_string("[IDT] exception vector=");

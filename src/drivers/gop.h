@@ -15,6 +15,8 @@ struct gop_state {
 void gop_init_from_limine(struct limine_framebuffer *fb);
 void gop_init_from_multiboot(void *mbi); // парсит multiboot2 info
 bool gop_is_available(void);
+uint32_t gop_get_width(void);
+uint32_t gop_get_height(void);
 void gop_clear(uint32_t color);
 void gop_set_color(uint32_t fg, uint32_t bg);
 void gop_putc(char c);
