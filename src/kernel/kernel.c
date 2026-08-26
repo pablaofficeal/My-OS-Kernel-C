@@ -2,6 +2,7 @@
 #include "../drivers/gop.h"
 #include "../drivers/serial.h"
 #include "../drivers/vga.h"
+#include "../drivers/mouse/ps2_mouse.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -46,6 +47,10 @@ void kernel_main(struct limine_framebuffer *fb) {
     // Правильно: x=50,y=50,w=300,h=80,color=0x00FF00
     __asm__ volatile("mov $100, %%rbx; mov $50, %%rcx; mov $300, %%rdx; mov $80, %%rsi; mov $0x00FF00, %%rdi; mov $100, %%rax; int $0x80" ::: "rax","rbx","rcx","rdx","rsi","rdi","r10","r8","memory");
     if(gop_is_available()) gop_write("DRAW_RECT via syscall done\n");
+
+    // kernel_main очищает framebuffer после инициализации PS/2.
+    // Восстанавливаем курсор и его диагностику поверх готового интерфейса.
+    mouse_redraw();
 
     serial_write_string("[KERNEL] halt\n");
     halt_forever();

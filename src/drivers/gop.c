@@ -102,6 +102,13 @@ static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
     gop.addr[y*gop.pitch + x]=c;
 }
 
+uint32_t gop_get_pixel(uint32_t x, uint32_t y){
+    if(!gop.available || !gop.addr || x>=gop.width || y>=gop.height) return 0;
+    return gop.addr[y*gop.pitch + x];
+}
+
+void gop_put_pixel(uint32_t x, uint32_t y, uint32_t color){ put_pixel(x, y, color); }
+
 void gop_clear(uint32_t color){
     if(!gop.available){ vga_clear(); return; }
     for(uint32_t y=0;y<gop.height;y++) for(uint32_t x=0;x<gop.width;x++) gop.addr[y*gop.pitch+x]=color;
@@ -128,6 +135,17 @@ void gop_putc(char c){
 }
 void gop_write(const char *s){ while(*s) gop_putc(*s++); }
 void gop_write_hex(uint64_t v){ const char*h="0123456789ABCDEF"; gop_write("0x"); for(int i=60;i>=0;i-=4) gop_putc(h[(v>>i)&0xF]); }
+void gop_draw_text_at(uint32_t x, uint32_t y, const char *text, uint32_t text_fg, uint32_t text_bg){
+    if(!gop.available) return;
+    uint32_t saved_fg=fg, saved_bg=bg;
+    fg=text_fg; bg=text_bg;
+    while(*text){
+        if(*text=='\n'){ x=12; y+=10; }
+        else { draw_char(*text, x, y); x+=8; }
+        text++;
+    }
+    fg=saved_fg; bg=saved_bg;
+}
 void gop_draw_rect(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t c){
     for(uint32_t dy=0;dy<h;dy++) for(uint32_t dx=0;dx<w;dx++) put_pixel(x+dx,y+dy,c);
 }

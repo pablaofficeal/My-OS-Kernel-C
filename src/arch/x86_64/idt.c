@@ -120,6 +120,7 @@ void idt_init(void) {
     idt_set_gate(13, (uint64_t)isr_stub_13, 0x8E);
     idt_set_gate(14, (uint64_t)isr_stub_14, 0x8E);
     idt_set_gate(32, (uint64_t)isr_stub_32, 0x8E);
+    idt_set_gate(44, (uint64_t)isr_stub_44, 0x8E);
     idt_set_gate(0x80, (uint64_t)isr_stub_128, 0xEE); // DPL3 для syscalls
     idtp.limit = sizeof(idt)-1;
     idtp.base  = (uint64_t)&idt;

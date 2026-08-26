@@ -9,7 +9,20 @@ struct mouse_state {
     bool has_data;
 };
 
+struct mouse_debug_state {
+    uint32_t irq_count;
+    uint32_t packet_count;
+    uint8_t controller_status;
+    uint8_t last_byte;
+    uint8_t reset_ack;
+    uint8_t enable_ack;
+    bool initialized;
+    bool enabled;
+};
+
 void ps2_mouse_init(void);
 void ps2_mouse_handler(void); // вызывается из IRQ12
+void mouse_redraw(void);
 struct mouse_state mouse_get_state(void);
+struct mouse_debug_state mouse_get_debug_state(void);
 void mouse_set_bounds(int32_t w, int32_t h);
