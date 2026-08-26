@@ -8,15 +8,28 @@
 struct gop_state {
     uint32_t *addr;
     uint32_t width, height, pitch;
+    uint64_t framebuffer_bytes;
+    const char *protocol_name;
     uint8_t bpp;
     bool available;
 };
 
-void gop_init_from_limine(struct limine_framebuffer *fb);
+enum gop_font_face {
+    GOP_FONT_CLASSIC,
+    GOP_FONT_THIN,
+    GOP_FONT_BOLD
+};
+
+void gop_init_from_limine(struct limine_framebuffer *fb, uint64_t firmware_type);
 void gop_init_from_multiboot(void *mbi); // парсит multiboot2 info
 bool gop_is_available(void);
 uint32_t gop_get_width(void);
 uint32_t gop_get_height(void);
+uint8_t gop_get_bpp(void);
+uint64_t gop_get_framebuffer_size_bytes(void);
+const char *gop_get_protocol_name(void);
+void gop_set_font_face(enum gop_font_face face);
+enum gop_font_face gop_get_font_face(void);
 void gop_clear(uint32_t color);
 void gop_set_color(uint32_t fg, uint32_t bg);
 void gop_putc(char c);

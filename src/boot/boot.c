@@ -37,6 +37,12 @@ static volatile struct limine_memmap_request memmap_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+static volatile struct limine_firmware_type_request firmware_type_request = {
+    .id = LIMINE_FIRMWARE_TYPE_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
@@ -65,7 +71,9 @@ void _start(void) {
     else vga_set_hhdm(0);
 
     // GOP сначала, VGA только если GOP нет
-    gop_init_from_limine(fb_ptr);
+    uint64_t firmware_type=firmware_type_request.response
+        ? firmware_type_request.response->firmware_type : UINT64_MAX;
+    gop_init_from_limine(fb_ptr,firmware_type);
 
     // первичный экран как в Linux: показываем всё по дефолту
     klog_init();

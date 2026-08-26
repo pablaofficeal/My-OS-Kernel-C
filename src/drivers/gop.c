@@ -7,6 +7,7 @@
 static struct gop_state gop = {0};
 static uint32_t cur_x=12, cur_y=12;
 static uint32_t fg=0xCDD6F4, bg=0x1E1E2E;
+static enum gop_font_face font_face=GOP_FONT_CLASSIC;
 
 // тот же 8x8 font что в fb.c
 static const uint8_t font[128][8] = {
@@ -45,12 +46,21 @@ static const uint8_t font[128][8] = {
   {0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00},{0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
 };
 
-void gop_init_from_limine(struct limine_framebuffer *fb){
+void gop_init_from_limine(struct limine_framebuffer *fb, uint64_t firmware_type){
     if(!fb) { gop.available=false; return; }
     gop.addr = (uint32_t*)fb->address;
     gop.width = fb->width;
     gop.height = fb->height;
     gop.pitch = fb->pitch / 4;
+    gop.framebuffer_bytes=fb->pitch*fb->height;
+    if(firmware_type==LIMINE_FIRMWARE_TYPE_UEFI32
+       || firmware_type==LIMINE_FIRMWARE_TYPE_UEFI64){
+        gop.protocol_name="UEFI GOP via Limine";
+    } else if(firmware_type==LIMINE_FIRMWARE_TYPE_X86BIOS){
+        gop.protocol_name="BIOS framebuffer via Limine";
+    } else {
+        gop.protocol_name="Limine framebuffer";
+    }
     gop.bpp = fb->bpp;
     gop.available = true;
     cur_x=12; cur_y=12; fg=0xCDD6F4; bg=0x1E1E2E;
@@ -80,6 +90,8 @@ void gop_init_from_multiboot(void *mbi){
             if(w && h && addr && pitch){
                 gop.addr = (uint32_t*)(uintptr_t)addr;
                 gop.width = w; gop.height = h; gop.pitch = pitch/4; gop.bpp=bpp;
+                gop.framebuffer_bytes=(uint64_t)pitch*h;
+                gop.protocol_name="Multiboot2 framebuffer";
                 gop.available = true;
                 cur_x=12; cur_y=12;
                 return;
@@ -96,6 +108,13 @@ void gop_init_from_multiboot(void *mbi){
 bool gop_is_available(void){ return gop.available; }
 uint32_t gop_get_width(void){ return gop.width; }
 uint32_t gop_get_height(void){ return gop.height; }
+uint8_t gop_get_bpp(void){ return gop.bpp; }
+uint64_t gop_get_framebuffer_size_bytes(void){ return gop.framebuffer_bytes; }
+const char *gop_get_protocol_name(void){
+    return gop.protocol_name ? gop.protocol_name : "Unavailable";
+}
+void gop_set_font_face(enum gop_font_face face){ font_face=face; }
+enum gop_font_face gop_get_font_face(void){ return font_face; }
 
 static void gop_scroll(void){
     if(!gop.available || !gop.addr) return;
@@ -135,9 +154,20 @@ void gop_clear(uint32_t color){
 
 void gop_set_color(uint32_t f, uint32_t b){ fg=f; bg=b; }
 
+static uint8_t get_font_row(uint8_t character, uint32_t row){
+    uint8_t bits=font[character][row];
+    if(font_face==GOP_FONT_BOLD) return bits|(bits>>1);
+    if(font_face!=GOP_FONT_THIN) return bits;
+
+    uint8_t count=0;
+    for(uint8_t value=bits;value;value>>=1) count+=value&1;
+    return count<5 ? bits&(uint8_t)~(bits>>1) : bits;
+}
+
 static void draw_char(char c, uint32_t x, uint32_t y){
     uint8_t ch=(uint8_t)c; if(ch>=128) ch='?';
-    for(int r=0;r<8;r++){ uint8_t bits=font[ch][r]; for(int col=0;col<8;col++){
+    for(int r=0;r<8;r++){ uint8_t bits=get_font_row(ch,(uint32_t)r);
+        for(int col=0;col<8;col++){
         uint32_t colr = (bits & (1<<(7-col))) ? fg : bg;
         put_pixel(x+col,y+r,colr);
     }}
@@ -149,7 +179,7 @@ static void draw_char_sized(char c, uint32_t x, uint32_t y, uint32_t size,
     uint8_t ch=(uint8_t)c; if(ch>=128) ch='?';
     for(uint32_t py=0; py<size; py++){
         uint32_t source_row=(py*8)/size;
-        uint8_t bits=font[ch][source_row];
+        uint8_t bits=get_font_row(ch,source_row);
         for(uint32_t px=0; px<size; px++){
             uint32_t source_col=(px*8)/size;
             uint32_t color=(bits & (1<<(7-source_col))) ? text_fg : text_bg;
