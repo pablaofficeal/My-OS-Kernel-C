@@ -61,6 +61,7 @@ static void pci_write32(uint8_t device, uint8_t function, uint8_t reg, uint32_t 
     outl(0xCFC, value);
 }
 
+
 static void draw_hex(uint32_t x, uint32_t y, uint32_t value, int digits){
     char text[9]; const char *hex="0123456789ABCDEF";
     for(int i=digits-1;i>=0;i--){ text[i]=hex[value & 0xF]; value >>= 4; }
@@ -154,14 +155,12 @@ void i2c_hid_touchpad_init(uint64_t hhdm_offset){
         draw_debug();
         return;
     }
-    uint32_t pci_command=pci_read32(0x15, 1, 0x04);
-    pci_write32(0x15, 1, 0x04, pci_command | 0x00000006U);
     debug_state.bar_low=pci_read32(0x15, 1, 0x10);
     debug_state.bar_high=pci_read32(0x15, 1, 0x14);
     uint64_t bar=(uint64_t)(debug_state.bar_low & ~0xFU);
     bar|=(uint64_t)debug_state.bar_high << 32;
     if(!bar){
-        serial_write_string("[I2C-HID] I2C1 has no MMIO BAR\n");
+        serial_write_string("[I2C-HID] I2C1 BAR is not assigned\n");
         draw_debug();
         return;
     }
