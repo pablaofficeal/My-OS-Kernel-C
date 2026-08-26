@@ -3,7 +3,6 @@
 #include "../drivers/serial.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
-#include "../drivers/mouse/i2c_hid_touchpad.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -16,11 +15,8 @@ static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t 
 }
 
 static void halt_forever(void){
-    for(;;){
-        ps2_mouse_poll();
-        if(i2c_hid_touchpad_is_active()) i2c_hid_touchpad_poll();
-        __asm__ volatile("sti; hlt; cli");
-    }
+    // HLT возвращает управление после IRQ12; cli здесь отключал мышь навсегда.
+    for(;;) __asm__ volatile("sti; hlt");
 }
 
 void kernel_main(struct limine_framebuffer *fb) {
@@ -58,7 +54,6 @@ void kernel_main(struct limine_framebuffer *fb) {
     // kernel_main очищает framebuffer после инициализации PS/2.
     // Восстанавливаем курсор и его диагностику поверх готового интерфейса.
     mouse_redraw();
-    i2c_hid_touchpad_redraw();
 
     serial_write_string("[KERNEL] halt\n");
     halt_forever();

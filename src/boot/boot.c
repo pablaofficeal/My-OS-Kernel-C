@@ -7,7 +7,6 @@
 #include "../drivers/serial.h"
 #include "../drivers/pic.h"
 #include "../drivers/mouse/ps2_mouse.h"
-#include "../drivers/mouse/i2c_hid_touchpad.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -28,18 +27,6 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 __attribute__((used, section(".requests")))
 static volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST,
-    .revision = 0
-};
-
-__attribute__((used, section(".requests")))
-static volatile struct limine_memmap_request memmap_request = {
-    .id = LIMINE_MEMMAP_REQUEST,
-    .revision = 0
-};
-
-__attribute__((used, section(".requests")))
-static volatile struct limine_kernel_address_request kernel_address_request = {
-    .id = LIMINE_KERNEL_ADDRESS_REQUEST,
     .revision = 0
 };
 
@@ -87,11 +74,6 @@ void _start(void) {
     syscall_init();
     serial_write_string("[IDT] loaded\n");
 
-    i2c_hid_touchpad_init(
-        hhdm_request.response ? hhdm_request.response->offset : 0,
-        kernel_address_request.response ? kernel_address_request.response->physical_base : 0,
-        kernel_address_request.response ? kernel_address_request.response->virtual_base : 0,
-        memmap_request.response ? memmap_request.response : 0);
     ps2_mouse_init();
     serial_write_string("[MOUSE] PS/2 ready\n");
 

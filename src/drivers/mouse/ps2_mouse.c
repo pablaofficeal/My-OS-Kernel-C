@@ -105,28 +105,6 @@ void mouse_redraw(void){
     draw_cursor(state.x, state.y);
 }
 
-void mouse_apply_relative(int8_t dx, int8_t dy, uint8_t buttons){
-    char tmp[32]; tmp[0]=0;
-    // serial debug для QEMU проверки
-    serial_write_string("[MOUSE] move dx="); 
-    // inline hex for dx/dy
-    const char *h="0123456789ABCDEF";
-    char b[5]; b[0]= (dx<0?'-':' '); b[1]= h[(dx>>4)&0xF]; b[2]= h[dx&0xF]; b[3]=0; serial_write_string(b);
-    serial_write_string(" dy="); b[0]= (dy<0?'-':' '); b[1]= h[(dy>>4)&0xF]; b[2]= h[dy&0xF]; b[3]=0; serial_write_string(b); serial_write_string("\n");
-    state.dx=dx;
-    state.dy=-dy;
-    state.x += dx;
-    state.y -= dy;
-    if(state.x < 0) state.x=0;
-    if(state.y < 0) state.y=0;
-    if(state.x >= bound_w-CURS_W) state.x=bound_w-CURS_W-1;
-    if(state.y >= bound_h-CURS_H) state.y=bound_h-CURS_H-1;
-    state.buttons=buttons & 0x07;
-    state.has_data=true;
-    draw_debug_overlay();
-    draw_cursor(state.x, state.y);
-}
-
 // Рисует курсор как в Linux: стрелка 12x12
 static void draw_cursor(int32_t x,int32_t y){
     if(!gop_is_available()){
@@ -170,47 +148,56 @@ static void draw_cursor(int32_t x,int32_t y){
     old_x=x; old_y=y;
 }
 
-static void ps2_handle_byte(uint8_t data, uint8_t status){
-    debug_state.controller_status=status;
-    debug_state.last_byte=data;
-    // В QEMU первый байт иногда приходит без 0x08 при эмуляции планшета
-    // Принимаем любые 3 байта, иначе курсор никогда не сдвинется
-    packet[pkt_idx++] = data;
-    if(pkt_idx==3){
-        uint8_t b0 = packet[0];
-        int8_t dx = (int8_t)packet[1];
-        int8_t dy = (int8_t)packet[2];
-        mouse_apply_relative(dx, dy, b0 & 0x07);
-        debug_state.packet_count++;
-        if(!packet_seen){ packet_seen=true; serial_write_string("[MOUSE] IRQ12 packets active\n"); }
-        pkt_idx=0;
-        return;
-    }
-    draw_debug_overlay();
-}
-
 void ps2_mouse_handler(void){
     uint8_t status = inb(PS2_STATUS);
+    debug_state.controller_status=status;
     debug_state.irq_count++;
     if(!(status & 1)) return;
     // Проверяем что это от мыши (bit5 = mouse)
     // На некоторых эмуляторах bit5 не ставится, читаем в любом случае
     uint8_t data = inb(PS2_DATA);
-    ps2_handle_byte(data, status);
-    // EOI уже в isr_handler, но для IRQ12 нужно ещё pic_eoi
-}
+    debug_state.last_byte=data;
 
-void ps2_mouse_poll(void){
-    for(int i=0;i<32;i++){
-        uint8_t status = inb(PS2_STATUS);
-        if(!(status & 1)) break;
-        // Не фильтруем по bit5 — QEMU/VBox часто не выставляет его
-        uint8_t data = inb(PS2_DATA);
-        // Считаем poll тоже как IRQ для отладки
-        debug_state.irq_count++;
-        ps2_handle_byte(data, status);
-        __asm__ volatile("pause");
+    // Первый байт должен иметь bit3=1
+    if(pkt_idx==0 && (data & 0x08)==0){
+        // Десинхрон, сбросим
+        // Не сбрасываем если это ACK 0xFA во время init
+        return;
     }
+    packet[pkt_idx++] = data;
+    if(pkt_idx==3){
+        // Декодируем как в Linux drivers/input/mouse/psmouse-base.c
+        uint8_t b0 = packet[0];
+        int8_t dx = (int8_t)packet[1];
+        int8_t dy = (int8_t)packet[2];
+        // Обработка переполнения
+        if(b0 & 0x40) {} // X overflow
+        if(b0 & 0x80) {} // Y overflow
+        // Движение
+        state.dx = dx;
+        state.dy = -dy; // Y инвертируем (мышь даёт - при движении вверх)
+        state.x += dx;
+        state.y += -dy;
+        if(state.x<0) state.x=0;
+        if(state.y<0) state.y=0;
+        if(state.x >= bound_w - CURS_W) state.x = bound_w - CURS_W -1;
+        if(state.y >= bound_h - CURS_H) state.y = bound_h - CURS_H -1;
+        state.buttons = b0 & 0x07;
+        state.has_data = true;
+        debug_state.packet_count++;
+
+        if(!packet_seen){
+            packet_seen=true;
+            serial_write_string("[MOUSE] IRQ12 packets active\n");
+        }
+
+        pkt_idx=0;
+        draw_debug_overlay();
+        draw_cursor(state.x, state.y);
+        return;
+    }
+    draw_debug_overlay();
+    // EOI уже в isr_handler, но для IRQ12 нужно ещё pic_eoi
 }
 
 void ps2_mouse_init(void){
