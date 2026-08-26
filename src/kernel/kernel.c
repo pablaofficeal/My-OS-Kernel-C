@@ -3,6 +3,7 @@
 #include "../drivers/serial.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/mouse/i2c_hid_touchpad.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -16,6 +17,11 @@ static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t 
 
 static void halt_forever(void){
     // HLT возвращает управление после IRQ12; cli здесь отключал мышь навсегда.
+    if(i2c_hid_touchpad_is_active()){
+        // I2C1 GPIO interrupt (GSI 40) has no IOAPIC route yet, so the
+        // target touchpad is polled until APIC input routing is added.
+        for(;;) { i2c_hid_touchpad_poll(); __asm__ volatile("pause"); }
+    }
     for(;;) __asm__ volatile("sti; hlt");
 }
 

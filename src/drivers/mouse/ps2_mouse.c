@@ -105,6 +105,21 @@ void mouse_redraw(void){
     draw_cursor(state.x, state.y);
 }
 
+void mouse_apply_relative(int8_t dx, int8_t dy, uint8_t buttons){
+    state.dx=dx;
+    state.dy=-dy;
+    state.x += dx;
+    state.y -= dy;
+    if(state.x < 0) state.x=0;
+    if(state.y < 0) state.y=0;
+    if(state.x >= bound_w-CURS_W) state.x=bound_w-CURS_W-1;
+    if(state.y >= bound_h-CURS_H) state.y=bound_h-CURS_H-1;
+    state.buttons=buttons & 0x07;
+    state.has_data=true;
+    draw_debug_overlay();
+    draw_cursor(state.x, state.y);
+}
+
 // Рисует курсор как в Linux: стрелка 12x12
 static void draw_cursor(int32_t x,int32_t y){
     if(!gop_is_available()){
@@ -174,16 +189,7 @@ void ps2_mouse_handler(void){
         if(b0 & 0x40) {} // X overflow
         if(b0 & 0x80) {} // Y overflow
         // Движение
-        state.dx = dx;
-        state.dy = -dy; // Y инвертируем (мышь даёт - при движении вверх)
-        state.x += dx;
-        state.y += -dy;
-        if(state.x<0) state.x=0;
-        if(state.y<0) state.y=0;
-        if(state.x >= bound_w - CURS_W) state.x = bound_w - CURS_W -1;
-        if(state.y >= bound_h - CURS_H) state.y = bound_h - CURS_H -1;
-        state.buttons = b0 & 0x07;
-        state.has_data = true;
+        mouse_apply_relative(dx, dy, b0 & 0x07);
         debug_state.packet_count++;
 
         if(!packet_seen){
@@ -192,8 +198,6 @@ void ps2_mouse_handler(void){
         }
 
         pkt_idx=0;
-        draw_debug_overlay();
-        draw_cursor(state.x, state.y);
         return;
     }
     draw_debug_overlay();

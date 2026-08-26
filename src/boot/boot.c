@@ -7,6 +7,7 @@
 #include "../drivers/serial.h"
 #include "../drivers/pic.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/mouse/i2c_hid_touchpad.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -74,6 +75,7 @@ void _start(void) {
     syscall_init();
     serial_write_string("[IDT] loaded\n");
 
+    i2c_hid_touchpad_init(hhdm_request.response ? hhdm_request.response->offset : 0);
     ps2_mouse_init();
     serial_write_string("[MOUSE] PS/2 ready\n");
 

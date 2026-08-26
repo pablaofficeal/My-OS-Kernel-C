@@ -23,6 +23,7 @@ struct mouse_debug_state {
 void ps2_mouse_init(void);
 void ps2_mouse_handler(void); // вызывается из IRQ12
 void mouse_redraw(void);
+void mouse_apply_relative(int8_t dx, int8_t dy, uint8_t buttons);
 struct mouse_state mouse_get_state(void);
 struct mouse_debug_state mouse_get_debug_state(void);
 void mouse_set_bounds(int32_t w, int32_t h);
