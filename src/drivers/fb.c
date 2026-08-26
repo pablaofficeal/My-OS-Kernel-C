@@ -142,6 +142,7 @@ static const uint8_t font[128][8] = {
 };
 
 void fb_init(struct limine_framebuffer *fb){
+    if (!fb) return;
     g_fb = fb;
     fb_addr = (uint32_t*)fb->address;
     fb_width = fb->width;
@@ -151,6 +152,7 @@ void fb_init(struct limine_framebuffer *fb){
 }
 
 void fb_clear(uint32_t color){
+    if (!fb_addr) return;
     for(uint32_t y=0;y<fb_height;y++)
         for(uint32_t x=0;x<fb_width;x++)
             fb_addr[y*fb_pitch + x] = color;
@@ -160,6 +162,7 @@ void fb_clear(uint32_t color){
 void fb_set_color(uint32_t f, uint32_t b){ fg=f; bg=b; }
 
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
+    if (!fb_addr) return;
     if(x>=fb_width || y>=fb_height) return;
     fb_addr[y*fb_pitch + x]=c;
 }
@@ -179,6 +182,7 @@ static void draw_char(char c, uint32_t x, uint32_t y){
 }
 
 void fb_putc(char c){
+    if (!fb_addr) return;
     if(c=='\n'){ cur_x=12; cur_y+=10; return; }
     if(c=='\r'){ cur_x=12; return; }
     if(cur_x + 8 >= fb_width){ cur_x=12; cur_y+=10; }

@@ -6,3 +6,4 @@
 kernel.elf
 qemu_logs.txt
 hdd.img
+kernel_grub.elf

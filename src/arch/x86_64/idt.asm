@@ -50,10 +50,15 @@ isr_common:
     push r13
     push r14
     push r15
-    mov rdi, [rsp + 15*8]      ; vector (pushed before regs)
-    mov rsi, [rsp + 16*8]      ; err (pushed before vector)
-    ; align stack to 16 before call (current: 17 pushes*8 = 136, + return = 144 => 0 mod 16? 144%16=0 good)
+    mov rdi, [rsp + 15*8]      ; vector
+    mov rsi, [rsp + 16*8]      ; err
+    mov rdx, [rsp + 17*8]      ; rip
+    mov rcx, [rsp + 18*8]      ; cs
+    mov r8,  [rsp + 19*8]      ; rflags
+    ; align stack
+    sub rsp, 8
     call isr_handler
+    add rsp, 8
     pop r15
     pop r14
     pop r13
