@@ -1,43 +1,67 @@
 #!/bin/bash
 set -e
+echo "🧹 Cleaning..."
+rm -rf iso kernel.elf purec_os.iso *.o
+mkdir -p iso/boot/limine iso/EFI/BOOT
 
-echo "🧹 Cleaning old files..."
-rm -f *.o kernel.elf kernel.bin purec_os.iso
+# Use Limine binaries from Arch pkg if available
+LIMINE_DIR="/tmp/limine-pkg/usr/share/limine"
+if [ ! -d "$LIMINE_DIR" ]; then
+  if [ -f /tmp/limine.pkg.tar.zst ]; then
+    mkdir -p /tmp/limine-pkg && tar -I zstd -xf /tmp/limine.pkg.tar.zst -C /tmp/limine-pkg 2>/dev/null || true
+    LIMINE_DIR="/tmp/limine-pkg/usr/share/limine"
+  fi
+fi
+LIMINE_BIN="/tmp/limine-pkg/usr/bin/limine"
+if [ ! -f "$LIMINE_DIR/BOOTX64.EFI" ]; then
+  echo "❌ Limine binaries not found, trying /tmp/limine-8.3.1..."
+  LIMINE_DIR="/tmp/limine-8.3.1"
+fi
 
-echo "🔨 Building assembly files..."
-nasm -f elf32 src/boot/lowlevel.asm -o lowlevel_asm.o
+echo "📦 Limine dir: $LIMINE_DIR"
+ls "$LIMINE_DIR" | head -n10
 
-echo "🔨 Building C files..."
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/start.c -o start.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/kernel.c -o kernel.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/lib/memory.c -o memory.o
-gcc -m32 -ffreestanding -fno-pie -nostdlib -fno-stack-protector -O1 -I./src -c src/drivers/screen.c -o screen.o
+echo "🔨 Building kernel (x86_64-elf, -mcmodel=kernel)..."
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/gdt.c -o gdt.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/idt.c -o idt.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/fb.c -o fb.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/serial.c -o serial.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/lib/string.c -o string.o
+nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm.o
+nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm.o
 
-echo "🔗 Linking kernel (32-bit i386 ELF)..."
-ld -m elf_i386 -T linker.ld -o kernel.elf start.o kernel.o memory.o screen.o lowlevel_asm.o
-# Verify that it's a valid i386 ELF multiboot kernel for GRUB
-grub-file --is-x86-multiboot kernel.elf && echo "✅ GRUB will recognize the multiboot kernel" || echo "⚠️  Warning: GRUB multiboot check failed"
+echo "🔗 Linking..."
+x86_64-elf-ld -T linker.ld -o kernel.elf boot.o kernel.o gdt.o idt.o fb.o serial.o string.o gdt_asm.o idt_asm.o
+echo "✅ kernel.elf: $(file kernel.elf | cut -d: -f2)"
 
-echo "📦 Creating binary file..."
-objcopy -O binary kernel.elf kernel.bin
+echo "📦 ISO layout..."
+cp kernel.elf iso/boot/
+cat > iso/boot/limine/limine.conf << 'EOF'
+timeout: 0
+verbose: yes
 
-echo "📀 Creating ISO image..."
-mkdir -p iso/boot/grub
-cp kernel.elf iso/boot/kernel.elf
-
-cat > iso/boot/grub/grub.cfg << EOF
-set timeout=0
-set default=0
-
-menuentry "PureC OS" {
-    echo "Loading PureC OS..."
-    multiboot /boot/kernel.elf
-    boot
-}
+/PureC OS 64-bit
+    protocol: limine
+    kernel_path: boot():/boot/kernel.elf
 EOF
+cat iso/boot/limine/limine.conf
+cp "$LIMINE_DIR/limine-bios.sys" iso/boot/limine/ 2>/dev/null || cp "$LIMINE_DIR/../limine-bios.sys" iso/boot/limine/ || true
+cp "$LIMINE_DIR/limine-bios-cd.bin" iso/boot/limine/ 2>/dev/null || true
+cp "$LIMINE_DIR/limine-uefi-cd.bin" iso/boot/limine/ 2>/dev/null || true
+cp "$LIMINE_DIR/BOOTX64.EFI" iso/EFI/BOOT/BOOTX64.EFI 2>/dev/null || true
+cp "$LIMINE_DIR/BOOTIA32.EFI" iso/EFI/BOOT/BOOTIA32.EFI 2>/dev/null || true
+ls -R iso | head -n30
 
-grub-mkrescue -o purec_os.iso iso/
+echo "📀 Creating ISO..."
+xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso -o purec_os.iso 2>&1 | tail -10
 
-echo "✅ Build complete! Image: purec_os.iso"
-echo "🚀 Run WITH LOGS: qemu-system-i386 -m 512M -no-reboot -nographic -cdrom purec_os.iso -serial file:qemu_logs.txt"
-echo "⚠️  -no-reboot forces QEMU to exit instead of rebooting, so logs are written correctly!"
+echo "🔧 BIOS install..."
+if [ -f "$LIMINE_BIN" ]; then chmod +x "$LIMINE_BIN"; "$LIMINE_BIN" bios-install purec_os.iso 2>&1 | tail -5; else echo "no limine bin"; fi
+
+echo "✅ Build complete: purec_os.iso ($(du -h purec_os.iso | cut -f1))"
+ls -lh kernel.elf purec_os.iso
+echo "🚀 BIOS: qemu-system-x86_64 -cdrom purec_os.iso -m 512M -serial stdio -display gtk"
+echo "🚀 UEFI: qemu-system-x86_64 -bios /usr/share/edk2-ovmf/x64/OVMF.4m.fd -cdrom purec_os.iso -m 512M -serial stdio -display gtk"
+echo "🚀 UEFI+serial: qemu-system-x86_64 -bios /usr/share/edk2-ovmf/x64/OVMF.4m.fd -cdrom purec_os.iso -m 512M -serial file:qemu_logs.txt -display none"

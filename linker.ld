@@ -1,51 +1,33 @@
-/* linker.ld - Working script for GRUB multiboot */
+/* linker.ld - 64-bit higher-half Limine kernel */
 ENTRY(_start)
 
 SECTIONS
 {
-    /* Start loading at 0x100000 (1MB) - standard multiboot load address */
-    . = 0x100000;
+    . = 0xffffffff80000000;
 
-    /* Multiboot header MUST be within the first 8KB of the file for GRUB to find */
-    .multiboot ALIGN(4) : {
-        KEEP(*(.multiboot))
-    }
-    
-    /* Multiboot2 header for UEFI support */
-    .multiboot2 ALIGN(8) : {
-        KEEP(*(.multiboot2))
+    .requests : {
+        KEEP(*(.requests))
+        KEEP(*(.requests_start_marker))
+        KEEP(*(.requests_end_marker))
     }
 
-    /* Executable code section */
     .text : {
-        *(.text)
+        *(.text .text.*)
     }
 
-    /* Read-only data section */
-    .rodata BLOCK(4) : {
-        *(.rodata)
-        *(.rodata.*)
+    .rodata : {
+        *(.rodata .rodata.*)
     }
 
-    /* Writable data section */
-    .data BLOCK(4) : {
-        *(.data)
-        *(.data.*)
-    }
-    
-    /* Large kernel data section */
-    .kernel_data BLOCK(4) : {
-        *(.kernel_data)
+    .data : {
+        *(.data .data.*)
     }
 
-    /* Zero-initialized BSS section */
-    .bss BLOCK(4) : {
+    .bss : {
         *(COMMON)
-        *(.bss)
-        *(.bss.*)
+        *(.bss .bss.*)
     }
 
-    /* Discard unnecessary sections to reduce file size */
     /DISCARD/ : {
         *(.comment)
         *(.note*)
