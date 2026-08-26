@@ -7,3 +7,7 @@ kernel.elf
 qemu_logs.txt
 hdd.img
 kernel_grub.elf
+iso_limine/limine-bios.sys
+iso_limine/boot/limine-bios.sys
+iso_limine/boot/limine/limine-bios.sys
+*.log
