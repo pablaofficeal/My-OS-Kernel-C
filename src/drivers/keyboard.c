@@ -1,6 +1,5 @@
 #include "keyboard.h"
 #include "../kernel/klog.h"
-#include "serial.h"
 #include <stdint.h>
 #include <stdbool.h>
 
