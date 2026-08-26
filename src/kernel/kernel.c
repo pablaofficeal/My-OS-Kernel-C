@@ -7,6 +7,7 @@
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
 #include "../kernel/klog.h"
+#include "../userspace/userspace.h"
 #include "../lib/string.h"
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
@@ -50,14 +51,14 @@ void kernel_main(struct limine_framebuffer *fb) {
     klogf(KLOG_DEBUG, "Verbose mode: %s (debug visible)", klog_is_verbose() ? "on" : "off");
     klog(KLOG_OK, "Booting userspace...");
 
-    // короткая пауза чтобы пользователь увидел boot log как в Linux (3 сек)
-    for(volatile uint64_t i=0;i<200000000ULL;i++) __asm__ volatile("pause");
-
+    // пауза чтобы увидеть boot log как в Linux (1 сек)
+    { volatile uint64_t dummy=0; for(uint64_t i=0;i<30000000ULL;i++){ __asm__ volatile("pause"); dummy+=i; } (void)dummy; }
+    serial_write_string("[KERNEL] hiding boot screen, entering userspace\n");
     // скрываем boot log и переключаемся в userspace (как в Linux: boot splash -> login)
     klog_set_screen_enabled(false);
-    extern void userspace_init(void);
-    extern void userspace_run(void);
+    serial_write_string("[USERSPACE] init\n");
     userspace_init();
+    serial_write_string("[USERSPACE] run\n");
     userspace_run();
 
     // fallback если userspace вернётся
