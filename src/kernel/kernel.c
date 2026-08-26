@@ -7,52 +7,17 @@
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
 #include "../kernel/klog.h"
+#include "../kernel/system_info.h"
 #include "../userspace/userspace.h"
 #include "../lib/string.h"
 // Forward declaration of memmap response from boot.c
 extern struct limine_memmap_response *memmap_response_ptr;
-#include "../lib/string.h"
 #include <stdint.h>
-
-char cpu_brand_string[49];
-uint64_t total_ram_bytes = 0;
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
     int64_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(n), "b"(a1), "c"(a2), "d"(a3), "S"(a4), "D"(a5) : "r10","r8","memory");
     return ret;
-}
-
-static void get_cpu_info() {
-    uint32_t ebx, ecx, edx;
-    uint32_t *ptr = (uint32_t*)cpu_brand_string;
-    __asm__ volatile (
-        "cpuid"
-        : "=a"(*ptr), "=b"(ebx), "=c"(*(ptr+1)), "=d"(*(ptr+2))
-        : "a"(0x80000002)
-    );
-    __asm__ volatile (
-        "cpuid"
-        : "=a"(*(ptr+3)), "=b"(*(ptr+4)), "=c"(*(ptr+5)), "=d"(*(ptr+6))
-        : "a"(0x80000003)
-    );
-    __asm__ volatile (
-        "cpuid"
-        : "=a"(*(ptr+9)), "=b"(*(ptr+10)), "=c"(*(ptr+11)), "=d"(*(ptr+12))
-        : "a"(0x80000004)
-    );
-    cpu_brand_string[48] = '\0';
-}
-
-static void calculate_total_ram() {
-    if (!memmap_response_ptr) return;
-    total_ram_bytes = 0;
-    for (uint64_t i = 0; i < memmap_response_ptr->entry_count; i++) {
-        struct limine_memmap_entry *entry = memmap_response_ptr->entries[i];
-        if (entry->type == LIMINE_MEMMAP_USABLE) {
-            total_ram_bytes += entry->length;
-        }
-    }
 }
 
 static void idle_forever(void){
@@ -68,10 +33,9 @@ void kernel_main(struct limine_framebuffer *fb) {
     klog(KLOG_INFO, "Entering kernel_main...");
     klog(KLOG_INFO, "Kernel: 64-bit long mode, GOP active");
 
-    get_cpu_info();
-    calculate_total_ram();
-    klogf(KLOG_OK, "CPU detected: %s", cpu_brand_string);
-    klogf(KLOG_OK, "Total RAM: %lu MB", total_ram_bytes / (1024 * 1024));
+    system_info_init(memmap_response_ptr);
+    klogf(KLOG_OK, "CPU detected: %s", system_info_cpu_name());
+    klogf(KLOG_OK, "Usable RAM: %lu MB", system_info_usable_ram_bytes() / (1024 * 1024));
     klogf(KLOG_INFO, "Framebuffer: %dx%d", gop_get_width(), gop_get_height());
 
     // GDT/IDT уже настроены в boot.c, но проверяем инт3 как linux-like selftest

@@ -3,7 +3,7 @@
 #include "../userspace.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../kernel/klog.h"
-#include "../../kernel/kernel.h"
+#include "../../kernel/system_info.h"
 #include "../../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -34,10 +34,10 @@ static void split_command(const char *line, char *command, uint32_t capacity,
 }
 
 static void show_systeminfo(void){
-    uint64_t ram_mb = total_ram_bytes / (1024 * 1024);
+    uint64_t ram_mb=system_info_usable_ram_bytes()/(1024*1024);
     terminal_write("=== System Information ===\n");
-    terminal_printf("Processor: %s\n", cpu_brand_string);
-    terminal_printf("Total RAM:  %lu MB (%lu GB)\n", ram_mb, ram_mb / 1024);
+    terminal_printf("Processor:  %s\n",system_info_cpu_name());
+    terminal_printf("Usable RAM: %lu MB\n",ram_mb);
     terminal_write("==========================\n");
 }
 

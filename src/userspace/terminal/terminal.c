@@ -188,6 +188,14 @@ void terminal_printf(const char *format, ...){
         else if(*format=='u') write_unsigned((uint64_t)va_arg(args,unsigned int),10,false);
         else if(*format=='x') write_unsigned((uint64_t)va_arg(args,unsigned int),16,false);
         else if(*format=='X') write_unsigned((uint64_t)va_arg(args,unsigned int),16,true);
+        else if(*format=='l'){
+            format++;
+            if(*format=='u') write_unsigned((uint64_t)va_arg(args,unsigned long),10,false);
+            else {
+                terminal_write("%l");
+                if(*format) terminal_putc(*format);
+            }
+        }
         else {
             terminal_putc('%');
             if(*format) terminal_putc(*format);
