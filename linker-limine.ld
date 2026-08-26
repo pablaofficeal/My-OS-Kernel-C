@@ -4,8 +4,8 @@ SECTIONS
 {
     . = 0xffffffff80000000;
     .requests : AT(ADDR(.requests) - 0xffffffff80000000 + 0x100000) {
-        KEEP(*(.requests))
         KEEP(*(.requests_start_marker))
+        KEEP(*(.requests))
         KEEP(*(.requests_end_marker))
     }
     .text : AT(ADDR(.text) - 0xffffffff80000000 + 0x100000) {
