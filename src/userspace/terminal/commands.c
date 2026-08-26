@@ -3,6 +3,7 @@
 #include "../userspace.h"
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
+#include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"
 #include "../../kernel/system_info.h"
@@ -139,12 +140,53 @@ static void show_file(const char *path){
     if(wrote_data && last_character!='\n') terminal_putc('\n');
 }
 
+static void list_directory(const char *path){
+    const char *target=path[0] ? path : "/";
+    struct fs_directory_entry entries[32];
+    int64_t count=invoke_syscall(SYS_DIR_LIST,(uint64_t)target,
+                                 (uint64_t)entries,32);
+    if(count<0){
+        terminal_printf("ls: cannot list directory (error %d)\n",(int)count);
+        return;
+    }
+    if(count==0){
+        terminal_write("(empty)\n");
+        return;
+    }
+
+    for(int64_t index=0;index<count;index++){
+        if(entries[index].attributes&FS_ATTRIBUTE_DIRECTORY){
+            terminal_printf("[DIR]  %s\n",entries[index].name);
+        } else {
+            terminal_printf("[FILE] %s  %u bytes\n",entries[index].name,
+                            entries[index].size);
+        }
+    }
+}
+
+static void create_path(const char *command, const char *path,
+                        uint64_t syscall_number){
+    if(!path[0]){
+        terminal_printf("%s: missing path\n",command);
+        return;
+    }
+    int64_t status=invoke_syscall(syscall_number,(uint64_t)path,0,0);
+    if(status<0){
+        terminal_printf("%s: cannot create path (error %d)\n",command,(int)status);
+        return;
+    }
+    terminal_printf("%s: created %s\n",command,path);
+}
+
 static void show_help(void){
     terminal_write("Commands:\n");
     terminal_write("  help              show this command list\n");
     terminal_write("  clear | cls       clear terminal output\n");
     terminal_write("  echo <text>       print text\n");
     terminal_write("  cat <file>        read a FAT32 file through syscalls\n");
+    terminal_write("  ls [directory]    list a FAT32 directory\n");
+    terminal_write("  touch <file>      create an empty FAT32 file\n");
+    terminal_write("  mkdir <directory> create a FAT32 directory\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -194,6 +236,12 @@ void commands_execute(const char *line){
         terminal_putc('\n');
     } else if(strcmp(command,"cat")==0){
         show_file(arguments);
+    } else if(strcmp(command,"ls")==0){
+        list_directory(arguments);
+    } else if(strcmp(command,"touch")==0){
+        create_path("touch",arguments,SYS_FILE_CREATE);
+    } else if(strcmp(command,"mkdir")==0){
+        create_path("mkdir",arguments,SYS_DIR_CREATE);
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);

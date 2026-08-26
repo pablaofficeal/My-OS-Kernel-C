@@ -70,6 +70,14 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_FILE_MOVE:
             return fat32_move((const char*)(uintptr_t)a1,
                               (const char*)(uintptr_t)a2);
+        case SYS_DIR_LIST:
+            return fat32_list((const char*)(uintptr_t)a1,
+                              (struct fs_directory_entry*)(uintptr_t)a2,
+                              (uint32_t)a3);
+        case SYS_FILE_CREATE:
+            return fat32_create_file((const char*)(uintptr_t)a1);
+        case SYS_DIR_CREATE:
+            return fat32_create_directory((const char*)(uintptr_t)a1);
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");

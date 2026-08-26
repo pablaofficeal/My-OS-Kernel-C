@@ -7,6 +7,7 @@
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08
 #define FAT32_ATTRIBUTE_READ_ONLY 0x01
+#define FAT32_ATTRIBUTE_ARCHIVE   0x20
 #define FAT32_ATTRIBUTE_LFN       0x0F
 #define FAT32_DELETED_ENTRY       0xE5
 #define FAT32_END_OF_CHAIN        0x0FFFFFF8
@@ -254,7 +255,7 @@ static int32_t resolve_entry(const char *path, struct fat32_entry_ref *result,
 }
 
 static int32_t resolve_directory(const char *path, uint32_t *cluster){
-    if(!path || !cluster) return FS_ERROR_INVALID;
+    if(!volume.mounted || !path || !cluster) return FS_ERROR_INVALID;
     const char *cursor=path;
     while(*cursor=='/') cursor++;
     if(!*cursor){
@@ -614,4 +615,90 @@ int32_t fat32_move(const char *path, const char *destination_directory){
     if(!block_device_read(source.sector_lba,sector_buffer)) return FS_ERROR_IO;
     sector_buffer[source.offset]=FAT32_DELETED_ENTRY;
     return block_device_write(source.sector_lba,sector_buffer) ? 0 : FS_ERROR_IO;
+}
+
+int32_t fat32_list(const char *path, struct fs_directory_entry *entries,
+                   uint32_t capacity){
+    if(!entries || capacity==0 || capacity>0x7FFFFFFF) return FS_ERROR_INVALID;
+
+    uint32_t cluster;
+    int32_t status=resolve_directory(path,&cluster);
+    if(status<0) return status;
+
+    uint32_t count=0;
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            if(!block_device_read(first_lba+sector,sector_buffer)) return FS_ERROR_IO;
+            for(uint16_t offset=0;offset<BLOCK_SECTOR_SIZE;offset+=32){
+                uint8_t first=sector_buffer[offset];
+                if(first==0) return (int32_t)count;
+                if(first==FAT32_DELETED_ENTRY) continue;
+
+                uint8_t attributes=sector_buffer[offset+11];
+                if(attributes==FAT32_ATTRIBUTE_LFN
+                   || (attributes&FAT32_ATTRIBUTE_VOLUME_ID)
+                   || first=='.'){
+                    continue;
+                }
+
+                short_name_to_text(&sector_buffer[offset],entries[count].name);
+                entries[count].size=read_u32(&sector_buffer[offset+28]);
+                entries[count].attributes=attributes;
+                count++;
+                if(count==capacity) return (int32_t)count;
+            }
+        }
+
+        uint32_t next;
+        status=fat_next_cluster(cluster,&next);
+        if(status<0) return status;
+        if(next>=FAT32_END_OF_CHAIN) return (int32_t)count;
+        if(!valid_cluster(next)) return FS_ERROR_INVALID;
+        cluster=next;
+    }
+    return FS_ERROR_INVALID;
+}
+
+int32_t fat32_create_file(const char *path){
+    uint32_t parent;
+    uint8_t short_name[11];
+    int32_t status=resolve_creation_parent(path,&parent,short_name);
+    if(status<0) return status;
+
+    status=find_entry(parent,short_name,0);
+    if(status==0) return FS_ERROR_EXISTS;
+    if(status!=FS_ERROR_NOT_FOUND) return status;
+    return create_directory_entry(parent,short_name,FAT32_ATTRIBUTE_ARCHIVE,0);
+}
+
+int32_t fat32_create_directory(const char *path){
+    uint32_t parent;
+    uint8_t short_name[11];
+    int32_t status=resolve_creation_parent(path,&parent,short_name);
+    if(status<0) return status;
+
+    status=find_entry(parent,short_name,0);
+    if(status==0) return FS_ERROR_EXISTS;
+    if(status!=FS_ERROR_NOT_FOUND) return status;
+
+    uint32_t directory_cluster;
+    status=allocate_cluster(&directory_cluster);
+    if(status<0) return status;
+
+    static const uint8_t dot_name[11]={'.',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '};
+    static const uint8_t dot_dot_name[11]={'.','.',' ',' ',' ',' ',' ',' ',' ',' ',' '};
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    fill_directory_entry(&sector_buffer[0],dot_name,FAT32_ATTRIBUTE_DIRECTORY,
+                         directory_cluster);
+    fill_directory_entry(&sector_buffer[32],dot_dot_name,FAT32_ATTRIBUTE_DIRECTORY,parent);
+    if(!block_device_write(cluster_lba(directory_cluster),sector_buffer)){
+        (void)fat_write_entry(directory_cluster,0);
+        return FS_ERROR_IO;
+    }
+
+    status=create_directory_entry(parent,short_name,FAT32_ATTRIBUTE_DIRECTORY,
+                                  directory_cluster);
+    if(status<0) (void)fat_write_entry(directory_cluster,0);
+    return status;
 }
