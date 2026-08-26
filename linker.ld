@@ -1,47 +1,51 @@
-/* linker.ld - скрипт для flat binary с Multiboot */
+/* linker.ld - Working script for GRUB multiboot */
 ENTRY(_start)
 
 SECTIONS
 {
-    /* Начинаем с адреса 0x100000 (1MB) - стандартный адрес загрузки */
+    /* Start loading at 0x100000 (1MB) - standard multiboot load address */
     . = 0x100000;
 
-    /* Multiboot заголовок ДОЛЖЕН быть в первых 8KB от начала файла */
+    /* Multiboot header MUST be within the first 8KB of the file for GRUB to find */
     .multiboot ALIGN(4) : {
         KEEP(*(.multiboot))
     }
     
-    /* Multiboot2 заголовок для UEFI */
+    /* Multiboot2 header for UEFI support */
     .multiboot2 ALIGN(8) : {
         KEEP(*(.multiboot2))
     }
 
-    /* Код и данные */
+    /* Executable code section */
     .text : {
         *(.text)
     }
 
+    /* Read-only data section */
     .rodata BLOCK(4) : {
         *(.rodata)
         *(.rodata.*)
     }
 
+    /* Writable data section */
     .data BLOCK(4) : {
         *(.data)
         *(.data.*)
     }
     
-    /* Большие данные ядра */
+    /* Large kernel data section */
     .kernel_data BLOCK(4) : {
         *(.kernel_data)
     }
 
+    /* Zero-initialized BSS section */
     .bss BLOCK(4) : {
         *(COMMON)
         *(.bss)
         *(.bss.*)
     }
 
+    /* Discard unnecessary sections to reduce file size */
     /DISCARD/ : {
         *(.comment)
         *(.note*)

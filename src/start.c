@@ -1,66 +1,40 @@
-// Multiboot заголовок - ДОЛЖЕН БЫТЬ ПЕРВЫМ!
-#define MULTIBOOT_HEADER_MAGIC 0x1BADB002
-#define MULTIBOOT_HEADER_FLAGS 0x00000003  // ALIGN | MEM_INFO
-#define MULTIBOOT_HEADER_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
+// start.c - Multiboot entry point
+// No standard headers used, all types defined manually
+typedef unsigned int uint32_t;
 
-// Multiboot заголовок структура
+// Полный правильный Multiboot заголовок для GRUB
+#define MULTIBOOT_HEADER_MAGIC 0x1BADB002
+// Флаги: информация о памяти, модулях, разделяет память
+#define MULTIBOOT_HEADER_FLAGS 0x3
+#define MULTIBOOT_CHECKSUM -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
+
+// Размещаем заголовок в секции .multiboot, GRUB ищет его в первых 8KB
 __attribute__((section(".multiboot")))
-__attribute__((aligned(4)))
-__attribute__((used))
-__attribute__((externally_visible))
-const unsigned int multiboot_header[] = {
+struct {
+    uint32_t magic;
+    uint32_t flags;
+    uint32_t checksum;
+} multiboot_header = {
     MULTIBOOT_HEADER_MAGIC,
     MULTIBOOT_HEADER_FLAGS,
-    MULTIBOOT_HEADER_CHECKSUM
+    MULTIBOOT_CHECKSUM
 };
 
-// Multiboot2 заголовок для UEFI - byte-packed
-__attribute__((section(".multiboot2")))
-__attribute__((aligned(8)))
-__attribute__((used))
-__attribute__((externally_visible))
-const unsigned char multiboot2_header[] = {
-    // Header
-    0xd6, 0x50, 0x52, 0xe8, // magic (0xe85250d6)
-    0x00, 0x00, 0x00, 0x00, // architecture (0)
-    0x20, 0x00, 0x00, 0x00, // header_length (32)
-    0x2a, 0xaf, 0xad, 0x17, // checksum (-(magic+arch+length))
-    // Console tag (type 2, size 12, flags 3)
-    0x02, 0x00, 0x00, 0x00, // tag_type = 2
-    0x0c, 0x00, 0x00, 0x00, // tag_size = 12
-    0x03, 0x00, 0x00, 0x00, // flags = 3
-    // End tag (type 0, size 8)
-    0x00, 0x00, 0x00, 0x00, // tag_type = 0
-    0x08, 0x00, 0x00, 0x00  // tag_size = 8
-};
+// Внешние функции из ассемблера
+extern void init_stack();
+extern void halt_cpu();
+void halt_forever();
 
-// Точка входа для ядра ОС
-
-extern void kernel_main(void);
-#include "boot/lowlevel.h"
-
-// Функция _start - точка входа, требуемая линковщиком
-void _start(void) {
-    // ВАЖНО: Сначала инициализируем стек, иначе вызовы функций не будут работать!
-    // Сохраняем Multiboot info pointer из EBX перед изменением стека
-    void* mb_info = get_multiboot_info_from_ebx();
-    
-    // Инициализация стека (должна быть первой!)
+// Main kernel function declaration
+extern __attribute__((noreturn)) void kernel_main();
+extern __attribute__((noreturn)) void halt_forever();
+__attribute__((noreturn)) void _start() {
+    // Initialize stack - FIRST operation, NOTHING WORKS WITHOUT THIS
     init_stack();
     
-    // Теперь можно вызывать функции
-    save_multiboot_info(mb_info);
-    simple_print("_start called!\n");
-    simple_print("Stack initialized\n");
-    
-    // Вызываем основную функцию ядра
-    simple_print("Calling kernel_main...\n");
+    // Run main kernel function
     kernel_main();
     
-    simple_print("kernel_main returned!\n");
-    
-    // Бесконечный цикл после завершения kernel_main
-    while(1) {
-        halt_cpu();
-    }
+    // If kernel_main returns (it NEVER should), halt forever
+    halt_forever();
 }

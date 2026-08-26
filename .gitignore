@@ -4,3 +4,4 @@
 *iso/
 *.idea/
 kernel.elf
+qemu_logs.txt

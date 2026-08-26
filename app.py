@@ -65,25 +65,28 @@ def main():
     # Link object files
     base_objects = " ".join(out for _, out in files)
     all_objects = f"{base_objects} lowlevel_asm.o mouse.o"
-    cmd = f"ld -m elf_i386 -T linker.ld -o kernel.bin {all_objects}"
+    cmd = f"ld -m elf_i386 -T linker.ld -o kernel.elf {all_objects}"
     run_command(cmd, "❌ Linking failed! Check for errors above.")
+    # Создаем kernel.bin для совместимости
+    run_command("objcopy -O binary kernel.elf kernel.bin", "❌ objcopy failed")
 
-    # Verify kernel.bin exists
-    if not os.path.exists("kernel.bin"):
-        print("❌ Kernel binary not found!")
+    # Verify kernel.elf exists
+    if not os.path.exists("kernel.elf"):
+        print("❌ Kernel ELF not found!")
         exit(1)
 
     # Create ISO directory structure
     os.makedirs("iso/boot/grub", exist_ok=True)
-    shutil.copy("kernel.bin", "iso/boot/")
+    shutil.copy("kernel.elf", "iso/boot/kernel.elf")
 
     # Create GRUB configuration
     grub_cfg = """
 set timeout=5
 set default=0
 
-menuentry "PureC OS - Hex Editor & Games" {
-    multiboot /boot/kernel.bin
+menuentry "PureC OS (Multiboot)" {
+    echo "Loading PureC OS kernel with Multiboot..."
+    multiboot /boot/kernel.elf
     boot
 }
 """
