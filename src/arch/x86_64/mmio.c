@@ -112,7 +112,9 @@ void mmio_init(uint64_t hhdm_offset,
         if(reported>=32 && reported<=52) physical_address_bits=reported;
     }
 
-    uint64_t cr3;
+    uint64_t cr3,cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    if(cr4&(1ULL<<12)) return;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     uint64_t *pml4=physical_pointer(cr3&PAGE_ADDRESS_MASK);
     for(uint16_t index=MMIO_FIRST_PML4_INDEX;index>=MMIO_LAST_PML4_INDEX;index--){

@@ -124,6 +124,7 @@ void _start(void) {
     if(!memmap_response_ptr) kernel_panic("Limine memory map response is missing");
     if(!mmio_is_ready()) kernel_panic("no free PML4 slot is available for PCI MMIO");
     boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "32-bpp framebuffer validated");
+    klog(KLOG_OK, "PCI MMIO mapper ready (uncached 4 KiB mappings)");
     klog(KLOG_OK, "Limine boot: 64-bit long mode, paging enabled");
     klogf(KLOG_INFO, "HHDM offset: 0x%llx", hhdm_request.response ? hhdm_request.response->offset : 0);
     if(gop_is_available()){
