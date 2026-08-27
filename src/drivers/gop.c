@@ -102,7 +102,9 @@ void gop_init_from_limine(struct limine_framebuffer *fb, uint64_t firmware_type)
     gop.addr = (uint32_t*)fb->address;
     gop.width = fb->width;
     gop.height = fb->height;
-    gop.pitch = fb->pitch / 4;
+    if(fb->bpp==24) gop.pitch = fb->pitch / 3;
+    else if(fb->bpp==16) gop.pitch = fb->pitch / 2;
+    else gop.pitch = fb->pitch / 4;
     gop.framebuffer_bytes=fb->pitch*fb->height;
     if(firmware_type==LIMINE_FIRMWARE_TYPE_UEFI32
        || firmware_type==LIMINE_FIRMWARE_TYPE_UEFI64){
@@ -171,14 +173,28 @@ static void gop_scroll(void){
     if(!gop.available || !gop.addr) return;
     const uint32_t line_h = 10;
     if(gop.height <= line_h) { gop_clear(bg); return; }
-    // сдвиг фреймбуфера вверх на line_h пиксельных строк (linux-like scroll)
-    for(uint32_t y=0; y + line_h < gop.height; y++){
-        // копируем целую строку (pitch пикселей)
-        memcpy(&gop.addr[y * gop.pitch], &gop.addr[(y + line_h) * gop.pitch], gop.pitch * sizeof(uint32_t));
-    }
-    // очищаем освободившиеся строки внизу
-    for(uint32_t y = gop.height - line_h; y < gop.height; y++){
-        for(uint32_t x=0; x < gop.pitch; x++) gop.addr[y * gop.pitch + x] = bg;
+    if(gop.bpp==24){
+        uint8_t *base=(uint8_t*)gop.addr;
+        uint32_t pitch_bytes=gop.pitch*3;
+        for(uint32_t y=0; y + line_h < gop.height; y++){
+            memcpy(base + y*pitch_bytes, base + (y+line_h)*pitch_bytes, pitch_bytes);
+        }
+        for(uint32_t y=gop.height-line_h; y<gop.height; y++){
+            uint8_t *line=base + y*pitch_bytes;
+            for(uint32_t x=0;x<gop.width;x++){ line[x*3+0]=(uint8_t)(bg&0xFF); line[x*3+1]=(uint8_t)((bg>>8)&0xFF); line[x*3+2]=(uint8_t)((bg>>16)&0xFF); }
+        }
+    } else if(gop.bpp==16){
+        uint16_t *base16=(uint16_t*)gop.addr;
+        uint16_t r=(bg>>19)&0x1F; uint16_t g=(bg>>10)&0x3F; uint16_t b=(bg>>3)&0x1F; uint16_t v=(r<<11)|(g<<5)|b;
+        for(uint32_t y=0; y+line_h<gop.height; y++) memcpy(&base16[y*gop.pitch], &base16[(y+line_h)*gop.pitch], gop.pitch*sizeof(uint16_t));
+        for(uint32_t y=gop.height-line_h; y<gop.height; y++) for(uint32_t x=0;x<gop.width;x++) base16[y*gop.pitch+x]=v;
+    } else {
+        for(uint32_t y=0; y + line_h < gop.height; y++){
+            memcpy(&gop.addr[y * gop.pitch], &gop.addr[(y + line_h) * gop.pitch], gop.pitch * sizeof(uint32_t));
+        }
+        for(uint32_t y = gop.height - line_h; y < gop.height; y++){
+            for(uint32_t x=0; x < gop.pitch; x++) gop.addr[y * gop.pitch + x] = bg;
+        }
     }
     if(cur_y >= line_h) cur_y -= line_h;
     else cur_y = 12;
@@ -187,11 +203,47 @@ static void gop_scroll(void){
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t c){
     if(!gop.available || !gop.addr) return;
     if(x>=gop.width || y>=gop.height) return;
+    if(gop.bpp==24){
+        // 24bpp BGR (little endian): byte0 Blue, byte1 Green, byte2 Red
+        uint8_t *base = (uint8_t*)gop.addr;
+        uint32_t pitch_bytes = gop.pitch * 3;
+        uint8_t *pixel = base + y * pitch_bytes + x * 3;
+        pixel[0] = (uint8_t)(c & 0xFF);
+        pixel[1] = (uint8_t)((c >> 8) & 0xFF);
+        pixel[2] = (uint8_t)((c >> 16) & 0xFF);
+        return;
+    }
+    if(gop.bpp==16){
+        uint16_t r = (c >> 19) & 0x1F;
+        uint16_t g = (c >> 10) & 0x3F;
+        uint16_t b = (c >> 3) & 0x1F;
+        uint16_t v = (r << 11) | (g << 5) | b;
+        uint16_t *base16 = (uint16_t*)gop.addr;
+        base16[y * gop.pitch + x] = v;
+        return;
+    }
     gop.addr[y*gop.pitch + x]=c;
 }
 
 uint32_t gop_get_pixel(uint32_t x, uint32_t y){
     if(!gop.available || !gop.addr || x>=gop.width || y>=gop.height) return 0;
+    if(gop.bpp==24){
+        uint8_t *base = (uint8_t*)gop.addr;
+        uint32_t pitch_bytes = gop.pitch * 3;
+        uint8_t *pixel = base + y * pitch_bytes + x * 3;
+        return (uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16);
+    }
+    if(gop.bpp==16){
+        uint16_t *base16 = (uint16_t*)gop.addr;
+        uint16_t v = base16[y * gop.pitch + x];
+        uint32_t r = (v >> 11) & 0x1F;
+        uint32_t g = (v >> 5) & 0x3F;
+        uint32_t b = v & 0x1F;
+        r = (r << 3) | (r >> 2);
+        g = (g << 2) | (g >> 4);
+        b = (b << 3) | (b >> 2);
+        return (r << 16) | (g << 8) | b;
+    }
     return gop.addr[y*gop.pitch + x];
 }
 
@@ -199,7 +251,27 @@ void gop_put_pixel(uint32_t x, uint32_t y, uint32_t color){ put_pixel(x, y, colo
 
 void gop_clear(uint32_t color){
     if(!gop.available){ vga_clear(); return; }
-    for(uint32_t y=0;y<gop.height;y++) for(uint32_t x=0;x<gop.width;x++) gop.addr[y*gop.pitch+x]=color;
+    if(gop.bpp==24){
+        uint8_t *base = (uint8_t*)gop.addr;
+        uint32_t pitch_bytes = gop.pitch * 3;
+        for(uint32_t y=0;y<gop.height;y++){
+            uint8_t *line = base + y * pitch_bytes;
+            for(uint32_t x=0;x<gop.width;x++){
+                line[x*3+0]=(uint8_t)(color & 0xFF);
+                line[x*3+1]=(uint8_t)((color>>8)&0xFF);
+                line[x*3+2]=(uint8_t)((color>>16)&0xFF);
+            }
+        }
+    } else if(gop.bpp==16){
+        uint16_t r = (color >> 19) & 0x1F;
+        uint16_t g = (color >> 10) & 0x3F;
+        uint16_t b = (color >> 3) & 0x1F;
+        uint16_t v = (r << 11) | (g << 5) | b;
+        uint16_t *base16=(uint16_t*)gop.addr;
+        for(uint32_t y=0;y<gop.height;y++) for(uint32_t x=0;x<gop.width;x++) base16[y*gop.pitch+x]=v;
+    } else {
+        for(uint32_t y=0;y<gop.height;y++) for(uint32_t x=0;x<gop.width;x++) gop.addr[y*gop.pitch+x]=color;
+    }
     cur_x=12; cur_y=12; bg=color;
 }
 
@@ -284,10 +356,25 @@ void gop_scroll_rect_up(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
         gop_draw_rect(x,y,w,h,fill_color);
         return;
     }
-    for(uint32_t row=0; row+amount<h; row++){
-        memcpy(&gop.addr[(y+row)*gop.pitch+x],
-               &gop.addr[(y+row+amount)*gop.pitch+x],
-               w*sizeof(uint32_t));
+    if(gop.bpp==24){
+        uint8_t *base=(uint8_t*)gop.addr;
+        uint32_t pitch_bytes=gop.pitch*3;
+        for(uint32_t row=0; row+amount<h; row++){
+            uint8_t *dst=base + (y+row)*pitch_bytes + x*3;
+            uint8_t *src=base + (y+row+amount)*pitch_bytes + x*3;
+            memcpy(dst, src, w*3);
+        }
+    } else if(gop.bpp==16){
+        uint16_t *base16=(uint16_t*)gop.addr;
+        for(uint32_t row=0; row+amount<h; row++){
+            memcpy(&base16[(y+row)*gop.pitch+x], &base16[(y+row+amount)*gop.pitch+x], w*sizeof(uint16_t));
+        }
+    } else {
+        for(uint32_t row=0; row+amount<h; row++){
+            memcpy(&gop.addr[(y+row)*gop.pitch+x],
+                   &gop.addr[(y+row+amount)*gop.pitch+x],
+                   w*sizeof(uint32_t));
+        }
     }
     gop_draw_rect(x, y+h-amount, w, amount, fill_color);
 }
