@@ -1,6 +1,7 @@
 #include "fat32.h"
 
 #include "../drivers/storage/block_device.h"
+#include "../kernel/klog.h"
 #include "../lib/string.h"
 #include <stddef.h>
 
@@ -963,34 +964,94 @@ int32_t fat32_format_device(const char *device_name,
                             const char *erase_confirmation){
     if(!device_name || !device_name[0] || !serial_confirmation
        || !erase_confirmation){
+        klogf(KLOG_ERROR,"fat32_format: INVALID args dev='%s'",device_name?device_name:"(null)");
         return FS_ERROR_INVALID;
     }
-    if(volume.mounted) return FS_ERROR_BUSY;
+    // Разрешаем форматировать другой диск даже когда примонтирован текущий том.
+    // BUSY только если цель совпадает с примонтированным.
+    if(volume.mounted){
+        const char *mounted=block_device_name();
+        if(mounted && strcmp(mounted,device_name)==0){
+            klogf(KLOG_WARN,"fat32_format: BUSY mounted='%s' target='%s'",mounted,device_name);
+            return FS_ERROR_BUSY;
+        }
+        klogf(KLOG_INFO,"fat32_format: volume mounted on '%s', formatting other dev '%s' (unmount not needed)",mounted?mounted:"?",device_name);
+    }
 
     int32_t device_index=block_device_find(device_name);
-    if(device_index<0) return FS_ERROR_NOT_FOUND;
+    if(device_index<0){
+        klogf(KLOG_ERROR,"fat32_format: NOT_FOUND '%s'",device_name);
+        return FS_ERROR_NOT_FOUND;
+    }
     struct storage_device_info info;
-    if(!block_device_get_info((uint32_t)device_index,&info)) return FS_ERROR_INVALID;
-    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(!block_device_get_info((uint32_t)device_index,&info)){
+        klogf(KLOG_ERROR,"fat32_format: cannot get info for '%s' idx=%d",device_name,device_index);
+        return FS_ERROR_INVALID;
+    }
+    klogf(KLOG_INFO,"fat32_format: dev='%s' serial='%s' model='%s' sectors=%llu ss=%u op=%u wr=%u transport=%u",
+          info.name,info.serial,info.model,info.sector_count,info.sector_size,info.operational,info.writable,info.transport);
+    if(!info.operational || !info.writable){
+        klogf(KLOG_ERROR,"fat32_format: READ_ONLY op=%u wr=%u",info.operational,info.writable);
+        return FS_ERROR_READ_ONLY;
+    }
     if(!info.serial[0] || strcmp(info.serial,serial_confirmation)!=0
        || strcmp(erase_confirmation,"ERASE")!=0){
+        klogf(KLOG_WARN,"fat32_format: CONFIRMATION failed serial='%s' expected='%s' erase='%s'",serial_confirmation,info.serial,erase_confirmation);
         return FS_ERROR_CONFIRMATION;
     }
     if(info.sector_size!=BLOCK_SECTOR_SIZE
        || info.sector_count>FAT32_FORMAT_MAX_SECTORS){
+        klogf(KLOG_ERROR,"fat32_format: UNSUPPORTED ss=%u expected %u sectors=%llu max=%u",
+              info.sector_size,BLOCK_SECTOR_SIZE,info.sector_count,FAT32_FORMAT_MAX_SECTORS);
         return FS_ERROR_UNSUPPORTED;
     }
 
     struct fat32_format_layout layout;
     if(!calculate_format_layout((uint32_t)info.sector_count,&layout)){
+        klogf(KLOG_ERROR,"fat32_format: TOO_SMALL sectors=%llu",info.sector_count);
         return FS_ERROR_TOO_SMALL;
     }
-    if(!block_device_select((uint32_t)device_index)) return FS_ERROR_INVALID;
+    klogf(KLOG_INFO,"fat32_format: layout sectors=%u fat=%u clusters=%u spc=%u",
+          layout.total_sectors,layout.fat_size,layout.cluster_count,layout.sectors_per_cluster);
+    if(!block_device_select((uint32_t)device_index)){
+        klogf(KLOG_ERROR,"fat32_format: SELECT failed idx=%d",device_index);
+        return FS_ERROR_INVALID;
+    }
     int32_t status=verify_blank_device(layout.total_sectors);
-    if(status<0) return status;
-    if(!write_format_metadata(&layout)) return FS_ERROR_IO;
+    if(status<0){
+        if(status==FS_ERROR_NOT_BLANK) klogf(KLOG_WARN,"fat32_format: NOT_BLANK dev='%s' (use --force or zero disk)",device_name);
+        else klogf(KLOG_ERROR,"fat32_format: verify_blank failed %d",status);
+        return status;
+    }
+    if(!write_format_metadata(&layout)){
+        klogf(KLOG_ERROR,"fat32_format: IO write metadata failed");
+        return FS_ERROR_IO;
+    }
 
     memset(&volume,0,sizeof(volume));
     memset(handles,0,sizeof(handles));
-    return fat32_init() ? 0 : FS_ERROR_IO;
+    bool mounted=fat32_init();
+    klogf(mounted?KLOG_OK:KLOG_ERROR,"fat32_format: %s dev='%s' mount=%u",mounted?"formatted and mounted":"mount after format failed",device_name,mounted);
+    return mounted ? 0 : FS_ERROR_IO;
+}
+
+// Внутренняя версия с force (игнорирует NOT_BLANK)
+int32_t fat32_format_device_force(const char *device_name, const char *serial_confirmation){
+    if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
+    // force = ERASE уже подтверждён инсталлером
+    int32_t device_index=block_device_find(device_name);
+    if(device_index<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)device_index,&info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(info.sector_size!=BLOCK_SECTOR_SIZE || info.sector_count>FAT32_FORMAT_MAX_SECTORS) return FS_ERROR_UNSUPPORTED;
+    struct fat32_format_layout layout;
+    if(!calculate_format_layout((uint32_t)info.sector_count,&layout)) return FS_ERROR_TOO_SMALL;
+    if(!block_device_select((uint32_t)device_index)) return FS_ERROR_INVALID;
+    // пропускаем verify_blank - инсталлер хочет перезаписать
+    klogf(KLOG_WARN,"fat32_format_force: skipping blank check dev='%s' sectors=%u",device_name,layout.total_sectors);
+    if(!write_format_metadata(&layout)) return FS_ERROR_IO;
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    return fat32_init()?0:FS_ERROR_IO;
 }

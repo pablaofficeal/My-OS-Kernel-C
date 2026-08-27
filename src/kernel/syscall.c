@@ -94,6 +94,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return fat32_format_device((const char*)(uintptr_t)a1,
                                        (const char*)(uintptr_t)a2,
                                        (const char*)(uintptr_t)a3);
+        case SYS_FAT32_FORMAT_FORCE:
+            return fat32_format_device_force((const char*)(uintptr_t)a1,
+                                             (const char*)(uintptr_t)a2);
         case SYS_FILE_WRITE:
             return fat32_write_file((const char*)(uintptr_t)a1,
                                     (const void*)(uintptr_t)a2,(uint32_t)a3);
@@ -189,8 +192,52 @@ void syscall_init(void){
         klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
+            // Читаем конфиги созданные установщиком (если есть) – для проверки инсталла
+            {
+                int32_t fd=fat32_open("/purec/install.cfg");
+                if(fd>=0){
+                    char cfg_buf[512]={0};
+                    int32_t r=fat32_read(fd,cfg_buf,sizeof(cfg_buf)-1);
+                    if(r>0){
+                        // лог без экрана? показываем кратко
+                        klogf(KLOG_INFO,"config: /purec/install.cfg (%d bytes)",r);
+                        // подробный дамп только в dmesg через serial? уже в klog
+                        // печатаем построчно для читаемости
+                        cfg_buf[r]=0;
+                        // разбиваем по \n
+                        char *p=cfg_buf;
+                        while(*p){
+                            char line[128]={0};
+                            uint32_t i=0;
+                            while(*p && *p!='\n' && i<127){ line[i++]=*p++; }
+                            if(*p=='\n') p++;
+                            if(line[0]) klogf(KLOG_INFO,"  cfg: %s",line);
+                        }
+                    }
+                }
+                fd=fat32_open("/etc/hostname");
+                if(fd>=0){
+                    char hn[64]={0};
+                    int32_t r=fat32_read(fd,hn,sizeof(hn)-1);
+                    if(r>0){
+                        hn[r]=0;
+                        // trim newline
+                        for(int i=0;i<r;i++) if(hn[i]=='\n'||hn[i]=='\r'){ hn[i]=0; break; }
+                        klogf(KLOG_INFO,"config: hostname='%s'",hn);
+                    }
+                }
+                fd=fat32_open("/boot/loader.cfg");
+                if(fd>=0){
+                    char lb[256]={0};
+                    int32_t r=fat32_read(fd,lb,sizeof(lb)-1);
+                    if(r>0){
+                        lb[r]=0;
+                        klogf(KLOG_DEBUG,"config: /boot/loader.cfg %d bytes",r);
+                    }
+                }
+            }
         } else {
-            klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found");
+            klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found (use 'install' or 'mkfs.fat32' to create)");
         }
         boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage and filesystem probe complete");
     }

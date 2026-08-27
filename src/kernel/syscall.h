@@ -24,6 +24,7 @@
 #define SYS_FAT32_FORMAT 210
 #define SYS_FILE_WRITE   211
 #define SYS_USB_RESCAN   212
+#define SYS_FAT32_FORMAT_FORCE 213
 
 struct usb_scan_status {
     uint32_t xhci_controllers;

@@ -34,3 +34,4 @@ int32_t fat32_create_directory(const char *path);
 int32_t fat32_format_device(const char *device_name,
                             const char *serial_confirmation,
                             const char *erase_confirmation);
+int32_t fat32_format_device_force(const char *device_name, const char *serial_confirmation);

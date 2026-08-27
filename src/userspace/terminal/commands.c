@@ -8,6 +8,7 @@
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
 #include "../../drivers/usb/xhci.h"
+#include "../../drivers/keyboard.h"
 #include "../../fs/fat32.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
@@ -383,39 +384,351 @@ static void rescan_usb(void){
     terminal_write("tip: после починки проверяй 'disks' и 'dmesg | tail'\n");
 }
 
+static bool fetch_device_serial(const char *device, char out_serial[STORAGE_SERIAL_CAPACITY]){
+    struct storage_device_info devices[20];
+    int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devices,20,0);
+    if(cnt<0) return false;
+    for(int64_t i=0;i<cnt;i++){
+        if(strcmp(devices[i].name,device)==0){
+            memcpy(out_serial,devices[i].serial,STORAGE_SERIAL_CAPACITY);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void prompt_read_line(const char *prompt, char *out, uint32_t cap);
+static bool fetch_device_serial(const char *device, char out_serial[STORAGE_SERIAL_CAPACITY]);
+static void print_mkfs_error(int64_t status, const char *device){
+    if(status==FS_ERROR_CONFIRMATION){
+        terminal_write("mkfs.fat32: erase confirmation does not match\n");
+        terminal_write("  Use: mkfs.fat32 /dev/sdX ERASE  (serial fetched automatically)\n");
+        terminal_write("  Legacy: mkfs.fat32 /dev/sdX SERIAL ERASE\n");
+    } else if(status==FS_ERROR_NOT_BLANK){
+        terminal_write("mkfs.fat32: disk is not blank (MBR/data found)\n");
+        terminal_write("  Use 'mkfs.fat32 /dev/sdX ERASE --force' to overwrite, or zero with 'install'\n");
+        terminal_write("  Details in dmesg\n");
+    } else if(status==FS_ERROR_BUSY){
+        terminal_write("mkfs.fat32: volume already mounted on this device; reboot or choose other disk\n");
+    } else if(status==FS_ERROR_TOO_SMALL){
+        terminal_write("mkfs.fat32: disk too small (<32MB) or too large for FAT32 layout\n");
+    } else if(status==FS_ERROR_UNSUPPORTED){
+        terminal_write("mkfs.fat32: unsupported sector size or disk >128GB\n");
+        terminal_write("  Check 'disks' for sector_size=512, dmesg for details\n");
+        if(device){
+            char s[STORAGE_SERIAL_CAPACITY]={0};
+            if(fetch_device_serial(device,s)){
+                terminal_printf("  dev %s serial %s\n",device,s);
+            }
+            struct storage_device_info devs[20];
+            int64_t c=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
+            for(int64_t i=0;i<c;i++) if(strcmp(devs[i].name,device)==0){
+                terminal_printf("  sectors=%llu ss=%u op=%u wr=%u\n",devs[i].sector_count,devs[i].sector_size,devs[i].operational,devs[i].writable);
+                break;
+            }
+        }
+    } else if(status==FS_ERROR_READ_ONLY){
+        terminal_write("mkfs.fat32: device is read-only or not operational (check dmesg, xhci errors)\n");
+    } else if(status==FS_ERROR_NOT_FOUND){
+        terminal_write("mkfs.fat32: device not found, check 'disks'\n");
+    } else if(status<0){
+        terminal_printf("mkfs.fat32: failed (error %d) see dmesg\n",(int)status);
+    }
+}
+
 static void format_fat32(const char *arguments){
-    char device[STORAGE_DEVICE_NAME_CAPACITY];
-    char serial[STORAGE_SERIAL_CAPACITY];
-    char approval[6];
-    char extra[2];
+    char device[STORAGE_DEVICE_NAME_CAPACITY]={0};
+    char arg2[STORAGE_SERIAL_CAPACITY]={0};
+    char arg3[16]={0};
+    char extra[16]={0};
     const char *remaining;
     const char *tail;
     split_command(arguments,device,sizeof(device),&remaining);
-    split_command(remaining,serial,sizeof(serial),&tail);
-    split_command(tail,approval,sizeof(approval),&remaining);
+    // trim device
+    if(!device[0]){
+        terminal_write("Use (simplified): mkfs.fat32 /dev/sdX ERASE\n");
+        terminal_write("     mkfs.fat32 /dev/sdX --force  (overwrite non-blank)\n");
+        terminal_write("Legacy: mkfs.fat32 /dev/sdX SERIAL ERASE\n");
+        terminal_write("Run 'disks' to list devices\n");
+        return;
+    }
+    split_command(remaining,arg2,sizeof(arg2),&tail);
+    split_command(tail,arg3,sizeof(arg3),&remaining);
     split_command(remaining,extra,sizeof(extra),&tail);
-    if(!device[0] || !serial[0] || strcmp(approval,"ERASE")!=0 || extra[0]){
-        terminal_write("Use: mkfs.fat32 <device> <exact-serial> ERASE\n");
-        terminal_write("The serial is shown by the disks command.\n");
+    if(extra[0]){
+        terminal_write("mkfs.fat32: too many arguments\n");
+        return;
+    }
+    char serial[STORAGE_SERIAL_CAPACITY]={0};
+    const char *approval="ERASE";
+    bool force=false;
+    // detect --force in arg2 or arg3
+    bool has_force=(strcmp(arg2,"--force")==0 || strcmp(arg2,"-f")==0 || strcmp(arg3,"--force")==0 || strcmp(arg3,"-f")==0);
+    if(has_force) force=true;
+    // case: mkfs.fat32 /dev/sdb  (only device) -> show info + hint, ask interactive
+    if(!arg2[0]){
+        if(!fetch_device_serial(device,serial)){
+            terminal_printf("mkfs.fat32: cannot find device %s (see 'disks')\n",device);
+            return;
+        }
+        struct storage_device_info devs[20];
+        int64_t c=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
+        for(int64_t i=0;i<c;i++) if(strcmp(devs[i].name,device)==0){
+            terminal_printf("Device %s: %s %llu MB serial %s %s\n",devs[i].name,devs[i].model,devs[i].sector_count/2048,devs[i].serial,devs[i].operational?"operational":"not operational");
+            break;
+        }
+        char ans[16]={0};
+        prompt_read_line("Type ERASE to format (or --force to overwrite): ",ans,sizeof(ans));
+        if(strcmp(ans,"ERASE")!=0 && strcmp(ans,"--force")!=0 && strcmp(ans,"-f")!=0){
+            terminal_write("Aborted.\n");
+            return;
+        }
+        if(strcmp(ans,"--force")==0 || strcmp(ans,"-f")==0) force=true;
+    } else if(!arg3[0]){
+        // two args: device ERASE  or device --force
+        if(strcmp(arg2,"ERASE")==0 || strcmp(arg2,"--force")==0 || strcmp(arg2,"-f")==0){
+            if(!fetch_device_serial(device,serial)){
+                terminal_printf("mkfs.fat32: cannot fetch serial for %s\n",device);
+                return;
+            }
+            if(strcmp(arg2,"--force")==0 || strcmp(arg2,"-f")==0) force=true;
+        } else {
+            terminal_write("mkfs.fat32: expected ERASE. Use: mkfs.fat32 /dev/sdX ERASE\n");
+            return;
+        }
+    } else {
+        // three args: legacy device serial ERASE (with optional --force as extra? already handled)
+        // if arg3 is ERASE and arg2 looks like serial
+        if(strcmp(arg3,"ERASE")==0){
+            memcpy(serial,arg2,sizeof(serial));
+            // force already detected via extra? but legacy no force
+        } else if((strcmp(arg2,"ERASE")==0 && (strcmp(arg3,"--force")==0 || strcmp(arg3,"-f")==0))){
+            if(!fetch_device_serial(device,serial)){
+                terminal_printf("mkfs.fat32: cannot fetch serial for %s\n",device);
+                return;
+            }
+            force=true;
+        } else {
+            terminal_write("Use: mkfs.fat32 /dev/sdX ERASE  or  mkfs.fat32 /dev/sdX SERIAL ERASE\n");
+            return;
+        }
+    }
+
+    if(force){
+        terminal_printf("Formatting %s as PURECOS FAT32 (force, serial %s); do not power off...\n",device,serial);
+        // call force path via SYS_FAT32_FORMAT with serial="FORCE"? use new helper via direct force file?
+        // We use normal syscall but if it returns NOT_BLANK we retry with force via second syscall number.
+        // For now, try normal; if NOT_BLANK, fallback to force syscall 213 if available, else try zeroing.
+        int64_t status=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)device,(uint64_t)serial,(uint64_t)approval);
+        if(status==FS_ERROR_NOT_BLANK){
+            terminal_write("Retrying with force (skip blank check)...\n");
+            // SYS_FAT32_FORMAT_FORCE = 213 (see kernel/syscall.h). Fallback: use write zero then retry
+            // try force syscall
+            int64_t fstatus=userspace_syscall(213,(uint64_t)device,(uint64_t)serial,0);
+            if(fstatus==0){
+                terminal_printf("mkfs.fat32: force formatted PURECOS on %s\n",device);
+                return;
+            }
+            // if force not implemented, report
+            status=fstatus;
+        }
+        if(status==0){
+            terminal_printf("mkfs.fat32: created and mounted PURECOS on %s\n",device);
+        } else {
+            print_mkfs_error(status,device);
+        }
         return;
     }
 
-    terminal_printf("Formatting %s as PURECOS FAT32; do not power off...\n",device);
+    terminal_printf("Formatting %s as PURECOS FAT32 (serial %s); do not power off...\n",device,serial);
     int64_t status=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)device,
                                      (uint64_t)serial,(uint64_t)approval);
-    if(status==FS_ERROR_CONFIRMATION){
-        terminal_write("mkfs.fat32: erase confirmation does not match\n");
-    } else if(status==FS_ERROR_NOT_BLANK){
-        terminal_write("mkfs.fat32: refused because the disk is not blank\n");
-    } else if(status==FS_ERROR_BUSY){
-        terminal_write("mkfs.fat32: refused while a FAT32 volume is mounted\n");
-    } else if(status==FS_ERROR_TOO_SMALL){
-        terminal_write("mkfs.fat32: disk size is not supported for FAT32\n");
-    } else if(status<0){
-        terminal_printf("mkfs.fat32: failed (error %d)\n",(int)status);
-    } else {
+    if(status==0){
         terminal_printf("mkfs.fat32: created and mounted PURECOS on %s\n",device);
+    } else {
+        print_mkfs_error(status,device);
     }
+}
+
+static void prompt_read_line(const char *prompt, char *out, uint32_t cap){
+    terminal_write(prompt);
+    uint32_t len=0;
+    memset(out,0,cap);
+    for(;;){
+        char c=keyboard_getc();
+        if(c=='\r' || c=='\n'){
+            terminal_putc('\n');
+            break;
+        }
+        if(c=='\b' || c==127){
+            if(len){
+                len--;
+                terminal_putc('\b');
+            }
+            continue;
+        }
+        if(c<' ' || c>'~') continue;
+        if(len+1<cap){
+            out[len++]=c;
+            terminal_putc(c);
+        }
+    }
+    out[len]=0;
+}
+
+static bool installer_write_file(const char *path, const char *content){
+    int64_t r=userspace_syscall(SYS_FILE_WRITE,(uint64_t)path,(uint64_t)content,strlen(content));
+    return r>=0;
+}
+static bool installer_create_dir(const char *path){
+    int64_t r=userspace_syscall(SYS_DIR_CREATE,(uint64_t)path,0,0);
+    return r==0 || r==FS_ERROR_EXISTS;
+}
+
+static void run_installer(const char *args){
+    terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
+    struct storage_device_info devs[20];
+    int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
+    if(cnt<=0){
+        terminal_write("No disks found. Run 'disks' to diagnose.\n");
+        return;
+    }
+    terminal_write("Available disks:\n");
+    for(int64_t i=0;i<cnt;i++){
+        uint64_t mb=devs[i].sector_count/2048;
+        terminal_printf("  [%d] %s  %llu MB  %s  serial=%s  %s  %s\n",
+                        (int)i,devs[i].name,mb,devs[i].model,devs[i].serial,
+                        devs[i].operational?"op":"offline",
+                        devs[i].writable?"rw":"ro");
+        const char *tr=devs[i].transport==STORAGE_TRANSPORT_USB_MSC?"USB-xHCI":
+                       devs[i].transport==STORAGE_TRANSPORT_USB_EHCI?"USB-EHCI":
+                       devs[i].transport==STORAGE_TRANSPORT_AHCI?"AHCI":"ATA";
+        terminal_printf("       transport=%s ctrl=%u port=%u\n",tr,devs[i].controller,devs[i].port);
+    }
+    char arg_dev[STORAGE_DEVICE_NAME_CAPACITY]={0};
+    const char *rem;
+    split_command(args,arg_dev,sizeof(arg_dev),&rem);
+    char devname[STORAGE_DEVICE_NAME_CAPACITY]={0};
+    if(arg_dev[0]){
+        bool ok=false;
+        for(int64_t i=0;i<cnt;i++) if(strcmp(devs[i].name,arg_dev)==0) ok=true;
+        if(!ok){
+            terminal_printf("Device %s not found\n",arg_dev);
+            return;
+        }
+        strcpy(devname,arg_dev);
+        terminal_printf("Selected %s from argument\n",devname);
+    } else {
+        char sel[16]={0};
+        prompt_read_line("Select disk number [0]: ",sel,sizeof(sel));
+        if(!sel[0]) strcpy(sel,"0");
+        int idx=sel[0]-'0';
+        // allow multi-digit
+        idx=0;
+        for(uint32_t i=0;sel[i]>='0'&&sel[i]<='9';i++) idx=idx*10+(sel[i]-'0');
+        if(idx<0 || idx>=cnt){
+            terminal_write("Invalid selection\n");
+            return;
+        }
+        strcpy(devname,devs[idx].name);
+    }
+    char serial[STORAGE_SERIAL_CAPACITY]={0};
+    char model[STORAGE_MODEL_CAPACITY]={0};
+    uint64_t sectors=0;
+    for(int64_t i=0;i<cnt;i++) if(strcmp(devs[i].name,devname)==0){
+        strcpy(serial,devs[i].serial);
+        strcpy(model,devs[i].model);
+        sectors=devs[i].sector_count;
+        if(!devs[i].writable){
+            terminal_printf("Device %s is read-only, cannot install\n",devname);
+            return;
+        }
+        if(!devs[i].operational){
+            terminal_printf("Device %s not operational (check dmesg)\n",devname);
+            return;
+        }
+        break;
+    }
+    terminal_printf("Target: %s  %s  %llu MB  serial=%s\n",devname,model,sectors/2048,serial);
+    char hostname[32]={0};
+    prompt_read_line("Hostname [purec-os]: ",hostname,sizeof(hostname));
+    if(!hostname[0]) strcpy(hostname,"purec-os");
+    char username[32]={0};
+    prompt_read_line("Username [purec]: ",username,sizeof(username));
+    if(!username[0]) strcpy(username,"purec");
+    terminal_write("\nSummary:\n");
+    terminal_printf("  Device   : %s\n  Hostname : %s\n  User     : %s\n",devname,hostname,username);
+    terminal_write("This will ERASE all data on the target disk!\n");
+    char confirm[16]={0};
+    prompt_read_line("Type YES to continue: ",confirm,sizeof(confirm));
+    if(strcmp(confirm,"YES")!=0){
+        terminal_write("Aborted.\n");
+        return;
+    }
+    terminal_printf("Formatting %s as PURECOS FAT32...\n",devname);
+    int64_t fmt=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)devname,(uint64_t)serial,(uint64_t)"ERASE");
+    if(fmt==FS_ERROR_NOT_BLANK){
+        terminal_write("Disk not blank, retrying with --force...\n");
+        fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
+    }
+    if(fmt<0){
+        print_mkfs_error(fmt,devname);
+        terminal_write("Install failed at format\n");
+        return;
+    }
+    terminal_write("Creating filesystem structure...\n");
+    installer_create_dir("/boot");
+    installer_create_dir("/etc");
+    installer_create_dir("/home");
+    installer_create_dir("/purec");
+    char cfg[1024];
+    // /purec/install.cfg
+    memset(cfg,0,sizeof(cfg));
+    strcpy(cfg,"# PureC OS Install Config\n");
+    strcat(cfg,"hostname=");
+    strcat(cfg,hostname);
+    strcat(cfg,"\ndevice=");
+    strcat(cfg,devname);
+    strcat(cfg,"\nserial=");
+    strcat(cfg,serial);
+    strcat(cfg,"\nuser=");
+    strcat(cfg,username);
+    strcat(cfg,"\nversion=0.1.0\ninstalled=1\n");
+    if(!installer_write_file("/purec/install.cfg",cfg)){
+        terminal_write("Warning: failed to write /purec/install.cfg\n");
+    }
+    memset(cfg,0,sizeof(cfg));
+    strcpy(cfg,hostname);
+    strcat(cfg,"\n");
+    installer_write_file("/etc/hostname",cfg);
+    memset(cfg,0,sizeof(cfg));
+    strcpy(cfg,"timeout=3\ndefault=purec\n");
+    strcat(cfg,"hostname=");
+    strcat(cfg,hostname);
+    strcat(cfg,"\n");
+    installer_write_file("/boot/loader.cfg",cfg);
+    char home_path[64]={0};
+    strcpy(home_path,"/home/");
+    strcat(home_path,username);
+    installer_create_dir(home_path);
+    char readme_path[80]={0};
+    strcpy(readme_path,home_path);
+    strcat(readme_path,"/README");
+    memset(cfg,0,sizeof(cfg));
+    strcpy(cfg,"Welcome ");
+    strcat(cfg,username);
+    strcat(cfg, "!\nPureC OS installed.\nHostname: ");
+    strcat(cfg,hostname);
+    strcat(cfg,"\nDevice: ");
+    strcat(cfg,devname);
+    strcat(cfg,"\n");
+    installer_write_file(readme_path,cfg);
+    installer_write_file("/README","PureC OS - see /purec/install.cfg\n");
+    terminal_write("\nInstall complete!\n");
+    terminal_printf("  Config: /purec/install.cfg  Host: %s  User: %s\n",hostname,username);
+    terminal_write("  Files: /etc/hostname /boot/loader.cfg\n");
+    terminal_write("Run 'ls /purec' and 'cat /purec/install.cfg' to verify.\n");
+    terminal_write("Reboot to test auto-mount.\n");
 }
 
 static void show_help(void){
@@ -432,7 +745,10 @@ static void show_help(void){
     terminal_write("  nano <file>       open the small text editor\n");
     terminal_write("  disks             list disks and storage controllers\n");
     terminal_write("  usbscan           rescan USB ports after VM capture\n");
-    terminal_write("  mkfs.fat32 DEV SERIAL ERASE  format a blank disk\n");
+    terminal_write("  mkfs.fat32 [DEV [ERASE]]  format disk (simplified, serial auto)\n");
+    terminal_write("  mkfs.fat32 DEV SERIAL ERASE (legacy)\n");
+    terminal_write("  install [DEV]     interactive installer (archinstall-like)\n");
+    terminal_write("  setup             alias for install\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -500,6 +816,8 @@ void commands_execute(const char *line){
         rescan_usb();
     } else if(strcmp(command,"mkfs.fat32")==0){
         format_fat32(arguments);
+    } else if(strcmp(command,"install")==0 || strcmp(command,"setup")==0){
+        run_installer(arguments);
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);
