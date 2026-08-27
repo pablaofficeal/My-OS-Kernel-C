@@ -25,6 +25,26 @@
 #define SYS_FILE_WRITE   211
 #define SYS_USB_RESCAN   212
 
+struct usb_scan_status {
+    uint32_t xhci_controllers;
+    uint32_t xhci_connected_ports;
+    uint32_t xhci_addressed_devices;
+    uint32_t xhci_disks;
+    uint32_t xhci_failures;
+    uint32_t xhci_stage;
+    uint32_t xhci_error;
+    uint32_t xhci_last_port;
+    uint32_t xhci_portsc;
+    uint32_t xhci_completion_code;
+    uint32_t xhci_max_ports;
+    uint32_t xhci_usb_status;
+    uint32_t ehci_connected_ports;
+    uint32_t ehci_high_speed_ports;
+    uint32_t ehci_disks;
+    uint32_t ehci_failures;
+    uint32_t ehci_stage;
+};
+
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;
     uint64_t vector, err;

@@ -7,6 +7,7 @@
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
+#include "../../drivers/usb/xhci.h"
 #include "../../fs/fat32.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
@@ -300,16 +301,62 @@ static void show_disks(void){
     }
 }
 
+static const char *xhci_error_name(uint32_t error){
+    switch(error){
+        case XHCI_PROBE_OK: return "none";
+        case XHCI_PROBE_MMIO: return "MMIO mapping failed";
+        case XHCI_PROBE_CAPABILITY: return "invalid capability registers";
+        case XHCI_PROBE_BIOS_HANDOFF: return "BIOS ownership timeout";
+        case XHCI_PROBE_HALT_TIMEOUT: return "controller halt timeout";
+        case XHCI_PROBE_RESET_TIMEOUT: return "controller reset timeout";
+        case XHCI_PROBE_NOT_READY_TIMEOUT: return "controller-not-ready timeout";
+        case XHCI_PROBE_PAGE_SIZE: return "4 KiB pages unsupported";
+        case XHCI_PROBE_DMA_ADDRESS: return "DMA address unsupported";
+        case XHCI_PROBE_SCRATCHPADS: return "too many scratchpad buffers";
+        case XHCI_PROBE_RUN_TIMEOUT: return "controller run timeout";
+        case XHCI_PROBE_NO_CONNECTED_PORT: return "no connected root port";
+        case XHCI_PROBE_PORT_RESET: return "root-port reset failed";
+        case XHCI_PROBE_EVENT_TIMEOUT: return "event ring timeout";
+        case XHCI_PROBE_COMPLETION: return "xHCI completion error";
+        case XHCI_PROBE_ENABLE_SLOT: return "Enable Slot failed";
+        case XHCI_PROBE_ADDRESS_DEVICE: return "Address Device failed";
+        case XHCI_PROBE_DEVICE_DESCRIPTOR: return "device descriptor failed";
+        case XHCI_PROBE_CONFIG_DESCRIPTOR: return "configuration descriptor failed";
+        case XHCI_PROBE_MASS_STORAGE_INTERFACE: return "no USB BOT interface";
+        case XHCI_PROBE_CONFIGURE_ENDPOINT: return "endpoint configuration failed";
+        case XHCI_PROBE_SCSI: return "USB BOT/SCSI probe failed";
+        default: return "unknown";
+    }
+}
+
 static void rescan_usb(void){
     terminal_write("usbscan: rescanning xHCI/EHCI root ports...\n");
-    int64_t count=userspace_syscall(SYS_USB_RESCAN,0,0,0);
+    struct usb_scan_status status={0};
+    int64_t count=userspace_syscall(SYS_USB_RESCAN,(uint64_t)&status,0,0);
     if(count<0){
         terminal_write("usbscan: controller scan failed\n");
         return;
     }
     terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
+    terminal_printf("xhci: controllers=%u ports=%u connected=%u addressed=%u disks=%u stage=%u\n",
+                    status.xhci_controllers,status.xhci_max_ports,
+                    status.xhci_connected_ports,status.xhci_addressed_devices,
+                    status.xhci_disks,status.xhci_stage);
+    terminal_printf("xhci: error=%u (%s) usbsts=0x%x\n",
+                    status.xhci_error,xhci_error_name(status.xhci_error),
+                    status.xhci_usb_status);
+    if(status.xhci_last_port){
+        terminal_printf("xhci: last-port=%u portsc=0x%x completion=%u\n",
+                        status.xhci_last_port,status.xhci_portsc,
+                        status.xhci_completion_code);
+    }
+    if(status.ehci_connected_ports || status.ehci_failures){
+        terminal_printf("ehci: connected=%u high-speed=%u disks=%u failures=%u stage=%u\n",
+                        status.ehci_connected_ports,status.ehci_high_speed_ports,
+                        status.ehci_disks,status.ehci_failures,status.ehci_stage);
+    }
     if(count==0){
-        terminal_write("usbscan: use dmesg to see the failed USB stage\n");
+        terminal_write("usbscan: report the xhci lines above\n");
     }
 }
 

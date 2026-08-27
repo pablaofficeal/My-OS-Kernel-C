@@ -103,10 +103,34 @@ int64_t syscall_handler(struct syscall_regs *r){
             struct ehci_probe_stats ehci_stats;
             xhci_get_probe_stats(&xhci_stats);
             ehci_get_probe_stats(&ehci_stats);
+            struct usb_scan_status *status=(struct usb_scan_status*)(uintptr_t)a1;
+            if(status){
+                status->xhci_controllers=xhci_stats.controllers;
+                status->xhci_connected_ports=xhci_stats.connected_ports;
+                status->xhci_addressed_devices=xhci_stats.addressed_devices;
+                status->xhci_disks=xhci_stats.mass_storage_devices;
+                status->xhci_failures=xhci_stats.failures;
+                status->xhci_stage=xhci_stats.last_stage;
+                status->xhci_error=xhci_stats.last_error;
+                status->xhci_last_port=xhci_stats.last_port;
+                status->xhci_portsc=xhci_stats.last_portsc;
+                status->xhci_completion_code=xhci_stats.last_completion_code;
+                status->xhci_max_ports=xhci_stats.max_ports;
+                status->xhci_usb_status=xhci_stats.usb_status;
+                status->ehci_connected_ports=ehci_stats.connected_ports;
+                status->ehci_high_speed_ports=ehci_stats.high_speed_ports;
+                status->ehci_disks=ehci_stats.mass_storage_devices;
+                status->ehci_failures=ehci_stats.failures;
+                status->ehci_stage=ehci_stats.last_stage;
+            }
             klogf(KLOG_INFO,"usb-rescan: xhci connected=%u addressed=%u disks=%u failures=%u stage=%u",
                   xhci_stats.connected_ports,xhci_stats.addressed_devices,
                   xhci_stats.mass_storage_devices,xhci_stats.failures,
                   xhci_stats.last_stage);
+            klogf(KLOG_INFO,"usb-rescan: xhci error=%u port=%u portsc=0x%x completion=%u usbsts=0x%x",
+                  xhci_stats.last_error,xhci_stats.last_port,
+                  xhci_stats.last_portsc,xhci_stats.last_completion_code,
+                  xhci_stats.usb_status);
             klogf(KLOG_INFO,"usb-rescan: ehci connected=%u high-speed=%u disks=%u failures=%u stage=%u",
                   ehci_stats.connected_ports,ehci_stats.high_speed_ports,
                   ehci_stats.mass_storage_devices,ehci_stats.failures,

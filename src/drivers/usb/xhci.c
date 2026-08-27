@@ -146,6 +146,29 @@ static bool mapping_ready;
 static bool probe_complete;
 static struct xhci_probe_stats probe_stats;
 
+static inline uint64_t rdtsc(void){
+    uint32_t low,high;
+    __asm__ volatile("rdtsc":"=a"(low),"=d"(high));
+    return ((uint64_t)high<<32)|low;
+}
+
+static uint32_t tsc_mhz(void){
+    uint32_t eax,ebx,ecx,edx;
+    __asm__ volatile("cpuid":"=a"(eax),"=b"(ebx),"=c"(ecx),"=d"(edx)
+                     :"a"(0),"c"(0));
+    if(eax>=0x16){
+        __asm__ volatile("cpuid":"=a"(eax),"=b"(ebx),"=c"(ecx),"=d"(edx)
+                         :"a"(0x16),"c"(0));
+        if(eax>=100 && eax<=10000) return eax;
+    }
+    return 5000;
+}
+
+static void delay_ms(uint32_t milliseconds){
+    uint64_t deadline=rdtsc()+(uint64_t)tsc_mhz()*1000ULL*milliseconds;
+    while((int64_t)(rdtsc()-deadline)<0) __asm__ volatile("pause");
+}
+
 void xhci_set_address_mapping(uint64_t direct_map_offset, uint64_t physical_base,
                               uint64_t virtual_base){
     (void)direct_map_offset;
@@ -230,14 +253,18 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
                && (!endpoint || event_endpoint==endpoint)){
                 if(result) *result=copy;
                 uint8_t code=(uint8_t)(copy.status>>24);
-                return code==XHCI_COMPLETION_SUCCESS
+                probe_stats.last_completion_code=code;
+                bool success=code==XHCI_COMPLETION_SUCCESS
                     || (wanted_type==XHCI_EVENT_TRANSFER
                         && code==XHCI_COMPLETION_SHORT);
+                if(!success) probe_stats.last_error=XHCI_PROBE_COMPLETION;
+                return success;
             }
         } else {
             __asm__ volatile("pause");
         }
     }
+    probe_stats.last_error=XHCI_PROBE_EVENT_TIMEOUT;
     return false;
 }
 
@@ -313,30 +340,41 @@ static bool reset_port(uint8_t port_number, uint8_t *speed){
     uint32_t status=port[0];
     if(!(status&XHCI_PORT_CONNECTED)) return false;
     probe_stats.connected_ports++;
+    probe_stats.last_port=port_number;
+    probe_stats.last_portsc=status;
     if(status&XHCI_PORT_ENABLED){
         *speed=(uint8_t)((status>>XHCI_PORT_SPEED_SHIFT)&0x0F);
         port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                           |XHCI_PORT_RESET))|(status&XHCI_PORT_CHANGE_BITS);
+        if(!*speed) probe_stats.last_error=XHCI_PROBE_PORT_RESET;
         return *speed!=0;
     }
     if(!(status&XHCI_PORT_POWER)){
         port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                           |XHCI_PORT_RESET))|XHCI_PORT_POWER;
-        for(volatile uint32_t power_wait=0;power_wait<1000000;power_wait++){
-            __asm__ volatile("pause");
-        }
+        delay_ms(20);
         status=port[0];
-        if(!(status&XHCI_PORT_CONNECTED)) return false;
+        if(!(status&XHCI_PORT_CONNECTED)){
+            probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+            probe_stats.last_portsc=status;
+            return false;
+        }
     }
     uint32_t writable=status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                                |XHCI_PORT_RESET);
     port[0]=writable|XHCI_PORT_POWER|XHCI_PORT_RESET;
-    if(!wait_register(&port[0],XHCI_PORT_RESET,false)) return false;
-    for(volatile uint32_t recovery=0;recovery<1000000;recovery++){
-        __asm__ volatile("pause");
+    if(!wait_register(&port[0],XHCI_PORT_RESET,false)){
+        probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+        probe_stats.last_portsc=port[0];
+        return false;
     }
+    delay_ms(20);
     status=port[0];
-    if(!(status&XHCI_PORT_CONNECTED) || !(status&XHCI_PORT_ENABLED)) return false;
+    probe_stats.last_portsc=status;
+    if(!(status&XHCI_PORT_CONNECTED) || !(status&XHCI_PORT_ENABLED)){
+        probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+        return false;
+    }
     *speed=(uint8_t)((status>>XHCI_PORT_SPEED_SHIFT)&0x0F);
     port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                       |XHCI_PORT_RESET))|(status&XHCI_PORT_CHANGE_BITS);
@@ -357,7 +395,10 @@ static bool update_control_packet_size(uint8_t index, uint16_t packet_size){
 
 static bool address_port(uint8_t device_index, uint8_t port, uint8_t speed){
     uint8_t slot;
-    if(!submit_command(0,XHCI_TRB_ENABLE_SLOT,0,&slot) || !slot) return false;
+    if(!submit_command(0,XHCI_TRB_ENABLE_SLOT,0,&slot) || !slot){
+        probe_stats.last_error=XHCI_PROBE_ENABLE_SLOT;
+        return false;
+    }
     devices[device_index].slot_id=slot;
     memset(input_contexts[device_index],0,4096);
     memset(output_contexts[device_index],0,4096);
@@ -377,6 +418,7 @@ static bool address_port(uint8_t device_index, uint8_t port, uint8_t speed){
     ep0[4]=8;
     __sync_synchronize();
     if(!submit_command(physical_address(input),XHCI_TRB_ADDRESS_DEVICE,slot,0)){
+        probe_stats.last_error=XHCI_PROBE_ADDRESS_DEVICE;
         return false;
     }
     probe_stats.addressed_devices++;
@@ -575,9 +617,19 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     uint8_t index=device_count;
     memset(&devices[index],0,sizeof(devices[index]));
     probe_stats.last_stage=3;
-    if(!address_port(index,port,speed)) return false;
+    if(!address_port(index,port,speed)){
+        if(probe_stats.last_error==XHCI_PROBE_OK
+           || probe_stats.last_error==XHCI_PROBE_EVENT_TIMEOUT
+           || probe_stats.last_error==XHCI_PROBE_COMPLETION){
+            probe_stats.last_error=XHCI_PROBE_ADDRESS_DEVICE;
+        }
+        return false;
+    }
     probe_stats.last_stage=4;
-    if(!get_descriptor(index,USB_DESCRIPTOR_DEVICE,0,18)) return false;
+    if(!get_descriptor(index,USB_DESCRIPTOR_DEVICE,0,18)){
+        probe_stats.last_error=XHCI_PROBE_DEVICE_DESCRIPTOR;
+        return false;
+    }
     uint16_t vendor=(uint16_t)descriptor_buffer[8]
         |((uint16_t)descriptor_buffer[9]<<8);
     uint16_t product=(uint16_t)descriptor_buffer[10]
@@ -588,11 +640,15 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
        && !update_control_packet_size(index,packet)){
         return false;
     }
-    if(!get_descriptor(index,USB_DESCRIPTOR_CONFIGURATION,0,9)) return false;
+    if(!get_descriptor(index,USB_DESCRIPTOR_CONFIGURATION,0,9)){
+        probe_stats.last_error=XHCI_PROBE_CONFIG_DESCRIPTOR;
+        return false;
+    }
     uint16_t total=(uint16_t)descriptor_buffer[2]
         |((uint16_t)descriptor_buffer[3]<<8);
     if(total<9 || total>sizeof(descriptor_buffer)
        || !get_descriptor(index,USB_DESCRIPTOR_CONFIGURATION,0,total)){
+        probe_stats.last_error=XHCI_PROBE_CONFIG_DESCRIPTOR;
         return false;
     }
     uint8_t configuration=0,interface_number=0,bulk_in=0,bulk_out=0;
@@ -600,18 +656,24 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     if(!find_mass_storage_interface(total,&configuration,&interface_number,
                                     &bulk_in,&bulk_in_packet,
                                     &bulk_out,&bulk_out_packet)){
+        probe_stats.last_error=XHCI_PROBE_MASS_STORAGE_INTERFACE;
         return false;
     }
     probe_stats.last_stage=5;
     (void)interface_number;
     if(!configure_mass_storage(index,configuration,bulk_in,bulk_in_packet,
                                bulk_out,bulk_out_packet)){
+        probe_stats.last_error=XHCI_PROBE_CONFIGURE_ENDPOINT;
         return false;
     }
-    if(!identify_mass_storage(index,name_index,port,vendor,product)) return false;
+    if(!identify_mass_storage(index,name_index,port,vendor,product)){
+        probe_stats.last_error=XHCI_PROBE_SCSI;
+        return false;
+    }
     device_count++;
     probe_stats.mass_storage_devices++;
     probe_stats.last_stage=7;
+    probe_stats.last_error=XHCI_PROBE_OK;
     return true;
 }
 
@@ -622,7 +684,17 @@ static bool take_ownership(volatile uint32_t *capability, uint32_t hccparams1){
         uint32_t header=extended[0];
         if((header&0xFF)==1){
             extended[0]=header|(1U<<24);
-            if(!wait_register(&extended[0],1U<<16,false)) return false;
+            uint64_t deadline=rdtsc()+(uint64_t)tsc_mhz()*1000ULL*1000ULL;
+            while((extended[0]&(1U<<16))
+                  && (int64_t)(rdtsc()-deadline)<0){
+                __asm__ volatile("pause");
+            }
+            if(extended[0]&(1U<<16)){
+                probe_stats.last_error=XHCI_PROBE_BIOS_HANDOFF;
+                klog(KLOG_WARN,"xhci: BIOS ownership timeout; forcing OS handoff");
+            }
+            // Disable legacy SMI sources even when broken firmware keeps the
+            // BIOS-owned semaphore asserted, matching the non-fatal Linux path.
             extended[1]=0;
             return true;
         }
@@ -643,6 +715,7 @@ static bool initialize_controller(const struct storage_controller_info *controll
     mmio_base=(volatile uint8_t*)mmio_map(controller->register_base,
                                           XHCI_MMIO_MAP_SIZE);
     if(!mmio_base){
+        probe_stats.last_error=XHCI_PROBE_MMIO;
         klogf(KLOG_ERROR,"xhci%u: cannot map BAR 0x%llx",controller_number,
               controller->register_base);
         return false;
@@ -654,29 +727,53 @@ static bool initialize_controller(const struct storage_controller_info *controll
     uint32_t hcsparams1=capability[1];
     uint32_t hcsparams2=capability[2];
     uint32_t hccparams1=capability[4];
-    if(capability_length<0x20 || !take_ownership(capability,hccparams1)) return false;
+    if(capability_length<0x20){
+        probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        return false;
+    }
+    if(!take_ownership(capability,hccparams1)) return false;
     context_size=(hccparams1&(1U<<2)) ? 64 : 32;
     uint8_t max_slots=(uint8_t)hcsparams1;
     uint8_t max_ports=(uint8_t)(hcsparams1>>24);
-    if(!max_slots || !max_ports) return false;
+    probe_stats.max_ports=max_ports;
+    if(!max_slots || !max_ports){
+        probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        return false;
+    }
     if(max_slots>32) max_slots=32;
 
     uint32_t doorbell_offset=capability[5]&~3U;
     uint32_t runtime_offset=capability[6]&~0x1FU;
     if((uint32_t)capability_length+0x40U>XHCI_MMIO_MAP_SIZE
        || doorbell_offset>XHCI_MMIO_MAP_SIZE-4U
-       || runtime_offset>XHCI_MMIO_MAP_SIZE-0x40U) return false;
+       || runtime_offset>XHCI_MMIO_MAP_SIZE-0x40U){
+        probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        return false;
+    }
     operational=(volatile uint32_t*)(void*)(mmio_base+capability_length);
     doorbells=(volatile uint32_t*)(void*)(mmio_base+doorbell_offset);
     runtime=(volatile uint32_t*)(void*)(mmio_base+runtime_offset);
     operational[0]&=~XHCI_CMD_RUN;
-    if(!wait_register(&operational[1],XHCI_STS_HALTED,true)) return false;
-    operational[0]|=XHCI_CMD_RESET;
-    if(!wait_register(&operational[0],XHCI_CMD_RESET,false)
-       || !wait_register(&operational[1],XHCI_STS_NOT_READY,false)){
+    if(!wait_register(&operational[1],XHCI_STS_HALTED,true)){
+        probe_stats.last_error=XHCI_PROBE_HALT_TIMEOUT;
+        probe_stats.usb_status=operational[1];
         return false;
     }
-    if(!(operational[2]&1)) return false;
+    operational[0]|=XHCI_CMD_RESET;
+    if(!wait_register(&operational[0],XHCI_CMD_RESET,false)){
+        probe_stats.last_error=XHCI_PROBE_RESET_TIMEOUT;
+        probe_stats.usb_status=operational[1];
+        return false;
+    }
+    if(!wait_register(&operational[1],XHCI_STS_NOT_READY,false)){
+        probe_stats.last_error=XHCI_PROBE_NOT_READY_TIMEOUT;
+        probe_stats.usb_status=operational[1];
+        return false;
+    }
+    if(!(operational[2]&1)){
+        probe_stats.last_error=XHCI_PROBE_PAGE_SIZE;
+        return false;
+    }
 
     uint64_t dma_high=physical_address(device_context_base)
         |physical_address(command_trbs)|physical_address(event_trbs)
@@ -686,12 +783,18 @@ static bool initialize_controller(const struct storage_controller_info *controll
         |physical_address(transfer_buffer)|physical_address(&command_block)
         |physical_address(&command_status)|physical_address(&event_segment)
         |physical_address(scratchpad_pointers)|physical_address(scratchpad_pages);
-    if((dma_high>>32)!=0 && !(hccparams1&1)) return false;
+    if((dma_high>>32)!=0 && !(hccparams1&1)){
+        probe_stats.last_error=XHCI_PROBE_DMA_ADDRESS;
+        return false;
+    }
 
     memset(device_context_base,0,sizeof(device_context_base));
     uint16_t scratchpads=(uint16_t)((hcsparams2>>27)&0x1F)
         |(uint16_t)((hcsparams2>>16)&0x3E0);
-    if(scratchpads>XHCI_SCRATCHPAD_LIMIT) return false;
+    if(scratchpads>XHCI_SCRATCHPAD_LIMIT){
+        probe_stats.last_error=XHCI_PROBE_SCRATCHPADS;
+        return false;
+    }
     if(scratchpads){
         for(uint16_t index=0;index<scratchpads;index++){
             scratchpad_pointers[index]=physical_address(scratchpad_pages[index]);
@@ -724,7 +827,12 @@ static bool initialize_controller(const struct storage_controller_info *controll
     interrupter[7]=(uint32_t)(event_address>>32);
     __sync_synchronize();
     operational[0]|=XHCI_CMD_RUN;
-    if(!wait_register(&operational[1],XHCI_STS_HALTED,false)) return false;
+    if(!wait_register(&operational[1],XHCI_STS_HALTED,false)){
+        probe_stats.last_error=XHCI_PROBE_RUN_TIMEOUT;
+        probe_stats.usb_status=operational[1];
+        return false;
+    }
+    probe_stats.usb_status=operational[1];
     probe_stats.last_stage=2;
 
     for(uint8_t port=1;port<=max_ports && device_count<XHCI_DEVICE_LIMIT;port++){
@@ -734,6 +842,8 @@ static bool initialize_controller(const struct storage_controller_info *controll
             probe_stats.failures++;
         }
     }
+    if(!probe_stats.connected_ports && !device_count)
+        probe_stats.last_error=XHCI_PROBE_NO_CONNECTED_PORT;
     return true;
 }
 
@@ -768,6 +878,12 @@ bool xhci_rescan(uint32_t linux_name_base){
     probe_stats.mass_storage_devices=0;
     probe_stats.failures=0;
     probe_stats.last_stage=0;
+    probe_stats.last_error=XHCI_PROBE_OK;
+    probe_stats.last_port=0;
+    probe_stats.last_portsc=0;
+    probe_stats.last_completion_code=0;
+    probe_stats.max_ports=0;
+    probe_stats.usb_status=0;
 
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
