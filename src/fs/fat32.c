@@ -24,6 +24,7 @@
 #define FAT32_FORMAT_MAX_SECTORS       UINT32_MAX
 #define FAT32_ESP_START_LBA 2048
 #define FAT32_ESP_RESERVED FAT32_FORMAT_RESERVED_SECTORS
+#define FAT32_LFN_CHARACTER_CAPACITY 13
 
 static const uint8_t required_volume_label[11]={
     'P','U','R','E','C','O','S',' ',' ',' ',' '
@@ -402,6 +403,124 @@ static int32_t create_directory_entry(uint32_t parent, const uint8_t short_name[
     fill_directory_entry(&sector_buffer[offset],short_name,attributes,first_cluster);
     if(was_end_marker && offset+32<BLOCK_SECTOR_SIZE) sector_buffer[offset+32]=0;
     return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
+}
+
+static uint8_t lfn_checksum(const uint8_t short_name[11]){
+    uint8_t checksum=0;
+    for(uint8_t index=0;index<11;index++){
+        checksum=(uint8_t)(((checksum&1)<<7)|(checksum>>1));
+        checksum=(uint8_t)(checksum+short_name[index]);
+    }
+    return checksum;
+}
+
+static void write_lfn_character(uint8_t *entry, uint8_t index, uint16_t character){
+    static const uint8_t offsets[FAT32_LFN_CHARACTER_CAPACITY]={
+        1,3,5,7,9,14,16,18,20,22,24,28,30
+    };
+    write_u16(&entry[offsets[index]],character);
+}
+
+static bool fill_lfn_entry(uint8_t *entry, const char *long_name,
+                           const uint8_t short_name[11]){
+    uint8_t length=0;
+    while(long_name[length]){
+        if(length>=FAT32_LFN_CHARACTER_CAPACITY) return false;
+        length++;
+    }
+    if(length==0) return false;
+
+    memset(entry,0xFF,32);
+    entry[0]=0x41;
+    entry[11]=FAT32_ATTRIBUTE_LFN;
+    entry[12]=0;
+    entry[13]=lfn_checksum(short_name);
+    write_u16(&entry[26],0);
+    for(uint8_t index=0;index<FAT32_LFN_CHARACTER_CAPACITY;index++){
+        uint16_t character=index<length ? (uint8_t)long_name[index]
+            : index==length ? 0 : 0xFFFF;
+        write_lfn_character(entry,index,character);
+    }
+    return true;
+}
+
+static int32_t find_free_entry_pair(uint32_t directory_cluster,
+                                    uint32_t *lba_result,
+                                    uint16_t *offset_result){
+    uint32_t cluster=directory_cluster;
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            uint32_t lba=first_lba+sector;
+            if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+            for(uint16_t offset=0;offset+64<=BLOCK_SECTOR_SIZE;offset+=32){
+                uint8_t first=sector_buffer[offset];
+                uint8_t second=sector_buffer[offset+32];
+                bool first_free=first==0 || first==FAT32_DELETED_ENTRY;
+                bool second_free=first==0 || second==0
+                    || second==FAT32_DELETED_ENTRY;
+                if(first_free && second_free){
+                    *lba_result=lba;
+                    *offset_result=offset;
+                    return 0;
+                }
+            }
+        }
+
+        uint32_t next;
+        int32_t status=fat_next_cluster(cluster,&next);
+        if(status<0) return status;
+        if(next>=FAT32_END_OF_CHAIN){
+            uint32_t new_cluster;
+            status=allocate_cluster(&new_cluster);
+            if(status<0) return status;
+            status=fat_write_entry(cluster,new_cluster);
+            if(status<0){
+                (void)fat_write_entry(new_cluster,0);
+                return status;
+            }
+            *lba_result=cluster_lba(new_cluster);
+            *offset_result=0;
+            return 0;
+        }
+        if(!valid_cluster(next)) return FS_ERROR_INVALID;
+        cluster=next;
+    }
+    return FS_ERROR_INVALID;
+}
+
+static int32_t create_lfn_file_entry(uint32_t parent, const char *long_name,
+                                     const uint8_t short_name[11]){
+    int32_t status=find_entry(parent,short_name,0);
+    if(status==0) return FS_ERROR_EXISTS;
+    if(status!=FS_ERROR_NOT_FOUND) return status;
+
+    uint32_t lba;
+    uint16_t offset;
+    status=find_free_entry_pair(parent,&lba,&offset);
+    if(status<0) return status;
+    if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+    bool was_end_marker=sector_buffer[offset]==0;
+    if(!fill_lfn_entry(&sector_buffer[offset],long_name,short_name)){
+        return FS_ERROR_UNSUPPORTED;
+    }
+    fill_directory_entry(&sector_buffer[offset+32],short_name,
+                         FAT32_ATTRIBUTE_ARCHIVE,0);
+    if(was_end_marker && offset+64<BLOCK_SECTOR_SIZE) sector_buffer[offset+64]=0;
+    return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
+}
+
+static int32_t write_lfn_file(const char *directory_path, const char *long_name,
+                              const char *alias_path, const char *alias_name,
+                              const void *buffer, uint32_t count){
+    uint32_t parent;
+    int32_t status=resolve_directory(directory_path,&parent);
+    if(status<0) return status;
+    uint8_t short_name[11];
+    if(!make_short_name(alias_name,short_name)) return FS_ERROR_INVALID;
+    status=create_lfn_file_entry(parent,long_name,short_name);
+    if(status<0 && status!=FS_ERROR_EXISTS) return status;
+    return fat32_write_file(alias_path,buffer,count);
 }
 
 static int32_t clear_cluster_chain(uint32_t first_cluster){
@@ -802,7 +921,6 @@ int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
         return FS_ERROR_NOT_FILE;
     }
     if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
-    if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
     for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
         if(entry.first_cluster && handles[index].used
            && handles[index].first_cluster==entry.first_cluster){
@@ -1242,16 +1360,17 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         if(st<0) klogf(KLOG_WARN,"fat32_uefi: kernel write failed %d",st);
         else klogf(KLOG_OK,"fat32_uefi: kernel %u bytes written",kernel_blob_len);
     }
-    // limine.cfg - используем 8.3 валидное имя (limine.conf требует LFN, наш драйвер 8.3)
+    // Стандартный limine.conf: LFN + совместимый короткий алиас LIMINE~1.CON.
     {
         const char *conf="timeout: 10\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
-        int32_t st = fat32_write_file("/boot/limine/limine.cfg", conf, strlen(conf));
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: limine.cfg write failed %d",st);
-        else klogf(KLOG_OK,"fat32_uefi: limine.cfg written");
-        (void)fat32_write_file("/limine.cfg", conf, strlen(conf));
-        // также пробуем limine.conf через LFN обход (если драйвер позволит 4-симв ext)
-        // Для совместимости с Limine который ищет limine.conf - создаём копию с коротким именем limine~1.conf через прямой сектор (если нужно)
-        // Пока оставляем limine.cfg, Limine также ищет limine.cfg как fallback
+        int32_t st=write_lfn_file("/boot/limine","limine.conf",
+                                  "/boot/limine/limine~1.con","limine~1.con",
+                                  conf,strlen(conf));
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: /boot/limine/limine.conf failed %d",st);
+        else klogf(KLOG_OK,"fat32_uefi: /boot/limine/limine.conf written");
+        st=write_lfn_file("/","limine.conf","/limine~1.con","limine~1.con",
+                          conf,strlen(conf));
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: /limine.conf failed %d",st);
     }
     return 0;
 }
