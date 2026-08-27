@@ -5,6 +5,7 @@
 #include "../lib/string.h"
 #include <stddef.h>
 #include "../drivers/storage/limine_uefi.h"
+#include "../drivers/storage/limine_vbr.h"
 #include "../kernel_blob.h"
 
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
@@ -1100,15 +1101,21 @@ static bool write_mbr_esp(uint32_t total_sectors){
     }
     uint32_t part_sectors = total_sectors - FAT32_ESP_START_LBA;
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    // Копируем BIOS boot code из limine_vbr (первые 440 байт) для dual BIOS+UEFI загрузки
+    // limine_vbr 512б содержит MBR код для superfloppy, берём 0..439
+    for(uint32_t i=0;i<440;i++) sector_buffer[i]=limine_vbr[i];
+    // Перезатираем BPB (3..61) нулями т.к. это MBR, не VBR
+    for(uint32_t i=3;i<62;i++) sector_buffer[i]=0;
+    // MBR signature будет перезаписан ниже
     uint8_t *p = &sector_buffer[446];
-    p[0]=0x00;
+    p[0]=0x80; // bootable для BIOS
     p[1]=0x00; p[2]=0x02; p[3]=0x00;
     p[4]=0xEF;
     p[5]=0xFF; p[6]=0xFF; p[7]=0xFF;
     write_u32(&p[8], FAT32_ESP_START_LBA);
     write_u32(&p[12], part_sectors);
     sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
-    klogf(KLOG_INFO,"write_mbr_esp: writing MBR LBA0 part %u sectors %u",FAT32_ESP_START_LBA,part_sectors);
+    klogf(KLOG_INFO,"write_mbr_esp: writing MBR LBA0 part %u sectors %u (BIOS+UEFI)",FAT32_ESP_START_LBA,part_sectors);
     if(!block_device_write(0, sector_buffer)){
         klogf(KLOG_ERROR,"write_mbr_esp: block_device_write LBA0 failed (dev %s)",block_device_name());
         return false;
