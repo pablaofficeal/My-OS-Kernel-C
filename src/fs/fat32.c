@@ -1219,14 +1219,16 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         if(st<0) klogf(KLOG_WARN,"fat32_uefi: kernel write failed %d",st);
         else klogf(KLOG_OK,"fat32_uefi: kernel %u bytes written",kernel_blob_len);
     }
-    // limine.conf
+    // limine.cfg - используем 8.3 валидное имя (limine.conf требует LFN, наш драйвер 8.3)
     {
         const char *conf="timeout: 3\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
-        int32_t st = fat32_write_file("/boot/limine/limine.conf", conf, strlen(conf));
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: limine.conf write failed %d",st);
-        else klogf(KLOG_OK,"fat32_uefi: limine.conf written");
-        // копия в корень ESP для надёжности
-        (void)fat32_write_file("/limine.conf", conf, strlen(conf));
+        int32_t st = fat32_write_file("/boot/limine/limine.cfg", conf, strlen(conf));
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: limine.cfg write failed %d",st);
+        else klogf(KLOG_OK,"fat32_uefi: limine.cfg written");
+        (void)fat32_write_file("/limine.cfg", conf, strlen(conf));
+        // также пробуем limine.conf через LFN обход (если драйвер позволит 4-симв ext)
+        // Для совместимости с Limine который ищет limine.conf - создаём копию с коротким именем limine~1.conf через прямой сектор (если нужно)
+        // Пока оставляем limine.cfg, Limine также ищет limine.cfg как fallback
     }
     return 0;
 }

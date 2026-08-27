@@ -216,6 +216,9 @@ void installer_run(const char *args){
     write_file("/etc/hostname",cfg);
     memset(cfg,0,sizeof(cfg));
     strcpy(cfg,"timeout: 3\nverbose: yes\n/PureC OS\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n");
+    write_file("/boot/limine/limine.cfg",cfg);
+    write_file("/limine.cfg",cfg);
+    // также пробуем conf для совместимости (может создаться как LFN если драйвер позволит)
     write_file("/boot/limine/limine.conf",cfg);
     write_file("/limine.conf",cfg);
     char home_path[64]={0};
