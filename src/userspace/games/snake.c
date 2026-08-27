@@ -2,7 +2,9 @@
 
 #include "../../drivers/keyboard.h"
 #include "../../drivers/mouse/ps2_mouse.h"
+#include "../../kernel/syscall.h"
 #include "../../kernel/system_info.h"
+#include "../syscall.h"
 #include "../terminal/terminal.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -194,6 +196,7 @@ void snake_run(void){
             draw_game(&game);
             next_tick=now+tick_interval;
         }
+        (void)userspace_syscall(SYS_SCHED_YIELD,0,0,0);
         __asm__ volatile("pause");
     }
 
