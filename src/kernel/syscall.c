@@ -19,6 +19,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+static volatile bool filesystem_syscall_busy;
+
+static void filesystem_syscall_lock(void){
+    while(__atomic_test_and_set(&filesystem_syscall_busy,__ATOMIC_ACQUIRE))
+        scheduler_yield();
+}
+
+static void filesystem_syscall_unlock(void){
+    __atomic_clear(&filesystem_syscall_busy,__ATOMIC_RELEASE);
+}
+
 static void print_hex(uint64_t v){
     const char *h="0123456789ABCDEF";
     char buf[17]; buf[16]=0;
@@ -69,45 +80,94 @@ int64_t syscall_handler(struct syscall_regs *r){
             *out = mouse_get_state();
             return 0;
         }
-        case SYS_FILE_OPEN:
-            return fat32_open((const char*)(uintptr_t)a1);
-        case SYS_FILE_READ:
-            return fat32_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
-        case SYS_FILE_DELETE:
-            return fat32_delete((const char*)(uintptr_t)a1);
-        case SYS_FILE_RENAME:
-            return fat32_rename((const char*)(uintptr_t)a1,
-                                (const char*)(uintptr_t)a2);
-        case SYS_FILE_MOVE:
-            return fat32_move((const char*)(uintptr_t)a1,
-                              (const char*)(uintptr_t)a2);
-        case SYS_DIR_LIST:
-            return fat32_list((const char*)(uintptr_t)a1,
-                              (struct fs_directory_entry*)(uintptr_t)a2,
-                              (uint32_t)a3);
-        case SYS_FILE_CREATE:
-            return fat32_create_file((const char*)(uintptr_t)a1);
-        case SYS_DIR_CREATE:
-            return fat32_create_directory((const char*)(uintptr_t)a1);
+        case SYS_FILE_OPEN: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_open((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_READ: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_DELETE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_delete((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_RENAME: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_rename((const char*)(uintptr_t)a1,
+                                        (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_MOVE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_move((const char*)(uintptr_t)a1,
+                                      (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_DIR_LIST: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_list((const char*)(uintptr_t)a1,
+                                      (struct fs_directory_entry*)(uintptr_t)a2,
+                                      (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_CREATE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_create_file((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_DIR_CREATE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_create_directory((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_DISK_LIST:
             return block_device_list((struct storage_device_info*)(uintptr_t)a1,
                                      (uint32_t)a2);
         case SYS_STORAGE_CONTROLLERS:
             return storage_controller_list(
                 (struct storage_controller_info*)(uintptr_t)a1,(uint32_t)a2);
-        case SYS_FAT32_FORMAT:
-            return fat32_format_device((const char*)(uintptr_t)a1,
-                                       (const char*)(uintptr_t)a2,
-                                       (const char*)(uintptr_t)a3);
-        case SYS_FAT32_FORMAT_FORCE:
-            return fat32_format_device_force((const char*)(uintptr_t)a1,
-                                             (const char*)(uintptr_t)a2);
-        case SYS_FAT32_FORMAT_UEFI:
-            return fat32_format_uefi_device((const char*)(uintptr_t)a1,
-                                            (const char*)(uintptr_t)a2);
-        case SYS_FILE_WRITE:
-            return fat32_write_file((const char*)(uintptr_t)a1,
-                                    (const void*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_FAT32_FORMAT: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_format_device((const char*)(uintptr_t)a1,
+                                               (const char*)(uintptr_t)a2,
+                                               (const char*)(uintptr_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FAT32_FORMAT_FORCE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_format_device_force((const char*)(uintptr_t)a1,
+                                                     (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FAT32_FORMAT_UEFI: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_format_uefi_device((const char*)(uintptr_t)a1,
+                                                    (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_WRITE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_write_file((const char*)(uintptr_t)a1,
+                                            (const void*)(uintptr_t)a2,
+                                            (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_USB_RESCAN: {
             uint32_t count=block_device_rescan_usb();
             struct xhci_probe_stats xhci_stats;
@@ -151,7 +211,11 @@ int64_t syscall_handler(struct syscall_regs *r){
                   ehci_stats.connected_ports,ehci_stats.high_speed_ports,
                   ehci_stats.mass_storage_devices,ehci_stats.failures,
                   ehci_stats.last_stage);
-            if(count && !fat32_is_mounted()) (void)fat32_init();
+            if(count){
+                filesystem_syscall_lock();
+                if(!fat32_is_mounted()) (void)fat32_init();
+                filesystem_syscall_unlock();
+            }
             return count;
         }
         case SYS_CPU_INFO: {
