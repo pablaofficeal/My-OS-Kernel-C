@@ -91,6 +91,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return fat32_format_device((const char*)(uintptr_t)a1,
                                        (const char*)(uintptr_t)a2,
                                        (const char*)(uintptr_t)a3);
+        case SYS_FILE_WRITE:
+            return fat32_write_file((const char*)(uintptr_t)a1,
+                                    (const void*)(uintptr_t)a2,(uint32_t)a3);
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");

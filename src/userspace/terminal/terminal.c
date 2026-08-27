@@ -1,5 +1,7 @@
 #include "terminal.h"
 #include "commands.h"
+#include "shell_path.h"
+#include "../editor/nano.h"
 #include "../../drivers/gop.h"
 #include "../../lib/string.h"
 #include <stdarg.h>
@@ -25,7 +27,6 @@
 #define WINDOW_MAX_W    960
 #define WINDOW_MAX_H    580
 #define SHELL_BUFFER_SIZE 256
-#define PROMPT_TEXT     "purec@os:~$ "
 
 static uint32_t window_x, window_y, window_w, window_h;
 static uint32_t text_x, text_y, text_w, text_h;
@@ -141,12 +142,16 @@ void terminal_init(uint32_t screen_width, uint32_t screen_height){
 }
 
 void terminal_handle_key(char c){
+    if(nano_is_active()){
+        nano_handle_key(c);
+        return;
+    }
     if(c=='\n' || c=='\r'){
         terminal_putc('\n');
         input_buffer[input_length]=0;
         commands_execute(input_buffer);
         input_length=0;
-        terminal_prompt();
+        if(!nano_is_active()) terminal_prompt();
         return;
     }
     if(c=='\b' || c==127){
@@ -217,7 +222,11 @@ void terminal_clear(void){
     cursor_y=text_y;
 }
 
-void terminal_prompt(void){ terminal_write_colored(PROMPT_TEXT,PROMPT_FG); }
+void terminal_prompt(void){
+    terminal_write_colored("purec@os:",PROMPT_FG);
+    terminal_write_colored(shell_path_current(),PROMPT_FG);
+    terminal_write_colored("$ ",PROMPT_FG);
+}
 
 bool terminal_set_font_size(uint32_t size){
     if(size<MIN_GLYPH_SIZE || size>MAX_GLYPH_SIZE) return false;

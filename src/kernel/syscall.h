@@ -9,8 +9,8 @@
 #define SYS_DRAW_RECT 100
 #define SYS_DRAW_LINE 101
 #define SYS_GET_MOUSE 102
-// FAT32 ABI: open(path), read(fd, buffer, count), delete(path),
-// rename(path, new_8_3_name), move(path, destination_directory).
+// FAT32 ABI: open/read/delete/rename/move plus directory, creation and
+// whole-file write operations used by the terminal tools.
 #define SYS_FILE_OPEN   200
 #define SYS_FILE_READ   201
 #define SYS_FILE_DELETE 202
@@ -22,6 +22,7 @@
 #define SYS_DISK_LIST   208
 #define SYS_STORAGE_CONTROLLERS 209
 #define SYS_FAT32_FORMAT 210
+#define SYS_FILE_WRITE   211
 
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;

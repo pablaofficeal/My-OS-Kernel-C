@@ -29,6 +29,7 @@ int32_t fat32_move(const char *path, const char *destination_directory);
 int32_t fat32_list(const char *path, struct fs_directory_entry *entries,
                    uint32_t capacity);
 int32_t fat32_create_file(const char *path);
+int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count);
 int32_t fat32_create_directory(const char *path);
 int32_t fat32_format_device(const char *device_name,
                             const char *serial_confirmation,

@@ -693,6 +693,116 @@ int32_t fat32_create_file(const char *path){
     return create_directory_entry(parent,short_name,FAT32_ATTRIBUTE_ARCHIVE,0);
 }
 
+static int32_t allocate_file_chain(uint32_t cluster_count,
+                                   uint32_t *first_cluster){
+    *first_cluster=0;
+    uint32_t previous=0;
+    for(uint32_t index=0;index<cluster_count;index++){
+        uint32_t cluster;
+        int32_t status=allocate_cluster(&cluster);
+        if(status<0){
+            if(*first_cluster) (void)clear_cluster_chain(*first_cluster);
+            return status;
+        }
+        if(!*first_cluster) *first_cluster=cluster;
+        if(previous){
+            status=fat_write_entry(previous,cluster);
+            if(status<0){
+                (void)fat_write_entry(cluster,0);
+                (void)clear_cluster_chain(*first_cluster);
+                *first_cluster=0;
+                return status;
+            }
+        }
+        previous=cluster;
+    }
+    return 0;
+}
+
+static int32_t write_file_chain(uint32_t first_cluster, const uint8_t *data,
+                                uint32_t count){
+    uint32_t cluster=first_cluster;
+    uint32_t written=0;
+    while(written<count){
+        if(!valid_cluster(cluster)) return FS_ERROR_INVALID;
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+            uint32_t amount=count-written;
+            if(amount>BLOCK_SECTOR_SIZE) amount=BLOCK_SECTOR_SIZE;
+            if(amount) memcpy(sector_buffer,data+written,amount);
+            if(!block_device_write(first_lba+sector,sector_buffer)){
+                return FS_ERROR_IO;
+            }
+            written+=amount;
+            if(written==count) return 0;
+        }
+        uint32_t next;
+        int32_t status=fat_next_cluster(cluster,&next);
+        if(status<0) return status;
+        if(!valid_cluster(next)) return FS_ERROR_INVALID;
+        cluster=next;
+    }
+    return 0;
+}
+
+int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
+    if(!path || !path[0] || (!buffer && count) || count>0x7FFFFFFF){
+        return FS_ERROR_INVALID;
+    }
+
+    struct fat32_entry_ref entry;
+    int32_t status=resolve_entry(path,&entry,0);
+    if(status==FS_ERROR_NOT_FOUND){
+        status=fat32_create_file(path);
+        if(status<0) return status;
+        status=resolve_entry(path,&entry,0);
+    }
+    if(status<0) return status;
+    if(entry.attributes&(FAT32_ATTRIBUTE_DIRECTORY|FAT32_ATTRIBUTE_VOLUME_ID)){
+        return FS_ERROR_NOT_FILE;
+    }
+    if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
+    if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
+    for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
+        if(entry.first_cluster && handles[index].used
+           && handles[index].first_cluster==entry.first_cluster){
+            return FS_ERROR_BUSY;
+        }
+    }
+
+    uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
+    uint32_t required_clusters=(uint32_t)(((uint64_t)count+cluster_size-1)
+                                          /cluster_size);
+    if(required_clusters>volume.cluster_count) return FS_ERROR_NO_SPACE;
+
+    uint32_t new_first_cluster;
+    status=allocate_file_chain(required_clusters,&new_first_cluster);
+    if(status<0) return status;
+    if(count){
+        status=write_file_chain(new_first_cluster,(const uint8_t*)buffer,count);
+        if(status<0){
+            (void)clear_cluster_chain(new_first_cluster);
+            return status;
+        }
+    }
+
+    if(!block_device_read(entry.sector_lba,sector_buffer)){
+        (void)clear_cluster_chain(new_first_cluster);
+        return FS_ERROR_IO;
+    }
+    write_u16(&sector_buffer[entry.offset+20],(uint16_t)(new_first_cluster>>16));
+    write_u16(&sector_buffer[entry.offset+26],(uint16_t)new_first_cluster);
+    write_u32(&sector_buffer[entry.offset+28],count);
+    if(!block_device_write(entry.sector_lba,sector_buffer)){
+        (void)clear_cluster_chain(new_first_cluster);
+        return FS_ERROR_IO;
+    }
+
+    (void)clear_cluster_chain(entry.first_cluster);
+    return (int32_t)count;
+}
+
 int32_t fat32_create_directory(const char *path){
     uint32_t parent;
     uint8_t short_name[11];

@@ -1,5 +1,8 @@
 #include "commands.h"
 #include "terminal.h"
+#include "shell_path.h"
+#include "../editor/nano.h"
+#include "../syscall.h"
 #include "../userspace.h"
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
@@ -22,18 +25,6 @@ static inline uint8_t inb(uint16_t port){
 
 static inline void outb(uint16_t port, uint8_t value){
     __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
-}
-
-static int64_t invoke_syscall(uint64_t number, uint64_t argument1,
-                              uint64_t argument2, uint64_t argument3){
-    int64_t result;
-    __asm__ volatile(
-        "int $0x80"
-        : "=a"(result)
-        : "a"(number),"b"(argument1),"c"(argument2),"d"(argument3)
-        : "r10","r8","memory"
-    );
-    return result;
 }
 
 static bool is_space(char c){ return c==' ' || c=='\t'; }
@@ -116,7 +107,13 @@ static void show_file(const char *path){
         return;
     }
 
-    int64_t descriptor=invoke_syscall(SYS_FILE_OPEN,(uint64_t)path,0,0);
+    char resolved[SHELL_PATH_CAPACITY];
+    if(!shell_path_resolve(path,resolved)){
+        terminal_write("cat: invalid or too long path\n");
+        return;
+    }
+
+    int64_t descriptor=userspace_syscall(SYS_FILE_OPEN,(uint64_t)resolved,0,0);
     if(descriptor<0){
         terminal_printf("cat: cannot open file (error %d)\n",(int)descriptor);
         return;
@@ -126,8 +123,8 @@ static void show_file(const char *path){
     bool wrote_data=false;
     char last_character='\0';
     for(;;){
-        int64_t count=invoke_syscall(SYS_FILE_READ,(uint64_t)descriptor,
-                                     (uint64_t)buffer,sizeof(buffer));
+        int64_t count=userspace_syscall(SYS_FILE_READ,(uint64_t)descriptor,
+                                        (uint64_t)buffer,sizeof(buffer));
         if(count<0){
             terminal_printf("cat: read failed (error %d)\n",(int)count);
             return;
@@ -143,10 +140,14 @@ static void show_file(const char *path){
 }
 
 static void list_directory(const char *path){
-    const char *target=path[0] ? path : "/";
+    char target[SHELL_PATH_CAPACITY];
+    if(!shell_path_resolve(path[0] ? path : ".",target)){
+        terminal_write("ls: invalid or too long path\n");
+        return;
+    }
     struct fs_directory_entry entries[32];
-    int64_t count=invoke_syscall(SYS_DIR_LIST,(uint64_t)target,
-                                 (uint64_t)entries,32);
+    int64_t count=userspace_syscall(SYS_DIR_LIST,(uint64_t)target,
+                                    (uint64_t)entries,32);
     if(count<0){
         terminal_printf("ls: cannot list directory (error %d)\n",(int)count);
         return;
@@ -172,20 +173,56 @@ static void create_path(const char *command, const char *path,
         terminal_printf("%s: missing path\n",command);
         return;
     }
-    int64_t status=invoke_syscall(syscall_number,(uint64_t)path,0,0);
+    char resolved[SHELL_PATH_CAPACITY];
+    if(!shell_path_resolve(path,resolved)){
+        terminal_printf("%s: invalid or too long path\n",command);
+        return;
+    }
+    int64_t status=userspace_syscall(syscall_number,(uint64_t)resolved,0,0);
     if(status<0){
         terminal_printf("%s: cannot create path (error %d)\n",command,(int)status);
         return;
     }
-    terminal_printf("%s: created %s\n",command,path);
+    terminal_printf("%s: created %s\n",command,resolved);
+}
+
+static void change_directory(const char *path){
+    char resolved[SHELL_PATH_CAPACITY];
+    if(!shell_path_resolve(path[0] ? path : "/",resolved)){
+        terminal_write("cd: invalid or too long path\n");
+        return;
+    }
+    struct fs_directory_entry probe;
+    int64_t status=userspace_syscall(SYS_DIR_LIST,(uint64_t)resolved,
+                                     (uint64_t)&probe,1);
+    if(status<0){
+        terminal_printf("cd: cannot enter directory (error %d)\n",(int)status);
+        return;
+    }
+    if(!shell_path_change(resolved)){
+        terminal_write("cd: failed to update current directory\n");
+    }
+}
+
+static void open_editor(const char *path){
+    if(!path[0]){
+        terminal_write("nano: missing file path\n");
+        return;
+    }
+    char resolved[SHELL_PATH_CAPACITY];
+    if(!shell_path_resolve(path,resolved)){
+        terminal_write("nano: invalid or too long path\n");
+        return;
+    }
+    nano_open(resolved);
 }
 
 static void show_disks(void){
     struct storage_device_info devices[12];
     struct storage_controller_info controllers[8];
-    int64_t disk_count=invoke_syscall(SYS_DISK_LIST,(uint64_t)devices,12,0);
-    int64_t controller_count=invoke_syscall(SYS_STORAGE_CONTROLLERS,
-                                            (uint64_t)controllers,8,0);
+    int64_t disk_count=userspace_syscall(SYS_DISK_LIST,(uint64_t)devices,12,0);
+    int64_t controller_count=userspace_syscall(SYS_STORAGE_CONTROLLERS,
+                                               (uint64_t)controllers,8,0);
     if(disk_count<0 || controller_count<0){
         terminal_write("disks: device enumeration failed\n");
         return;
@@ -267,8 +304,8 @@ static void format_fat32(const char *arguments){
     }
 
     terminal_printf("Formatting %s as PURECOS FAT32; do not power off...\n",device);
-    int64_t status=invoke_syscall(SYS_FAT32_FORMAT,(uint64_t)device,
-                                  (uint64_t)serial,(uint64_t)approval);
+    int64_t status=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)device,
+                                     (uint64_t)serial,(uint64_t)approval);
     if(status==FS_ERROR_CONFIRMATION){
         terminal_write("mkfs.fat32: erase confirmation does not match\n");
     } else if(status==FS_ERROR_NOT_BLANK){
@@ -291,8 +328,11 @@ static void show_help(void){
     terminal_write("  echo <text>       print text\n");
     terminal_write("  cat <file>        read a FAT32 file through syscalls\n");
     terminal_write("  ls [directory]    list a FAT32 directory\n");
+    terminal_write("  cd [directory]    change current FAT32 directory\n");
+    terminal_write("  pwd               show current directory\n");
     terminal_write("  touch <file>      create an empty FAT32 file\n");
     terminal_write("  mkdir <directory> create a FAT32 directory\n");
+    terminal_write("  nano <file>       open the small text editor\n");
     terminal_write("  disks             list disks and storage controllers\n");
     terminal_write("  mkfs.fat32 DEV SERIAL ERASE  format a blank disk\n");
     terminal_write("  dmesg             show kernel boot log\n");
@@ -346,10 +386,16 @@ void commands_execute(const char *line){
         show_file(arguments);
     } else if(strcmp(command,"ls")==0){
         list_directory(arguments);
+    } else if(strcmp(command,"cd")==0){
+        change_directory(arguments);
+    } else if(strcmp(command,"pwd")==0){
+        terminal_printf("%s\n",shell_path_current());
     } else if(strcmp(command,"touch")==0){
         create_path("touch",arguments,SYS_FILE_CREATE);
     } else if(strcmp(command,"mkdir")==0){
         create_path("mkdir",arguments,SYS_DIR_CREATE);
+    } else if(strcmp(command,"nano")==0){
+        open_editor(arguments);
     } else if(strcmp(command,"disks")==0){
         show_disks();
     } else if(strcmp(command,"mkfs.fat32")==0){

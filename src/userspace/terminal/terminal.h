@@ -1,4 +1,5 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
 void terminal_init(uint32_t screen_width, uint32_t screen_height);

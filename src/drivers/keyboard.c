@@ -26,6 +26,7 @@ static inline uint8_t inb(uint16_t port){ uint8_t ret; __asm__ volatile("inb %1,
 static inline void io_wait(void){ outb(0x80,0); }
 
 static bool shift_pressed = false;
+static bool control_pressed = false;
 static bool caps_lock = false;
 static uint8_t active_scan_set = 1;
 static bool set2_break_pending = false;
@@ -109,10 +110,20 @@ static void emit_key(const char *plain, const char *shifted, uint8_t sc){
         c = shift_pressed ? shifted[sc] : base;
         if(!c) c = base;
     }
+    if(control_pressed && c>='a' && c<='z') c=(char)(c-'a'+1);
+    else if(control_pressed && c>='A' && c<='Z') c=(char)(c-'A'+1);
     if(c) kbd_push(c);
 }
 
 static void handle_scancode_set1(uint8_t sc){
+    if(sc == 0x1D){
+        control_pressed = true;
+        return;
+    }
+    if(sc == 0x9D){
+        control_pressed = false;
+        return;
+    }
     if(sc == 0x2A || sc == 0x36){ // LSHIFT / RSHIFT press
         shift_pressed = true;
         return;
@@ -161,6 +172,10 @@ static void handle_scancode_set2(uint8_t sc){
 
     if(sc == 0x12 || sc == 0x59){ // LSHIFT / RSHIFT
         shift_pressed = !released;
+        return;
+    }
+    if(sc == 0x14){
+        control_pressed = !released;
         return;
     }
     if(released) return;
@@ -264,6 +279,7 @@ static bool configure_native_scan_set2(void){
 static bool decoder_self_test(void){
     active_scan_set = 2;
     shift_pressed = false;
+    control_pressed = false;
     caps_lock = false;
     set2_break_pending = false;
     set2_extended = false;
@@ -280,6 +296,7 @@ static bool decoder_self_test(void){
         && first=='a' && second=='\n';
 
     shift_pressed = false;
+    control_pressed = false;
     caps_lock = false;
     set2_break_pending = false;
     set2_extended = false;
