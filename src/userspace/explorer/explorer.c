@@ -16,6 +16,7 @@
 #define TOOLBAR_Y 38
 #define LIST_Y 72
 #define ROW_HEIGHT 20
+#define FILE_PREVIEW_CAPACITY 1024
 
 #define COLOR_BORDER 0x45475A
 #define COLOR_WINDOW 0x1E1E2E
@@ -31,7 +32,15 @@
 enum explorer_edit_mode {
     EXPLORER_EDIT_NONE,
     EXPLORER_EDIT_CREATE_DIRECTORY,
+    EXPLORER_EDIT_CREATE_FILE,
     EXPLORER_EDIT_RENAME
+};
+
+enum explorer_popup {
+    EXPLORER_POPUP_NONE,
+    EXPLORER_POPUP_NEW,
+    EXPLORER_POPUP_ENTRY,
+    EXPLORER_POPUP_DELETE_CONFIRM
 };
 
 static uint32_t window_x=34;
@@ -43,6 +52,7 @@ static bool dragging;
 static int32_t drag_offset_x;
 static int32_t drag_offset_y;
 static char current_path[EXPLORER_PATH_CAPACITY]="/";
+static char previous_path[EXPLORER_PATH_CAPACITY]="/";
 static struct fs_directory_entry entries[EXPLORER_ENTRY_LIMIT];
 static uint32_t entry_count;
 static int32_t selected_index=-1;
@@ -50,13 +60,21 @@ static enum explorer_edit_mode edit_mode;
 static char edit_buffer[EXPLORER_NAME_CAPACITY];
 static uint32_t edit_length;
 static const char *status_text="";
+static enum explorer_popup popup;
+static uint32_t popup_x;
+static uint32_t popup_y;
+static uint8_t previous_buttons;
+static bool viewing_file;
+static char preview_name[EXPLORER_NAME_CAPACITY];
+static char file_preview[FILE_PREVIEW_CAPACITY+1];
+static uint32_t file_preview_length;
 
 static uint32_t toolbar_button_width(void){
-    return (window_width-36)/5;
+    return 28;
 }
 
 static uint32_t toolbar_button_x(uint32_t index){
-    return window_x+10+index*(toolbar_button_width()+4);
+    return window_x+10+index*34;
 }
 
 static uint32_t visible_row_count(void){
@@ -127,11 +145,51 @@ static void draw_edit_box(void){
         return;
     }
     const char *label=edit_mode==EXPLORER_EDIT_CREATE_DIRECTORY
-        ? "New folder: " : "Rename: ";
+        ? "New folder: " : edit_mode==EXPLORER_EDIT_CREATE_FILE
+        ? "New file: " : "Rename: ";
     gop_draw_text_sized_at(window_x+16,y+9,label,COLOR_OK,COLOR_BUTTON,8);
     gop_draw_text_sized_at(window_x+112,y+9,edit_buffer,COLOR_TEXT,COLOR_BUTTON,8);
     uint32_t cursor_x=window_x+112+edit_length*8;
     gop_draw_rect(cursor_x,y+7,2,13,COLOR_TEXT);
+}
+
+static void draw_file_preview(uint32_t top, uint32_t height){
+    gop_draw_rect(window_x+10,top,window_width-20,height,COLOR_BUTTON);
+    gop_draw_text_sized_at(window_x+16,top+7,preview_name,COLOR_FOLDER,
+                           COLOR_BUTTON,8);
+    char line[46];
+    uint32_t input=0;
+    uint32_t y=top+26;
+    while(input<file_preview_length && y+9<top+height){
+        uint32_t length=0;
+        while(input<file_preview_length && file_preview[input]!='\n'
+              && length+1<sizeof(line)){
+            char c=file_preview[input++];
+            line[length++]=(c>=' ' && c<='~') ? c : '.';
+        }
+        if(input<file_preview_length && file_preview[input]=='\n') input++;
+        line[length]='\0';
+        gop_draw_text_sized_at(window_x+16,y,line,COLOR_TEXT,COLOR_BUTTON,8);
+        y+=12;
+    }
+}
+
+static void draw_popup(void){
+    if(popup==EXPLORER_POPUP_NONE) return;
+    uint32_t height=popup==EXPLORER_POPUP_ENTRY ? 72 : 48;
+    gop_draw_rect(popup_x,popup_y,130,height,COLOR_BORDER);
+    gop_draw_rect(popup_x+1,popup_y+1,128,height-2,COLOR_WINDOW);
+    if(popup==EXPLORER_POPUP_NEW){
+        gop_draw_text_sized_at(popup_x+8,popup_y+8,"New folder",COLOR_TEXT,COLOR_WINDOW,8);
+        gop_draw_text_sized_at(popup_x+8,popup_y+28,"New file",COLOR_TEXT,COLOR_WINDOW,8);
+    } else if(popup==EXPLORER_POPUP_DELETE_CONFIRM){
+        gop_draw_text_sized_at(popup_x+8,popup_y+8,"Delete now",COLOR_CLOSE,COLOR_WINDOW,8);
+        gop_draw_text_sized_at(popup_x+8,popup_y+28,"Cancel",COLOR_TEXT,COLOR_WINDOW,8);
+    } else {
+        gop_draw_text_sized_at(popup_x+8,popup_y+8,"Open",COLOR_TEXT,COLOR_WINDOW,8);
+        gop_draw_text_sized_at(popup_x+8,popup_y+28,"Rename",COLOR_TEXT,COLOR_WINDOW,8);
+        gop_draw_text_sized_at(popup_x+8,popup_y+48,"Delete",COLOR_CLOSE,COLOR_WINDOW,8);
+    }
 }
 
 void explorer_window_draw(void){
@@ -148,17 +206,23 @@ void explorer_window_draw(void){
     gop_draw_text_sized_at(window_x+window_width-23,window_y+10,"x",
                            COLOR_WINDOW,COLOR_CLOSE,9);
 
-    draw_button(0,"Up");
-    draw_button(1,"Open");
-    draw_button(2,"New dir");
-    draw_button(3,"Rename");
-    draw_button(4,"Reload");
+    draw_button(0,"<");
+    draw_button(1,"^");
+    draw_button(2,"R");
+    draw_button(3,"+");
 
     gop_draw_text_sized_at(window_x+12,window_y+64,current_path,COLOR_MUTED,
                            COLOR_WINDOW,8);
     uint32_t list_top=window_y+LIST_Y;
     uint32_t row_count=visible_row_count();
     uint32_t list_height=row_count*ROW_HEIGHT;
+    if(viewing_file){
+        draw_file_preview(list_top,list_height);
+        draw_edit_box();
+        draw_popup();
+        mouse_end_framebuffer_update();
+        return;
+    }
     gop_draw_rect(window_x+10,list_top,window_width-20,list_height,COLOR_BUTTON);
     uint32_t drawn_entries=entry_count<row_count ? entry_count : row_count;
     for(uint32_t index=0;index<drawn_entries;index++){
@@ -178,6 +242,7 @@ void explorer_window_draw(void){
         gop_draw_text_sized_at(window_x+16,list_top+8,"Directory is empty",
                                COLOR_MUTED,COLOR_BUTTON,8);
     draw_edit_box();
+    draw_popup();
     mouse_end_framebuffer_update();
 }
 
@@ -189,8 +254,13 @@ void explorer_open(uint32_t screen_width, uint32_t screen_height){
     visible=true;
     dragging=false;
     edit_mode=EXPLORER_EDIT_NONE;
+    popup=EXPLORER_POPUP_NONE;
+    viewing_file=false;
     current_path[0]='/';
     current_path[1]='\0';
+    previous_path[0]='/';
+    previous_path[1]='\0';
+    previous_buttons=0;
     refresh_entries();
 }
 
@@ -198,6 +268,8 @@ void explorer_window_close(void){
     visible=false;
     dragging=false;
     edit_mode=EXPLORER_EDIT_NONE;
+    popup=EXPLORER_POPUP_NONE;
+    viewing_file=false;
 }
 
 bool explorer_window_is_visible(void){ return visible; }
@@ -208,8 +280,14 @@ bool explorer_window_contains_point(int32_t x, int32_t y){
 }
 
 static void navigate_up(void){
+    if(viewing_file){
+        viewing_file=false;
+        status_text="";
+        return;
+    }
     uint32_t length=(uint32_t)strlen(current_path);
     if(length<=1) return;
+    copy_text(previous_path,sizeof(previous_path),current_path);
     while(length>1 && current_path[length-1]!='/') length--;
     if(length>1) length--;
     current_path[length]='\0';
@@ -218,12 +296,29 @@ static void navigate_up(void){
 
 static void open_selected(void){
     if(selected_index<0 || (uint32_t)selected_index>=entry_count){
-        status_text="Select a directory";
+        status_text="Select an entry";
         return;
     }
     struct fs_directory_entry *entry=&entries[selected_index];
     if(!(entry->attributes&FS_ATTRIBUTE_DIRECTORY)){
-        status_text="Opening files is not supported yet";
+        char path[EXPLORER_PATH_CAPACITY];
+        if(!build_child_path(path,entry->name)){
+            status_text="Path is too long";
+            return;
+        }
+        int64_t descriptor=userspace_syscall(SYS_FILE_OPEN,(uint64_t)path,0,0);
+        if(descriptor<0){ status_text="Cannot open file"; return; }
+        int64_t count=userspace_syscall(SYS_FILE_READ,(uint64_t)descriptor,
+                                        (uint64_t)file_preview,
+                                        FILE_PREVIEW_CAPACITY);
+        (void)userspace_syscall(SYS_FILE_CLOSE,(uint64_t)descriptor,0,0);
+        if(count<0){ status_text="Cannot read file"; return; }
+        file_preview_length=(uint32_t)count;
+        file_preview[file_preview_length]='\0';
+        copy_text(preview_name,sizeof(preview_name),entry->name);
+        viewing_file=true;
+        popup=EXPLORER_POPUP_NONE;
+        status_text=count==FILE_PREVIEW_CAPACITY ? "Preview truncated to 1 KiB" : "File preview";
         return;
     }
     char path[EXPLORER_PATH_CAPACITY];
@@ -231,6 +326,7 @@ static void open_selected(void){
         status_text="Path is too long";
         return;
     }
+    copy_text(previous_path,sizeof(previous_path),current_path);
     copy_text(current_path,sizeof(current_path),path);
     refresh_entries();
 }
@@ -251,11 +347,37 @@ static void begin_edit(enum explorer_edit_mode mode){
     status_text="Enter confirms, Esc cancels";
 }
 
+static void navigate_back(void){
+    if(viewing_file){ viewing_file=false; status_text=""; return; }
+    char swap[EXPLORER_PATH_CAPACITY];
+    copy_text(swap,sizeof(swap),current_path);
+    copy_text(current_path,sizeof(current_path),previous_path);
+    copy_text(previous_path,sizeof(previous_path),swap);
+    refresh_entries();
+}
+
+static void delete_selected(void){
+    if(selected_index<0 || (uint32_t)selected_index>=entry_count){
+        status_text="Select an entry";
+        return;
+    }
+    char path[EXPLORER_PATH_CAPACITY];
+    if(!build_child_path(path,entries[selected_index].name)){
+        status_text="Path is too long";
+        return;
+    }
+    int64_t result=userspace_syscall(SYS_FILE_DELETE,(uint64_t)path,0,0);
+    refresh_entries();
+    status_text=result==0 ? "Deleted" : "Delete failed (folder must be empty)";
+}
+
 bool explorer_window_handle_mouse(int32_t x, int32_t y, uint8_t buttons,
                                   bool pressed, bool released,
                                   uint32_t screen_width,
                                   uint32_t screen_height){
     if(!visible) return false;
+    bool right_pressed=(buttons&2) && !(previous_buttons&2);
+    previous_buttons=buttons;
     if(pressed && point_inside(x,y,window_x+window_width-27,window_y+6,18,18)){
         explorer_window_close();
         return true;
@@ -281,31 +403,64 @@ bool explorer_window_handle_mouse(int32_t x, int32_t y, uint8_t buttons,
         dragging=false;
         return true;
     }
+    if(right_pressed && edit_mode==EXPLORER_EDIT_NONE && !viewing_file){
+        uint32_t list_top=window_y+LIST_Y;
+        if(point_inside(x,y,window_x+10,list_top,window_width-20,
+                        visible_row_count()*ROW_HEIGHT)){
+            uint32_t index=((uint32_t)y-list_top)/ROW_HEIGHT;
+            if(index<entry_count){
+                selected_index=(int32_t)index;
+                popup=EXPLORER_POPUP_ENTRY;
+                popup_x=(uint32_t)x;
+                popup_y=(uint32_t)y;
+                if(popup_x+130>window_x+window_width) popup_x=window_x+window_width-134;
+                if(popup_y+72>window_y+window_height) popup_y=window_y+window_height-76;
+                return true;
+            }
+        }
+    }
     if(!pressed || edit_mode!=EXPLORER_EDIT_NONE) return false;
+
+    if(popup!=EXPLORER_POPUP_NONE){
+        uint32_t popup_height=popup==EXPLORER_POPUP_ENTRY ? 72 : 48;
+        if(point_inside(x,y,popup_x,popup_y,130,popup_height)){
+            uint32_t action=((uint32_t)y-popup_y)/20;
+            enum explorer_popup active=popup;
+            popup=EXPLORER_POPUP_NONE;
+            if(active==EXPLORER_POPUP_NEW){
+                begin_edit(action==0 ? EXPLORER_EDIT_CREATE_DIRECTORY
+                                     : EXPLORER_EDIT_CREATE_FILE);
+            } else if(active==EXPLORER_POPUP_DELETE_CONFIRM){
+                if(action==0) delete_selected();
+            } else if(action==0) open_selected();
+            else if(action==1) begin_edit(EXPLORER_EDIT_RENAME);
+            else popup=EXPLORER_POPUP_DELETE_CONFIRM;
+            return true;
+        }
+        popup=EXPLORER_POPUP_NONE;
+    }
 
     uint32_t toolbar_y=window_y+TOOLBAR_Y;
     uint32_t button_width=toolbar_button_width();
-    if(point_inside(x,y,toolbar_button_x(0),toolbar_y,button_width,24)) navigate_up();
-    else if(point_inside(x,y,toolbar_button_x(1),toolbar_y,button_width,24))
-        open_selected();
-    else if(point_inside(x,y,toolbar_button_x(2),toolbar_y,button_width,24))
-        begin_edit(EXPLORER_EDIT_CREATE_DIRECTORY);
-    else if(point_inside(x,y,toolbar_button_x(3),toolbar_y,button_width,24))
-        begin_edit(EXPLORER_EDIT_RENAME);
-    else if(point_inside(x,y,toolbar_button_x(4),toolbar_y,button_width,24))
-        refresh_entries();
+    if(point_inside(x,y,toolbar_button_x(0),toolbar_y,button_width,24)) navigate_back();
+    else if(point_inside(x,y,toolbar_button_x(1),toolbar_y,button_width,24)) navigate_up();
+    else if(point_inside(x,y,toolbar_button_x(2),toolbar_y,button_width,24)) refresh_entries();
+    else if(point_inside(x,y,toolbar_button_x(3),toolbar_y,button_width,24)){
+        popup=EXPLORER_POPUP_NEW;
+        popup_x=toolbar_button_x(3);
+        popup_y=toolbar_y+26;
+    }
     else {
         uint32_t list_top=window_y+LIST_Y;
         if(point_inside(x,y,window_x+10,list_top,window_width-20,
                         visible_row_count()*ROW_HEIGHT)){
             uint32_t index=((uint32_t)y-list_top)/ROW_HEIGHT;
             if(index<entry_count){
-                if(selected_index==(int32_t)index
-                   && (entries[index].attributes&FS_ATTRIBUTE_DIRECTORY)){
+                if(selected_index==(int32_t)index){
                     open_selected();
                 } else {
                     selected_index=(int32_t)index;
-                    status_text="Click again or press Open";
+                    status_text="Click again to open; right-click for actions";
                 }
             }
         }
@@ -321,14 +476,17 @@ static void submit_edit(void){
     int64_t result;
     const char *success_text;
     const char *failure_text;
-    if(edit_mode==EXPLORER_EDIT_CREATE_DIRECTORY){
+    if(edit_mode==EXPLORER_EDIT_CREATE_DIRECTORY
+       || edit_mode==EXPLORER_EDIT_CREATE_FILE){
         char path[EXPLORER_PATH_CAPACITY];
         if(!build_child_path(path,edit_buffer)){
             status_text="Path is too long";
             return;
         }
-        result=userspace_syscall(SYS_DIR_CREATE,(uint64_t)path,0,0);
-        success_text="Directory created";
+        bool directory=edit_mode==EXPLORER_EDIT_CREATE_DIRECTORY;
+        result=userspace_syscall(directory ? SYS_DIR_CREATE : SYS_FILE_CREATE,
+                                 (uint64_t)path,0,0);
+        success_text=directory ? "Directory created" : "File created";
         failure_text="Create failed (8.3 names only)";
     } else {
         char path[EXPLORER_PATH_CAPACITY];

@@ -1,5 +1,6 @@
 #include "keyboard.h"
 #include "../kernel/klog.h"
+#include "../kernel/scheduler.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -330,6 +331,7 @@ bool keyboard_try_getc(char *out){
 char keyboard_getc(void){
     char c;
     while(!keyboard_try_getc(&c)){
+        scheduler_yield();
         __asm__ volatile("pause");
         keyboard_poll();
     }

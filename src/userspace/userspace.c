@@ -2,6 +2,7 @@
 #include "explorer/explorer.h"
 #include "terminal/terminal.h"
 #include "monitor/monitor.h"
+#include "syscall.h"
 #include "../drivers/gop.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
@@ -11,6 +12,7 @@
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
 #include "../kernel/scheduler.h"
+#include "../kernel/syscall.h"
 #include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -35,6 +37,7 @@ static uint32_t explorer_icon_x=348;
 static uint32_t htop_icon_x=420;
 static uint32_t terminal_icon_x=500;
 static uint8_t previous_mouse_buttons;
+static bool power_menu_visible;
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -67,6 +70,22 @@ static void draw_terminal_icon(void){
     gop_draw_text_at(terminal_icon_x,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
 }
 
+static void draw_power_button(void){
+    uint32_t x=desktop_width-38;
+    gop_draw_rect(x,3,30,22,0x45475A);
+    gop_draw_text_at(x+7,9,"PWR",TOPBAR_FG,0x45475A);
+}
+
+static void draw_power_menu(void){
+    if(!power_menu_visible) return;
+    uint32_t x=desktop_width-158;
+    gop_draw_rect(x,28,150,62,0x45475A);
+    gop_draw_rect(x+2,30,146,28,0x1E1E2E);
+    gop_draw_rect(x+2,60,146,28,0x1E1E2E);
+    gop_draw_text_at(x+12,39,"Restart",TOPBAR_FG,0x1E1E2E);
+    gop_draw_text_at(x+12,69,"Power off",0xF38BA8,0x1E1E2E);
+}
+
 static void draw_desktop(void){
     desktop_width=gop_get_width();
     desktop_height=gop_get_height();
@@ -82,6 +101,7 @@ static void draw_desktop(void){
     draw_explorer_icon();
     draw_htop_icon();
     draw_terminal_icon();
+    draw_power_button();
 }
 
 static void redraw_scene(void){
@@ -90,6 +110,7 @@ static void redraw_scene(void){
     if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
+    draw_power_menu();
     mouse_end_framebuffer_update();
 }
 
@@ -100,7 +121,25 @@ static void handle_desktop_mouse(void){
     bool redraw=false;
     bool consumed=false;
 
-    if(explorer_window_is_visible()){
+    if(pressed && point_inside(mouse.x,mouse.y,desktop_width-38,3,30,22)){
+        power_menu_visible=!power_menu_visible;
+        consumed=true;
+        redraw=true;
+    } else if(pressed && power_menu_visible){
+        uint32_t menu_x=desktop_width-158;
+        if(point_inside(mouse.x,mouse.y,menu_x,28,150,30)){
+            (void)userspace_syscall(SYS_REBOOT,0,0,0);
+            consumed=true;
+        } else if(point_inside(mouse.x,mouse.y,menu_x,58,150,32)){
+            (void)userspace_syscall(SYS_SHUTDOWN,0,0,0);
+            consumed=true;
+        } else {
+            power_menu_visible=false;
+            redraw=true;
+        }
+    }
+
+    if(!consumed && explorer_window_is_visible()){
         consumed=explorer_window_contains_point(mouse.x,mouse.y);
         redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
                                              pressed,released,

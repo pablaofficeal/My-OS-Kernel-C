@@ -92,6 +92,12 @@ int64_t syscall_handler(struct syscall_regs *r){
             filesystem_syscall_unlock();
             return result;
         }
+        case SYS_FILE_CLOSE: {
+            filesystem_syscall_lock();
+            int32_t result=fat32_close((int32_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_FILE_DELETE: {
             filesystem_syscall_lock();
             int32_t result=fat32_delete((const char*)(uintptr_t)a1);

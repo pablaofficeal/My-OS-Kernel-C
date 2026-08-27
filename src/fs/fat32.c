@@ -366,6 +366,7 @@ static int32_t resolve_creation_parent(const char *path, uint32_t *parent,
 static int32_t allocate_cluster(uint32_t *cluster_result){
     if(!cluster_result) return FS_ERROR_INVALID;
     for(uint32_t cluster=2;cluster<volume.cluster_count+2;cluster++){
+        if((cluster&0xFFU)==0) scheduler_yield();
         uint32_t value;
         int32_t status=fat_next_cluster(cluster,&value);
         if(status<0) return status;
@@ -800,17 +801,31 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     return (int32_t)total_read;
 }
 
+int32_t fat32_close(int32_t descriptor){
+    int32_t index=descriptor-FAT32_DESCRIPTOR_BASE;
+    if(index<0 || index>=FAT32_MAX_OPEN_FILES || !handles[index].used)
+        return FS_ERROR_INVALID;
+    handles[index].used=false;
+    return 0;
+}
+
 int32_t fat32_delete(const char *path){
     struct fat32_entry_ref entry;
     int32_t status=resolve_entry(path,&entry,0);
     if(status<0) return status;
-    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY) return FS_ERROR_NOT_FILE;
     if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
     if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
-    for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
-        if(entry.first_cluster!=0 && handles[index].used
-           && handles[index].first_cluster==entry.first_cluster){
-            return FS_ERROR_BUSY;
+    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY){
+        struct fs_directory_entry child;
+        status=fat32_list(path,&child,1);
+        if(status<0) return status;
+        if(status>0) return FS_ERROR_NOT_BLANK;
+    } else {
+        for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
+            if(entry.first_cluster!=0 && handles[index].used
+               && handles[index].first_cluster==entry.first_cluster){
+                return FS_ERROR_BUSY;
+            }
         }
     }
 
@@ -957,10 +972,12 @@ static int32_t write_file_chain(uint32_t first_cluster, const uint8_t *data,
                                 uint32_t count){
     uint32_t cluster=first_cluster;
     uint32_t written=0;
+    uint32_t sectors_written=0;
     while(written<count){
         if(!valid_cluster(cluster)) return FS_ERROR_INVALID;
         uint32_t first_lba=cluster_lba(cluster);
         for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            if((sectors_written++&0x0FU)==0) scheduler_yield();
             memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
             uint32_t amount=count-written;
             if(amount>BLOCK_SECTOR_SIZE) amount=BLOCK_SECTOR_SIZE;
@@ -1078,6 +1095,7 @@ static int32_t verify_blank_device(uint32_t total_sectors){
     uint32_t scan_count=total_sectors<FAT32_FORMAT_BLANK_SCAN
         ? total_sectors : FAT32_FORMAT_BLANK_SCAN;
     for(uint32_t lba=0;lba<scan_count;lba++){
+        if((lba&0x3FU)==0) scheduler_yield();
         if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
         if(!sector_is_zero(sector_buffer)) return FS_ERROR_NOT_BLANK;
     }
@@ -1125,6 +1143,7 @@ static bool calculate_format_layout(uint32_t total_sectors,
 static bool write_zero_range(uint32_t first_lba, uint32_t count){
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
     for(uint32_t index=0;index<count;index++){
+        if((index&0x3FU)==0) scheduler_yield();
         if(!block_device_write(first_lba+index,sector_buffer)) return false;
     }
     return true;

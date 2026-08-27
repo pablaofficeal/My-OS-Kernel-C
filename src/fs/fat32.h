@@ -23,6 +23,7 @@ bool fat32_is_mounted(void);
 const char *fat32_device_name(void);
 int32_t fat32_open(const char *path);
 int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count);
+int32_t fat32_close(int32_t descriptor);
 int32_t fat32_delete(const char *path);
 int32_t fat32_rename(const char *path, const char *new_name);
 int32_t fat32_move(const char *path, const char *destination_directory);
