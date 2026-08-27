@@ -275,97 +275,193 @@ bool desktop_apps_handle_mouse(int32_t px, int32_t py, uint8_t buttons,
 }
 static int64_t parse_calc(void) {
   int64_t result = 0;
-  for (uint32_t i = 0; i < input_length; i++)
-    if (input[i] >= '0' && input[i] <= '9')
+
+  for (uint32_t i = 0; i < input_length; i++) {
+    if (input[i] >= '0' && input[i] <= '9') {
       result = result * 10 + (input[i] - '0');
-  return result;
-}
-bool desktop_apps_handle_key(char key) {
-  if (!visible)
-    return false;
-  if (active_app != DESKTOP_APP_CALCULATOR) {
-    if (!editing) {
-      if (key == 'e' || key == 'E') {
-        editing = true;
-        input_length = 0;
-        input[0] = '\0';
-        message = active_app == DESKTOP_APP_CLOCK ? "Enter full date and time"
-                                                  : "Enter date";
-      } else
-        return false;
-    } else if (key == 27) {
-      editing = false;
-    } else if (key == '\n' || key == '\r') {
-      struct datetime parsed;
-      if (parse_datetime(input, &parsed, active_app == DESKTOP_APP_CALENDAR)) {
-        if (active_app == DESKTOP_APP_CALENDAR) {
-          parsed.hour = value.hour;
-          parsed.minute = value.minute;
-          parsed.second = value.second;
-        }
-        value = parsed;
-        last_uptime_second = system_info_uptime_ms() / 1000;
-        save_datetime();
-        editing = false;
-      } else
-        message = "Invalid date/time";
-    } else if ((key == '\b' || key == 127) && input_length)
-      input[--input_length] = '\0';
-    else if (key >= ' ' && key <= '~' && input_length + 1 < sizeof(input)) {
-      input[input_length++] = key;
-      input[input_length] = '\0';
-    }
-  } else {
-    if (key == 'c' || key == 'C') {
-      input_length = 0;
-      input[0] = '\0';
-      calc_have_left = false;
-      message = "";
-    } else if (key >= '0' && key <= '9' && input_length + 1 < sizeof(input)) {
-      input[input_length++] = key;
-      input[input_length] = '\0';
-    } else if ((key == '+' || key == '-' || key == '*' || key == '/') &&
-               input_length) {
-      calc_left = parse_calc();
-      calc_op = key;
-      calc_have_left = true;
-      input_length = 0;
-      input[0] = '\0';
-    } else if ((key == '\n' || key == '=') && calc_have_left && input_length) {
-      int64_t right = parse_calc(), answer = 0;
-      bool ok = true;
-      if (calc_op == '+')
-        answer = calc_left + right;
-      else if (calc_op == '-')
-        answer = calc_left - right;
-      else if (calc_op == '*')
-        answer = calc_left * right;
-      else if (right)
-        answer = calc_left / right;
-      else
-        ok = false;
-      input_length = 0;
-      char reverse[24];
-      uint32_t n = 0;
-      bool neg = answer < 0;
-      uint64_t magnitude =
-          neg ? (uint64_t)(-(answer + 1)) + 1 : (uint64_t)answer;
-      do {
-        reverse[n++] = (char)('0' + magnitude % 10);
-        magnitude /= 10;
-      } while (magnitude);
-      if (neg)
-        input[input_length++] = '-';
-      while (n)
-        input[input_length++] = reverse[--n];
-      input[input_length] = '\0';
-      message = ok ? "Result" : "Division by zero";
-      calc_have_left = false;
     }
   }
+
+  return result;
+}
+
+static void clear_input(void) {
+  input_length = 0;
+  input[0] = '\0';
+}
+
+static bool append_input(char character) {
+  if (input_length + 1 >= sizeof(input)) {
+    return false;
+  }
+
+  input[input_length++] = character;
+  input[input_length] = '\0';
+  return true;
+}
+
+static void format_calc_result(int64_t answer) {
+  char reverse[24];
+  uint32_t length = 0;
+  bool negative = answer < 0;
+  uint64_t magnitude;
+
+  if (negative) {
+    magnitude = (uint64_t)(-(answer + 1)) + 1;
+  } else {
+    magnitude = (uint64_t)answer;
+  }
+
+  do {
+    reverse[length++] = (char)('0' + magnitude % 10);
+    magnitude /= 10;
+  } while (magnitude != 0);
+
+  clear_input();
+  if (negative) {
+    append_input('-');
+  }
+  while (length > 0) {
+    append_input(reverse[--length]);
+  }
+}
+
+static void reset_calculator(void) {
+  clear_input();
+  calc_have_left = false;
+  message = "";
+}
+
+static void select_calc_operator(char operation) {
+  calc_left = parse_calc();
+  calc_op = operation;
+  calc_have_left = true;
+  clear_input();
+}
+
+static void evaluate_calculator(void) {
+  int64_t right = parse_calc();
+  int64_t answer = 0;
+  bool valid = true;
+
+  switch (calc_op) {
+  case '+':
+    answer = calc_left + right;
+    break;
+  case '-':
+    answer = calc_left - right;
+    break;
+  case '*':
+    answer = calc_left * right;
+    break;
+  case '/':
+    if (right == 0) {
+      valid = false;
+    } else {
+      answer = calc_left / right;
+    }
+    break;
+  default:
+    valid = false;
+    break;
+  }
+
+  format_calc_result(answer);
+  message = valid ? "Result" : "Division by zero";
+  calc_have_left = false;
+}
+
+static void handle_calculator_key(char key) {
+  bool is_operator = key == '+' || key == '-' || key == '*' || key == '/';
+
+  if (key == 'c' || key == 'C') {
+    reset_calculator();
+    return;
+  }
+
+  if (key >= '0' && key <= '9') {
+    append_input(key);
+    return;
+  }
+
+  if (is_operator && input_length > 0) {
+    select_calc_operator(key);
+    return;
+  }
+
+  if ((key == '\n' || key == '\r' || key == '=') && calc_have_left &&
+      input_length > 0) {
+    evaluate_calculator();
+  }
+}
+
+static bool handle_datetime_key(char key) {
+  if (!editing) {
+    if (key != 'e' && key != 'E') {
+      return false;
+    }
+
+    editing = true;
+    clear_input();
+    message = active_app == DESKTOP_APP_CLOCK ? "Enter full date and time"
+                                              : "Enter date";
+    return true;
+  }
+
+  if (key == 27) {
+    editing = false;
+    return true;
+  }
+
+  if ((key == '\b' || key == 127) && input_length > 0) {
+    input[--input_length] = '\0';
+    return true;
+  }
+
+  if (key == '\n' || key == '\r') {
+    struct datetime parsed;
+    bool date_only = active_app == DESKTOP_APP_CALENDAR;
+
+    if (!parse_datetime(input, &parsed, date_only)) {
+      message = "Invalid date/time";
+      return true;
+    }
+
+    if (date_only) {
+      parsed.hour = value.hour;
+      parsed.minute = value.minute;
+      parsed.second = value.second;
+    }
+
+    value = parsed;
+    last_uptime_second = system_info_uptime_ms() / 1000;
+    save_datetime();
+    editing = false;
+    return true;
+  }
+
+  if (key >= ' ' && key <= '~') {
+    append_input(key);
+  }
+
+  return true;
+}
+
+bool desktop_apps_handle_key(char key) {
+  if (!visible) {
+    return false;
+  }
+
+  if (active_app == DESKTOP_APP_CALCULATOR) {
+    handle_calculator_key(key);
+  } else if (!handle_datetime_key(key)) {
+    return false;
+  }
+
   desktop_apps_draw();
   return true;
 }
+
 void desktop_apps_update(void) {
   uint64_t now = system_info_uptime_ms() / 1000;
   while (last_uptime_second < now) {
