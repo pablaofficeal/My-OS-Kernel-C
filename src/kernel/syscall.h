@@ -29,6 +29,10 @@
 #define SYS_CPU_INFO 215
 #define SYS_MEMORY_INFO 216
 #define SYS_DISK_STATS 217
+#define SYS_REBOOT 218
+#define SYS_SHUTDOWN 219
+#define SYS_BATTERY_INFO 220
+#define SYS_SCHED_YIELD 221
 
 #define CPU_MONITOR_NAME_CAPACITY 49
 
@@ -76,6 +80,17 @@ struct usb_scan_status {
     uint32_t ehci_disks;
     uint32_t ehci_failures;
     uint32_t ehci_stage;
+};
+
+struct battery_info {
+    uint32_t present;
+    uint32_t percent; // 0-100
+    uint32_t charging; // 0 discharging, 1 charging, 2 charged
+    uint32_t remaining_minutes;
+    uint32_t voltage_mv;
+    uint32_t current_ma;
+    char name[32];
+    char status_text[32]; // "Charging", "Discharging", "AC"
 };
 
 struct syscall_regs {

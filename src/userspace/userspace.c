@@ -67,13 +67,6 @@ static void draw_desktop(void){
     gop_clear(DESKTOP_BG);
     gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
     gop_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
-    gop_draw_text_at(120,8,"Userspace 0.2.0",TOPBAR_FG,TOPBAR_BG);
-
-    const char *status="desktop: icons  |  drag title bars  |  help";
-    uint32_t status_width=(uint32_t)strlen(status)*8;
-    uint32_t status_x=desktop_width>status_width+12
-        ? desktop_width-status_width-12 : 220;
-    gop_draw_text_at(status_x,8,status,TOPBAR_MUTED,TOPBAR_BG);
     draw_htop_icon();
     draw_terminal_icon();
 }
