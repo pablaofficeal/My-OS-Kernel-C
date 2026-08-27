@@ -29,7 +29,7 @@ static volatile LIMINE_BASE_REVISION(0);
 __attribute__((used, section(".requests")))
 static volatile struct limine_framebuffer_request framebuffer_request = {
     .id = LIMINE_FRAMEBUFFER_REQUEST,
-    .revision = 0
+    .revision = 1
 };
 
 __attribute__((used, section(".requests")))
@@ -127,8 +127,7 @@ void _start(void) {
         for(;;) __asm__ volatile("cli; hlt");
     }
     if(fb_ptr->bpp != 32){
-        serial_write_string("[EARLY PANIC] framebuffer is not 32 bpp\n");
-        for(;;) __asm__ volatile("cli; hlt");
+        serial_write_string("[EARLY WARN] framebuffer bpp !=32, trying to continue\n");
     }
     memmap_response_ptr = memmap_request.response;
 
@@ -163,12 +162,14 @@ void _start(void) {
     if(!hhdm_request.response) kernel_panic("Limine HHDM response is missing");
     if(!kernel_address_request.response) kernel_panic("Limine kernel address response is missing");
     if(!memmap_response_ptr) kernel_panic("Limine memory map response is missing");
-    boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "32-bpp framebuffer validated");
+    if(fb_ptr->bpp==32) boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "32-bpp framebuffer validated");
+    else boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "framebuffer validated (non-32 bpp)");
     klog(KLOG_OK, "Limine boot: 64-bit long mode, paging enabled");
     klogf(KLOG_INFO, "HHDM offset: 0x%llx", hhdm_request.response ? hhdm_request.response->offset : 0);
     if(gop_is_available()){
-        klogf(KLOG_OK, "%s initialized: %dx%d bpp=%d",
-              gop_get_protocol_name(),fb_ptr->width,fb_ptr->height,fb_ptr->bpp);
+        klogf(KLOG_OK, "%s initialized: %dx%d bpp=%d pitch=%d",
+              gop_get_protocol_name(),fb_ptr->width,fb_ptr->height,fb_ptr->bpp,fb_ptr->pitch);
+        if(fb_ptr->bpp!=32) klogf(KLOG_WARN, "GOP bpp %d !=32: rendering assumes 32 bpp – colors may be off but boot continues", fb_ptr->bpp);
     } else {
         klog(KLOG_WARN, "GOP unavailable, fallback to VGA text 80x25");
     }

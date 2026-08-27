@@ -192,8 +192,10 @@ int64_t syscall_handler(struct syscall_regs *r){
             for(;;) __asm__ volatile("cli; hlt");
         case SYS_SLEEP:
             if(a1>UINT32_MAX) return -1;
+            // Real HW: PIT IRQ may not arrive via APIC – используем busy-wait чтобы не виснуть на hlt.
+            // 1ms ~ 1e6 nop+pause, калибровка грубая но не требует timer_tick.
             for(volatile uint64_t wait=0;wait<a1*1000000ULL;wait++){
-                __asm__ volatile("nop");
+                __asm__ volatile("pause");
             }
             return 0;
         default:

@@ -7,8 +7,6 @@
 #include "../../kernel/klog.h"
 #include <stdint.h>
 
-// Linux psmouse упрощённо: 8042 + IRQ12, 3-байтный пакет
-// Порты 8042
 #define PS2_DATA   0x60
 #define PS2_STATUS 0x64
 #define PS2_CMD    0x64
@@ -19,29 +17,46 @@ static inline void outb(uint16_t p, uint8_t v){ __asm__ volatile("outb %0,%1"::"
 static inline uint8_t inb(uint16_t p){ uint8_t r; __asm__ volatile("inb %1,%0":"=a"(r):"Nd"(p)); return r; }
 static inline void io_wait(void){ outb(0x80,0); }
 
-static void ps2_wait_input(void){ for(int i=0;i<100000;i++){ if(!(inb(PS2_STATUS)&2)) return; } }
-static void ps2_wait_output(void){ for(int i=0;i<100000;i++){ if(inb(PS2_STATUS)&1) return; } }
-
-static void ps2_write_cmd(uint8_t cmd){
-    ps2_wait_input();
-    outb(PS2_CMD, cmd);
+static bool ps2_wait_input(void){
+    for(int i=0;i<100000;i++){ if(!(inb(PS2_STATUS)&2)) return true; __asm__ volatile("pause"); }
+    return false;
 }
-static void ps2_write_data(uint8_t data){
-    ps2_wait_input();
+static bool ps2_wait_output(void){
+    for(int i=0;i<100000;i++){ if(inb(PS2_STATUS)&1) return true; __asm__ volatile("pause"); }
+    return false;
+}
+
+static bool ps2_write_cmd(uint8_t cmd){
+    if(!ps2_wait_input()) return false;
+    outb(PS2_CMD, cmd);
+    return true;
+}
+static bool ps2_write_data(uint8_t data){
+    if(!ps2_wait_input()) return false;
     outb(PS2_DATA, data);
+    return true;
+}
+static bool ps2_read_data_timeout(uint8_t *out){
+    if(!ps2_wait_output()) return false;
+    *out=inb(PS2_DATA);
+    return true;
 }
 static uint8_t ps2_read_data(void){
-    ps2_wait_output();
-    return inb(PS2_DATA);
+    uint8_t v=0;
+    (void)ps2_read_data_timeout(&v);
+    return v;
 }
-// Отправка в мышь: D4 + data
-static void mouse_write(uint8_t data){
-    ps2_write_cmd(0xD4);
-    ps2_write_data(data);
+static bool mouse_write(uint8_t data){
+    if(!ps2_write_cmd(0xD4)) return false;
+    if(!ps2_write_data(data)) return false;
+    return true;
 }
 static uint8_t mouse_read_ack(void){
-    uint8_t c = ps2_read_data();
-    // ACK 0xFA, Resend 0xFE, Error 0xFC
+    uint8_t c = 0xFF;
+    for(int tries=0; tries<10; tries++){
+        if(ps2_read_data_timeout(&c)) break;
+        for(volatile int d=0; d<10000; d++) __asm__ volatile("pause");
+    }
     return c;
 }
 
@@ -173,8 +188,6 @@ static void draw_cursor(int32_t x,int32_t y){
     }
     save_bg(x, y);
     first_draw=false;
-    // Рисуем новый курсор: белая стрелка с чёрной рамкой
-    // Простая стрелка: треугольник
     for(int dy=0;dy<CURS_H;dy++){
         for(int dx=0;dx<CURS_W;dx++){
             bool inside = false;
@@ -272,60 +285,93 @@ void ps2_mouse_poll(void){
 void ps2_mouse_init(void){
     klog(KLOG_INFO, "psmouse: initializing PS/2 mouse (Linux psmouse style)");
 
-    // Включаем мышь через 8042, как в Linux
-    // 1. Включить AUX
-    ps2_write_cmd(0xA8);
+    uint8_t probe_status = inb(PS2_STATUS);
+    if(probe_status == 0xFF){
+        klog(KLOG_WARN, "psmouse: no 8042 controller (status 0xFF) – PS/2 disabled, using USB mouse only");
+        debug_state.initialized=true;
+        debug_state.enabled=false;
+        goto ps2_init_done;
+    }
+
+    if(!ps2_write_cmd(0xA8)){
+        klog(KLOG_WARN, "psmouse: 8042 not responding to 0xA8");
+        goto ps2_init_no_mouse;
+    }
     io_wait();
-    // 2. Прочитать Command Byte
-    ps2_write_cmd(0x20);
-    ps2_wait_output();
-    uint8_t status = inb(PS2_DATA);
+    if(!ps2_write_cmd(0x20)){
+        klog(KLOG_WARN, "psmouse: 8042 not responding to read cmd byte");
+        goto ps2_init_no_mouse;
+    }
+    uint8_t status;
+    if(!ps2_read_data_timeout(&status)){
+        klog(KLOG_WARN, "psmouse: 8042 no command byte reply – PS/2 disabled");
+        goto ps2_init_no_mouse;
+    }
     klogf(KLOG_DEBUG, "psmouse: command byte=0x%x", status);
-    // Включить IRQ12 (bit1), отключить clock мыши? bit5
     status |= 0x02; // enable IRQ12
     status &= ~0x20; // enable mouse
-    // Записать обратно
-    ps2_write_cmd(0x60);
-    ps2_write_data(status);
+    if(!ps2_write_cmd(0x60) || !ps2_write_data(status)){
+        klog(KLOG_WARN, "psmouse: 8042 failed to write command byte");
+        goto ps2_init_no_mouse;
+    }
     io_wait();
 
-    // 3. Сброс мыши
-    mouse_write(0xFF);
+    if(!mouse_write(0xFF)){
+        klog(KLOG_WARN, "psmouse: mouse_write 0xFF failed – no PS/2 mouse");
+        goto ps2_init_no_mouse;
+    }
     uint8_t ack = mouse_read_ack();
     debug_state.reset_ack=ack;
     if(ack==0xFA){
-        uint8_t bat = ps2_read_data(); // 0xAA
-        uint8_t id = ps2_read_data(); // 0x00
-        (void)bat; (void)id;
+        uint8_t bat=0xFF, id=0xFF;
+        bool has_bat = ps2_read_data_timeout(&bat);
+        bool has_id = ps2_read_data_timeout(&id);
+        (void)has_bat; (void)has_id;
         klog(KLOG_OK, "psmouse: reset OK (BAT 0xAA)");
     } else {
-        klogf(KLOG_WARN, "psmouse: reset ack=0x%x", ack);
+        klogf(KLOG_WARN, "psmouse: reset ack=0x%x (no mouse or not PS/2)", ack);
+        // не считаем фатальным – пробуем дальше, может мышь всё равно ответит на enable
     }
     // 4. Set defaults
-    mouse_write(0xF6);
-    mouse_read_ack();
+    if(mouse_write(0xF6)) (void)mouse_read_ack();
     // 5. Включить поток данных
-    mouse_write(0xF4);
-    uint8_t ack2 = mouse_read_ack();
-    debug_state.enable_ack=ack2;
-    if(ack2==0xFA){
-        has_mouse=true;
-        debug_state.enabled=true;
-        klog(KLOG_OK, "psmouse: enabled, IRQ12 active");
+    bool en_ok = false;
+    if(mouse_write(0xF4)){
+        uint8_t ack2 = mouse_read_ack();
+        debug_state.enable_ack=ack2;
+        if(ack2==0xFA){
+            has_mouse=true;
+            debug_state.enabled=true;
+            en_ok=true;
+            klog(KLOG_OK, "psmouse: enabled, IRQ12 active");
+        } else {
+            klogf(KLOG_WARN, "psmouse: enable failed ack=0x%x – PS/2 mouse not present", ack2);
+        }
     } else {
-        klogf(KLOG_ERROR, "psmouse: enable failed ack=0x%x", ack2);
+        klog(KLOG_WARN, "psmouse: mouse_write 0xF4 failed");
+    }
+    if(!en_ok){
+        // PS/2 мыши нет – это нормально на ноутбуках без PS/2, продолжим с USB
+    ps2_init_no_mouse:
+        debug_state.enabled=false;
+        has_mouse=false;
+        klog(KLOG_INFO, "psmouse: PS/2 mouse not detected – USB mouse will be used if present");
+    }
+    // Размаскировать IRQ12 только если есть шанс что мышь есть
+    if(has_mouse || debug_state.enabled){
+        uint8_t m1 = inb(0x21);
+        uint8_t m2 = inb(0xA1);
+        m1 &= ~(1<<2); // cascade
+        m2 &= ~(1<<4); // IRQ12 -> slave bit4
+        outb(0x21, m1);
+        outb(0xA1, m2);
+        klog(KLOG_DEBUG, "psmouse: PIC unmasked IRQ2+IRQ12");
+    } else {
+        klog(KLOG_DEBUG, "psmouse: PIC IRQ12 left masked (no PS/2 mouse)");
+        // оставляем замаскированным чтобы не получать spurious IRQ12
     }
 
-    // Размаскировать IRQ12 (и каскад IRQ2)
-    // pic_mask_all уже, теперь разрешим 2 и 12
-    // 0x21 master, 0xA1 slave
-    uint8_t m1 = inb(0x21);
-    uint8_t m2 = inb(0xA1);
-    m1 &= ~(1<<2); // cascade
-    m2 &= ~(1<<4); // IRQ12 -> slave bit4
-    outb(0x21, m1);
-    outb(0xA1, m2);
-    klog(KLOG_DEBUG, "psmouse: PIC unmasked IRQ2+IRQ12");
+ps2_init_done:
 
     if(gop_is_available()){
         bound_w = gop_get_width();

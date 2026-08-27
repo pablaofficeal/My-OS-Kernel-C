@@ -10,7 +10,7 @@
 #define XHCI_DEVICE_LIMIT       4
 #define XHCI_RING_ENTRIES       64
 #define XHCI_EVENT_ENTRIES      128
-#define XHCI_TIMEOUT            10000000U
+#define XHCI_TIMEOUT            50000000U
 #define XHCI_MMIO_MAP_SIZE      0x100000U
 #define XHCI_SCRATCHPAD_LIMIT   1023
 #define XHCI_NO_DEVICE          0xFF
@@ -453,7 +453,7 @@ static bool reset_port(uint8_t port_number, uint8_t *speed){
         klogf(KLOG_WARN,"xhci%u: port%u PP=0, powering on",controller_number,port_number);
         port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                           |XHCI_PORT_RESET))|XHCI_PORT_POWER;
-        delay_ms(20);
+        delay_ms(50);
         status=port[0];
         xhci_log_port(port_number,status,"after-PP-set");
         if(!(status&XHCI_PORT_CONNECTED)){
@@ -465,6 +465,7 @@ static bool reset_port(uint8_t port_number, uint8_t *speed){
         if(!(status&XHCI_PORT_POWER)){
             klogf(KLOG_WARN,"xhci%u: port%u PP still 0 after SET (PORTSC=0x%08x)",controller_number,port_number,status);
         }
+        delay_ms(20);
     }
     uint32_t writable=status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                                |XHCI_PORT_RESET);
@@ -477,7 +478,7 @@ static bool reset_port(uint8_t port_number, uint8_t *speed){
         klogf(KLOG_ERROR,"xhci%u: port%u PR timeout (PORTSC=0x%08x)",controller_number,port_number,port[0]);
         return false;
     }
-    delay_ms(20);
+    delay_ms(50);
     status=port[0];
     xhci_log_port(port_number,status,"after-PR");
     probe_stats.last_portsc=status;
@@ -676,19 +677,18 @@ static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
     configure_endpoint_context(endpoint,7,packet_size,&bulk_in_rings[index]);
     uint8_t xhci_interval;
     if(speed<=2){
-        uint16_t frames=interval ? interval : 1;
-        xhci_interval=3;
-        while(frames>1 && xhci_interval<10){
-            frames=(uint16_t)((frames+1)/2);
-            xhci_interval++;
-        }
+        xhci_interval = interval ? interval : 1;
+        if(xhci_interval==0) xhci_interval=10;
+        klogf(KLOG_DEBUG,"xhci%u: FS/LS mouse interval bInterval=%u -> xHCI interval=%u",controller_number,interval,xhci_interval);
     } else {
         if(interval<1) interval=1;
         if(interval>16) interval=16;
         xhci_interval=(uint8_t)(interval-1);
+        klogf(KLOG_DEBUG,"xhci%u: HS/SS mouse interval bInterval=%u -> xHCI interval=%u",controller_number,interval,xhci_interval);
     }
     endpoint[0]=(uint32_t)xhci_interval<<16;
     uint16_t report_length=packet_size<8 ? packet_size : 8;
+    // Average TRB Length (low 16) = 8, Max ESIT Payload (high 16) = wMaxPacket
     endpoint[4]=(uint32_t)report_length|((uint32_t)packet_size<<16);
     if(!submit_command(physical_address(input),XHCI_TRB_CONFIGURE_EP,
                        devices[index].slot_id,0)) return false;
