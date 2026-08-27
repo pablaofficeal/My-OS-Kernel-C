@@ -420,9 +420,18 @@ static int32_t clear_cluster_chain(uint32_t first_cluster){
 }
 
 static bool mount_boot_sector(uint32_t partition_lba){
-    if(!block_device_read(partition_lba,sector_buffer)) return false;
-    if(sector_buffer[510]!=0x55 || sector_buffer[511]!=0xAA) return false;
-    if(memcmp(&sector_buffer[71],required_volume_label,11)!=0) return false;
+    if(!block_device_read(partition_lba,sector_buffer)){
+        klogf(KLOG_DEBUG,"mount: read LBA %u failed",partition_lba);
+        return false;
+    }
+    if(sector_buffer[510]!=0x55 || sector_buffer[511]!=0xAA){
+        klogf(KLOG_DEBUG,"mount: LBA %u no boot sig %02x %02x",partition_lba,sector_buffer[510],sector_buffer[511]);
+        return false;
+    }
+    if(memcmp(&sector_buffer[71],required_volume_label,11)!=0){
+        klogf(KLOG_DEBUG,"mount: LBA %u label mismatch",partition_lba);
+        return false;
+    }
 
     uint16_t bytes_per_sector=read_u16(&sector_buffer[11]);
     uint8_t sectors_per_cluster=sector_buffer[13];
@@ -439,16 +448,30 @@ static bool mount_boot_sector(uint32_t partition_lba){
        || (sectors_per_cluster&(sectors_per_cluster-1))!=0
        || reserved_sectors==0 || fat_count==0 || fat_size==0 || total_sectors==0
        || root_entry_count!=0 || fat16_size!=0){
+        klogf(KLOG_DEBUG,"mount: LBA %u bpb invalid bps=%u spc=%u res=%u fats=%u fsz=%u tot=%u rootEC=%u f16=%u",
+              partition_lba,bytes_per_sector,sectors_per_cluster,reserved_sectors,fat_count,fat_size,total_sectors,root_entry_count,fat16_size);
         return false;
     }
 
     uint64_t fat_sectors=(uint64_t)fat_count*fat_size;
-    if((uint64_t)reserved_sectors+fat_sectors>=total_sectors) return false;
+    if((uint64_t)reserved_sectors+fat_sectors>=total_sectors){
+        klogf(KLOG_DEBUG,"mount: LBA %u fat+res %llu >= tot %u",partition_lba,(unsigned long long)fat_sectors+reserved_sectors,total_sectors);
+        return false;
+    }
     uint32_t data_sectors=total_sectors-reserved_sectors-(uint32_t)fat_sectors;
     uint32_t cluster_count=data_sectors/sectors_per_cluster;
-    if(cluster_count<65525 || root_cluster<2 || root_cluster>=cluster_count+2) return false;
-    if((uint64_t)fat_size*(BLOCK_SECTOR_SIZE/4)<cluster_count+2) return false;
-    if((uint64_t)partition_lba+total_sectors>0x10000000ULL) return false;
+    if(cluster_count<65525 || root_cluster<2 || root_cluster>=cluster_count+2){
+        klogf(KLOG_DEBUG,"mount: LBA %u clusters %u root %u",partition_lba,cluster_count,root_cluster);
+        return false;
+    }
+    if((uint64_t)fat_size*(BLOCK_SECTOR_SIZE/4)<cluster_count+2){
+        klogf(KLOG_DEBUG,"mount: LBA %u fat too small %u clusters %u",partition_lba,fat_size,cluster_count);
+        return false;
+    }
+    if((uint64_t)partition_lba+total_sectors>0x10000000ULL){
+        klogf(KLOG_DEBUG,"mount: LBA %u tot %u exceeds limit",partition_lba,total_sectors);
+        return false;
+    }
 
     volume.partition_lba=partition_lba;
     volume.fat_lba=partition_lba+reserved_sectors;
