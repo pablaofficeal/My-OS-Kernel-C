@@ -9,6 +9,7 @@
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/storage/ahci.h"
 #include "../drivers/usb/xhci.h"
+#include "../drivers/usb/ehci.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -82,6 +83,9 @@ void _start(void) {
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);
         xhci_set_address_mapping(hhdm_request.response->offset,
+                                 kernel_address_request.response->physical_base,
+                                 kernel_address_request.response->virtual_base);
+        ehci_set_address_mapping(hhdm_request.response->offset,
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);
     }

@@ -2,6 +2,7 @@
 #include "ahci.h"
 #include "ata_pio.h"
 #include "../usb/xhci.h"
+#include "../usb/ehci.h"
 #include "../../lib/string.h"
 
 #define BLOCK_TRANSPORT_NONE 0
@@ -13,6 +14,8 @@ bool block_device_init(void){
     bool ata_available=ata_pio_init();
     bool ahci_available=ahci_init(ata_pio_device_count());
     bool usb_available=xhci_init(ata_pio_device_count()+ahci_device_count());
+    bool ehci_available=ehci_init(ata_pio_device_count()+ahci_device_count()
+                                  +xhci_device_count());
     if(active_transport==BLOCK_TRANSPORT_NONE){
         if(ata_available){
             active_transport=STORAGE_TRANSPORT_ATA_PIO;
@@ -26,14 +29,19 @@ bool block_device_init(void){
             active_transport=STORAGE_TRANSPORT_USB_MSC;
             active_index=0;
             (void)xhci_select_device(0);
+        } else if(ehci_available){
+            active_transport=STORAGE_TRANSPORT_USB_EHCI;
+            active_index=0;
+            (void)ehci_select_device(0);
         }
     }
-    return ata_available || ahci_available || usb_available;
+    return ata_available || ahci_available || usb_available || ehci_available;
 }
 
 uint32_t block_device_count(void){
     (void)block_device_init();
-    return ata_pio_device_count()+ahci_device_count()+xhci_device_count();
+    return ata_pio_device_count()+ahci_device_count()+xhci_device_count()
+        +ehci_device_count();
 }
 
 bool block_device_get_info(uint32_t index, struct storage_device_info *info){
@@ -41,6 +49,7 @@ bool block_device_get_info(uint32_t index, struct storage_device_info *info){
     (void)block_device_init();
     uint32_t ata_count=ata_pio_device_count();
     uint32_t ahci_count=ahci_device_count();
+    uint32_t xhci_count=xhci_device_count();
     bool status;
     uint8_t transport;
     uint32_t transport_index;
@@ -52,10 +61,14 @@ bool block_device_get_info(uint32_t index, struct storage_device_info *info){
         transport_index=index-ata_count;
         status=ahci_get_device_info(transport_index,info);
         transport=STORAGE_TRANSPORT_AHCI;
-    } else {
+    } else if(index-ata_count-ahci_count<xhci_count){
         transport_index=index-ata_count-ahci_count;
         status=xhci_get_device_info(transport_index,info);
         transport=STORAGE_TRANSPORT_USB_MSC;
+    } else {
+        transport_index=index-ata_count-ahci_count-xhci_count;
+        status=ehci_get_device_info(transport_index,info);
+        transport=STORAGE_TRANSPORT_USB_EHCI;
     }
     if(status){
         info->selected=active_transport==transport && active_index==transport_index;
@@ -97,6 +110,7 @@ bool block_device_select(uint32_t index){
         return true;
     }
     uint32_t ahci_count=ahci_device_count();
+    uint32_t xhci_count=xhci_device_count();
     uint32_t relative=index-ata_count;
     if(relative<ahci_count){
         if(!ahci_select_device(relative)) return false;
@@ -105,13 +119,21 @@ bool block_device_select(uint32_t index){
         return true;
     }
     uint32_t usb_index=relative-ahci_count;
-    if(!xhci_select_device(usb_index)) return false;
-    active_transport=STORAGE_TRANSPORT_USB_MSC;
-    active_index=usb_index;
+    if(usb_index<xhci_count){
+        if(!xhci_select_device(usb_index)) return false;
+        active_transport=STORAGE_TRANSPORT_USB_MSC;
+        active_index=usb_index;
+        return true;
+    }
+    uint32_t ehci_index=usb_index-xhci_count;
+    if(!ehci_select_device(ehci_index)) return false;
+    active_transport=STORAGE_TRANSPORT_USB_EHCI;
+    active_index=ehci_index;
     return true;
 }
 
 bool block_device_read(uint32_t lba, void *buffer){
+    if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_read_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_read_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_read_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_read_sector(lba,buffer);
@@ -119,6 +141,7 @@ bool block_device_read(uint32_t lba, void *buffer){
 }
 
 bool block_device_write(uint32_t lba, const void *buffer){
+    if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_write_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_write_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_write_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_write_sector(lba,buffer);
@@ -126,6 +149,7 @@ bool block_device_write(uint32_t lba, const void *buffer){
 }
 
 const char *block_device_name(void){
+    if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_device_name();
     if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_device_name();
     if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_device_name();
     if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_device_name();

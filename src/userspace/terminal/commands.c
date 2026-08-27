@@ -250,7 +250,9 @@ static void show_disks(void){
                 const char *drive=devices[index].drive ? "slave" : "master";
                 terminal_printf("  bus: ATA %s %s\n",channel,drive);
             } else {
-                terminal_printf("  bus: USB xHCI controller %u port %u\n",
+                const char *usb_host=devices[index].transport==STORAGE_TRANSPORT_USB_EHCI
+                    ? "EHCI" : "xHCI";
+                terminal_printf("  bus: USB %s controller %u port %u\n",usb_host,
                                 (unsigned int)devices[index].controller,
                                 (unsigned int)devices[index].port);
             }
@@ -268,7 +270,8 @@ static void show_disks(void){
         for(int64_t index=0;index<controller_count;index++){
             const char *type=controllers[index].type==STORAGE_CONTROLLER_AHCI
                 ? "AHCI" : (controllers[index].type==STORAGE_CONTROLLER_NVME
-                    ? "NVMe" : "xHCI");
+                    ? "NVMe" : (controllers[index].type==STORAGE_CONTROLLER_XHCI
+                        ? "xHCI" : "EHCI"));
             terminal_printf("%s  %s  pci %u:%u.%u  id %x:%x\n",
                             controllers[index].name,type,
                             (unsigned int)controllers[index].bus,
@@ -286,7 +289,8 @@ static void show_disks(void){
             }
             if(controllers[index].type==STORAGE_CONTROLLER_AHCI){
                 terminal_write("  block I/O: DMA read/write\n");
-            } else if(controllers[index].type==STORAGE_CONTROLLER_XHCI){
+            } else if(controllers[index].type==STORAGE_CONTROLLER_XHCI
+                      || controllers[index].type==STORAGE_CONTROLLER_EHCI){
                 terminal_write("  block I/O: USB Mass Storage polling\n");
             } else {
                 terminal_write("  block I/O: driver not initialized\n");

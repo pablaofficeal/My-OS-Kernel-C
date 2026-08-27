@@ -13,12 +13,14 @@
 #define PCI_CLASS_SERIAL_BUS     0x0C
 #define PCI_SUBCLASS_USB         0x03
 #define PCI_INTERFACE_XHCI       0x30
+#define PCI_INTERFACE_EHCI       0x20
 
 static struct storage_controller_info controllers[STORAGE_CONTROLLER_LIMIT];
 static uint8_t controller_count;
 static uint8_t ahci_count;
 static uint8_t nvme_count;
 static uint8_t xhci_count;
+static uint8_t ehci_count;
 static bool probe_complete;
 
 static void set_controller_name(struct storage_controller_info *controller,
@@ -53,8 +55,10 @@ static void inspect_pci_device(const struct pci_device_info *device, void *conte
         type=STORAGE_CONTROLLER_NVME;
     } else if(device->class_code==PCI_CLASS_SERIAL_BUS
               && device->subclass==PCI_SUBCLASS_USB
-              && device->programming_interface==PCI_INTERFACE_XHCI){
-        type=STORAGE_CONTROLLER_XHCI;
+              && (device->programming_interface==PCI_INTERFACE_XHCI
+                  || device->programming_interface==PCI_INTERFACE_EHCI)){
+        type=device->programming_interface==PCI_INTERFACE_XHCI
+            ? STORAGE_CONTROLLER_XHCI : STORAGE_CONTROLLER_EHCI;
     } else {
         return;
     }
@@ -74,8 +78,10 @@ static void inspect_pci_device(const struct pci_device_info *device, void *conte
         set_controller_name(controller,"ahci",ahci_count++);
     } else if(type==STORAGE_CONTROLLER_NVME){
         set_controller_name(controller,"nvme",nvme_count++);
-    } else {
+    } else if(type==STORAGE_CONTROLLER_XHCI){
         set_controller_name(controller,"xhci",xhci_count++);
+    } else {
+        set_controller_name(controller,"ehci",ehci_count++);
     }
     controller_count++;
 }
