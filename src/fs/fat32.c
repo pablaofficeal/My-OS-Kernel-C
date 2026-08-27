@@ -2,6 +2,7 @@
 
 #include "../drivers/storage/block_device.h"
 #include "../kernel/klog.h"
+#include "../kernel/scheduler.h"
 #include "../lib/string.h"
 #include <stddef.h>
 #include "../boot/install_source.h"
@@ -759,7 +760,9 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     uint8_t *output=(uint8_t*)buffer;
     uint32_t total_read=0;
     uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
+    uint32_t yield_counter=0;
     while(total_read<count && handle->position<handle->size){
+        if((yield_counter++ & 0x3)==0) scheduler_yield();
         uint32_t cluster=handle->current_cluster;
         if(!valid_cluster(cluster)){
             handle->used=false;

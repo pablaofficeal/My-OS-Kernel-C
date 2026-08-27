@@ -9,6 +9,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "../kernel/scheduler.h"
 #include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -147,7 +148,37 @@ void userspace_init(void){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
 
+void userspace_input_thread(void *arg){
+    (void)arg;
+    klog(KLOG_INFO, "sched: input thread started (mouse polling + desktop)");
+    for(;;){
+        ps2_mouse_poll();
+        usb_mouse_poll();
+        keyboard_poll();
+        handle_desktop_mouse();
+        monitor_window_update();
+        scheduler_yield();
+        // Small pause to avoid 100% busy
+        __asm__ volatile("pause");
+    }
+}
+
+void userspace_terminal_thread(void *arg){
+    (void)arg;
+    klog(KLOG_INFO, "sched: terminal thread started (file I/O + keyboard)");
+    for(;;){
+        char c;
+        while(keyboard_try_getc(&c)){
+            if(terminal_is_visible()) terminal_handle_key(c);
+        }
+        // Yield so input thread can run even while terminal is idle
+        scheduler_yield();
+        for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
+    }
+}
+
 void userspace_run(void){
+    // Fallback single-threaded loop (when scheduler not available)
     for(;;){
         ps2_mouse_poll();
         usb_mouse_poll();

@@ -14,6 +14,8 @@
 #include "../fs/fat32.h"
 #include "system_info.h"
 #include "../lib/string.h"
+#include "../drivers/power.h"
+#include "../kernel/scheduler.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -197,6 +199,22 @@ int64_t syscall_handler(struct syscall_regs *r){
             for(volatile uint64_t wait=0;wait<a1*1000000ULL;wait++){
                 __asm__ volatile("pause");
             }
+            // Yield to scheduler so other threads run
+            scheduler_yield();
+            return 0;
+        case SYS_REBOOT:
+            power_reboot();
+            return 0;
+        case SYS_SHUTDOWN:
+            power_shutdown();
+            return 0;
+        case SYS_BATTERY_INFO: {
+            struct battery_info *out=(struct battery_info*)(uintptr_t)a1;
+            if(!out) return -1;
+            return power_battery_get(out) ? 0 : -1;
+        }
+        case SYS_SCHED_YIELD:
+            scheduler_yield();
             return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");

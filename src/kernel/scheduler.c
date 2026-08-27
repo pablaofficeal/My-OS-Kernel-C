@@ -3,7 +3,10 @@
 #include "../kernel/klog.h"
 #include "../kernel/panic.h"
 #include "../arch/x86_64/gdt.h"
+#include "../boot/limine.h"
 #include <string.h>
+
+extern struct limine_smp_response *smp_response_ptr;
 
 static struct thread threads[SCHEDULER_MAX_THREADS];
 static struct thread *current = NULL;
@@ -52,7 +55,13 @@ static void thread_trampoline(void){
 void scheduler_init(void){
     if(initialized) return;
     memset(threads, 0, sizeof(threads));
-    core_count = 1;
+    if(smp_response_ptr && smp_response_ptr->cpu_count>0){
+        core_count = (uint32_t)smp_response_ptr->cpu_count;
+        if(core_count>8) core_count=8;
+        if(core_count==0) core_count=1;
+    } else {
+        core_count = 1;
+    }
     struct thread *idle = &threads[0];
     idle->id = 0;
     idle->state = THREAD_RUNNING;

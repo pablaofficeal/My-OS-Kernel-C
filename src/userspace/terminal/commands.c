@@ -784,7 +784,9 @@ static void show_help(void){
     terminal_write("  snake             start the Snake game\n");
     terminal_write("  mouse             show PS/2 and USB mouse state\n");
     terminal_write("  debug [on|off]    control mouse debug panel\n");
-    terminal_write("  reboot            reboot through the 8042\n");
+    terminal_write("  reboot            reboot via syscall (ACPI/8042)\n");
+    terminal_write("  poweroff|shutdown proper shutdown via ACPI/QEMU\n");
+    terminal_write("  battery           show battery status (percent/charging)\n");
     terminal_write("  halt              stop the CPU\n");
 }
 
@@ -812,15 +814,48 @@ static void show_mouse(void){
 }
 
 static void reboot_system(void){
-    terminal_write("Rebooting...\n");
-    __asm__ volatile("cli");
-    for(uint32_t i=0;i<100000;i++){
-        if(!(inb(0x64)&0x02)){
-            outb(0x64,0xFE);
-            break;
+    terminal_write("Rebooting via kernel syscall...\n");
+    int64_t r=userspace_syscall(SYS_REBOOT,0,0,0);
+    if(r<0){
+        terminal_printf("syscall reboot failed (%d), fallback to 8042\n",(int)r);
+        __asm__ volatile("cli");
+        for(uint32_t i=0;i<100000;i++){
+            if(!(inb(0x64)&0x02)){
+                outb(0x64,0xFE);
+                break;
+            }
         }
+        for(;;) __asm__ volatile("hlt");
     }
-    for(;;) __asm__ volatile("hlt");
+}
+
+static void shutdown_system(void){
+    terminal_write("Shutting down via kernel syscall...\n");
+    int64_t r=userspace_syscall(SYS_SHUTDOWN,0,0,0);
+    if(r<0){
+        terminal_printf("syscall shutdown failed (%d), fallback halt\n",(int)r);
+        for(;;) __asm__ volatile("cli; hlt");
+    }
+}
+
+static void show_battery(void){
+    struct battery_info info;
+    memset(&info,0,sizeof(info));
+    int64_t r=userspace_syscall(SYS_BATTERY_INFO,(uint64_t)&info,0,0);
+    if(r<0){
+        terminal_write("battery: syscall failed\n");
+        return;
+    }
+    if(!info.present){
+        terminal_write("battery: no battery present (AC only)\n");
+        return;
+    }
+    terminal_printf("battery: %s %u%% (%s)\n", info.name, info.percent, info.status_text);
+    terminal_printf("  charging: %s\n", info.charging ? "yes" : "no");
+    terminal_printf("  voltage: %u mV  current: %d mA\n", info.voltage_mv, (int)info.current_ma);
+    terminal_printf("  remaining: %u minutes\n", info.remaining_minutes);
+    if(info.charging) terminal_write("  AC adapter: connected, battery charging\n");
+    else terminal_write("  AC adapter: on battery\n");
 }
 
 void commands_execute(const char *line){

@@ -9,8 +9,9 @@
 #include "../arch/x86_64/mmio.h"
 #include "../userspace/userspace.h"
 #include "../lib/string.h"
-// Forward declaration of memmap response from boot.c
+#include "scheduler.h"
 extern struct limine_memmap_response *memmap_response_ptr;
+extern struct limine_smp_response *smp_response_ptr;
 #include <stdint.h>
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
@@ -65,8 +66,36 @@ void kernel_main(struct limine_framebuffer *fb) {
     { volatile uint64_t dummy=0; for(uint64_t i=0;i<30000000ULL;i++){ __asm__ volatile("pause"); dummy+=i; } (void)dummy; }
     serial_write_string("[USERSPACE] init\n");
     userspace_init();
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN, "userspace_init returned; entering event loop");
-    serial_write_string("[USERSPACE] run\n");
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN, "userspace_init complete, starting scheduler");
+
+    // Scheduler: планировщик потоков с распределением по ядрам
+    scheduler_init();
+    // Определяем количество ядер через SMP (если Limine дал)
+    int core_count = scheduler_get_core_count();
+    if(smp_response_ptr && smp_response_ptr->cpu_count>0){
+        core_count = (int)smp_response_ptr->cpu_count;
+        klogf(KLOG_INFO, "sched: SMP detected %u cores via Limine", smp_response_ptr->cpu_count);
+        // Future: boot APs via smp_response_ptr->cpus[].goto_address
+        // For now use BSP only, but API supports affinity
+    }
+    klogf(KLOG_INFO, "sched: cores=%d, creating threads", core_count);
+
+    // Создаём потоки: input (высший приоритет, affinity 0), terminal, monitor/idle
+    extern void userspace_input_thread(void *arg);
+    extern void userspace_terminal_thread(void *arg);
+    // Input thread - высокий приоритет, чтобы мышь не фризила при чтении файла
+    scheduler_create_thread(userspace_input_thread, NULL, "input", 0, 0);
+    // Terminal thread - средний приоритет, может быть на ядре 1 если есть
+    int term_core = core_count>1 ? 1 : 0;
+    scheduler_create_thread(userspace_terminal_thread, NULL, "terminal", 1, term_core);
+    // Дополнительный поток для фоновых задач (monitor) - низкий приоритет
+    // Используем существующий userspace_run как fallback если scheduler не запущен
+    klog(KLOG_OK, "sched: threads created, starting scheduler (preemptive tick 10ms)");
+    serial_write_string("[SCHED] start\n");
+    scheduler_start();
+
+    // Если scheduler вернулся (не должен), fallback
+    serial_write_string("[USERSPACE] run (fallback)\n");
     userspace_run();
 
     kernel_panic("userspace_run returned unexpectedly");
