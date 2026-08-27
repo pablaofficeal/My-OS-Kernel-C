@@ -253,8 +253,7 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
             uint64_t dequeue=physical_address(&event_trbs[event_index]);
             interrupter[6]=(uint32_t)dequeue|8;
             interrupter[7]=(uint32_t)(dequeue>>32);
-            klogf(KLOG_DEBUG,"xhci%u: event raw type=%u slot=%u ep=%u code=%u wanted=%u slot-filter=%u ep-filter=%u ctl=0x%08x sts=0x%08x param=0x%08x%08x",
-                  controller_number,type,event_slot,event_endpoint,code,wanted_type,slot,endpoint,ev_ctrl,ev_status,copy.parameter_high,copy.parameter_low);
+            // raw event скрыт от экрана загрузки, виден в dmesg, но не флудит на GOP
             if(type==wanted_type && (!slot || event_slot==slot)
                && (!endpoint || event_endpoint==endpoint)){
                 if(result) *result=copy;
@@ -264,18 +263,13 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
                         && code==XHCI_COMPLETION_SHORT);
                 if(!success){
                     probe_stats.last_error=XHCI_PROBE_COMPLETION;
-                    klogf(KLOG_ERROR,"xhci%u: event completion error type=%u slot=%u ep=%u code=%u (expected SUCCESS/SHORT)",controller_number,type,event_slot,event_endpoint,code);
-                } else {
-                    klogf(KLOG_DEBUG,"xhci%u: event SUCCESS type=%u slot=%u code=%u",controller_number,type,event_slot,code);
+                    // error всегда виден и в dmesg и на экране (кратко)
+                    klogf(KLOG_ERROR,"xhci%u: event error type=%u slot=%u ep=%u code=%u",controller_number,type,event_slot,event_endpoint,code);
                 }
                 return success;
-            } else {
-                klogf(KLOG_DEBUG,"xhci%u: event skipped (filter mismatch) got type %u slot %u ep %u wanted %u/%u/%u",controller_number,type,event_slot,event_endpoint,wanted_type,slot,endpoint);
             }
+            // несовпадающие события просто пропускаем без лога (экономим ring 32K и GOP перерисовку)
         } else {
-            if((wait & 0x1FFFFF)==0 && wait!=0){
-                klogf(KLOG_DEBUG,"xhci%u: next_event wait %u, no new event cycle=%u want=%u slot=%u",controller_number,wait,event_cycle,wanted_type,slot);
-            }
             __asm__ volatile("pause");
         }
     }
@@ -291,17 +285,14 @@ static bool submit_command(uint64_t parameter, uint32_t type, uint8_t slot,
     trb->parameter_low=(uint32_t)parameter;
     trb->parameter_high=(uint32_t)(parameter>>32);
     trb->control=(type<<10)|((uint32_t)slot<<24)|command_ring.cycle;
-    klogf(KLOG_DEBUG,"xhci%u: submit CMD type=%u slot=%u param=0x%llx cycle=%u enqueue=%u",
-          controller_number,type,slot,parameter,command_ring.cycle,command_ring.enqueue);
     __sync_synchronize();
     doorbells[0]=0;
     struct xhci_trb event;
     if(!next_event(XHCI_EVENT_COMMAND,0,0,&event)){
-        klogf(KLOG_ERROR,"xhci%u: CMD type=%u slot=%u timeout/no-success",controller_number,type,slot);
+        klogf(KLOG_ERROR,"xhci%u: CMD type=%u slot=%u timeout",controller_number,type,slot);
         return false;
     }
     if(result_slot) *result_slot=(uint8_t)(event.control>>24);
-    klogf(KLOG_INFO,"xhci%u: CMD type=%u slot=%u OK result_slot=%u code=%u",controller_number,type,slot,result_slot?*result_slot:0,(event.status>>24)&0xFF);
     return true;
 }
 
@@ -314,8 +305,6 @@ static bool transfer(uint8_t device_index, uint8_t endpoint,
     trb->parameter_high=(uint32_t)(address>>32);
     trb->status=length;
     trb->control=(XHCI_TRB_NORMAL<<10)|(1U<<5)|ring->cycle;
-    klogf(KLOG_DEBUG,"xhci%u: transfer dev=%u slot=%u ep=%u len=%u addr=0x%llx cycle=%u",
-          controller_number,device_index,devices[device_index].slot_id,endpoint,length,address,ring->cycle);
     __sync_synchronize();
     uint8_t slot=devices[device_index].slot_id;
     doorbells[slot]=endpoint;
@@ -1081,18 +1070,19 @@ static bool initialize_controller(const struct storage_controller_info *controll
 
 bool xhci_init(uint32_t linux_name_base){
     if(probe_complete){
-        klogf(KLOG_DEBUG,"xhci: init already probe_complete disks=%u",device_count);
         return device_count>0;
     }
     probe_complete=true;
     if(!mapping_ready){
-        klog(KLOG_ERROR,"xhci: init mapping not ready (mmio_configure not called)");
+        klog(KLOG_ERROR,"xhci: init mapping not ready");
         return false;
     }
+    // Тяжёлую диагностику xhci пишем только в ring/dmesg, без мерцания GOP на реальном железе
+    bool was_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
-    klogf(KLOG_INFO,"xhci: init enumeration found %d controller(s) (linux_name_base=%u)",count,linux_name_base);
-    if(count<0) return false;
+    // подробный список PCI - только в dmesg
     for(int32_t i=0;i<count;i++){
         klogf(KLOG_INFO,"xhci: PCI controller[%d] type=%u name=%s bus %u:%u.%u BAR=0x%llx vend=%04x dev=%04x",
               i,controllers[i].type,controllers[i].name,controllers[i].bus,controllers[i].slot,controllers[i].function,
@@ -1104,23 +1094,26 @@ bool xhci_init(uint32_t linux_name_base){
         probe_stats.controllers++;
         probe_stats.last_stage=1;
         controller_number=xhci_index++;
-        klogf(KLOG_INFO,"xhci%u: initializing controller %d pci %u:%u.%u BAR 0x%llx",controller_number,index,controllers[index].bus,controllers[index].slot,controllers[index].function,controllers[index].register_base);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
-            klogf(KLOG_ERROR,"xhci%u: initialize_controller failed error=%u stage=%u usbsts=0x%x",controller_number,probe_stats.last_error,probe_stats.last_stage,probe_stats.usb_status);
             continue;
         }
-        klogf(KLOG_OK,"xhci%u: controller init complete disks=%u connected=%u",controller_number,device_count,probe_stats.connected_ports);
         if(device_count) break;
     }
-    klogf(KLOG_INFO,"xhci: init done total disks=%u controllers=%u",device_count,probe_stats.controllers);
+    klog_set_screen_enabled(was_screen);
+    // Краткий итог - одна строка на экране загрузки, детали - в dmesg/usbscan
+    if(probe_stats.controllers==0){
+        klog(KLOG_INFO,"xhci: no controllers found");
+    } else if(device_count==0 && probe_stats.connected_ports==0){
+        klogf(KLOG_WARN,"xhci: controllers=%u ports=%u connected=0 disks=0 (детали в dmesg)",probe_stats.controllers,probe_stats.max_ports);
+    } else {
+        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u disks=%u",probe_stats.controllers,probe_stats.connected_ports,device_count);
+    }
     return device_count>0;
 }
 
 bool xhci_rescan(uint32_t linux_name_base){
-    klogf(KLOG_INFO,"xhci: rescan requested linux_name_base=%u device_count=%u",linux_name_base,device_count);
     if(device_count){
-        klogf(KLOG_INFO,"xhci: rescan skipped, already %u devices",device_count);
         return true;
     }
     if(!mapping_ready){
@@ -1141,31 +1134,30 @@ bool xhci_rescan(uint32_t linux_name_base){
     probe_stats.usb_status=0;
     probe_stats.scratchpad_count=0;
 
+    // usbscan вызывается из userspace - там мерцания нет, можно писать подробно в ring,
+    // но в терминал выводим только кратко, детали - через dmesg. Поэтому логируем в ring с выключенным экраном.
+    bool was_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
-    klogf(KLOG_INFO,"xhci: rescan controllers found %d",count);
     if(count<0){
-        klogf(KLOG_ERROR,"xhci: storage_controller_list failed %d",count);
+        klog_set_screen_enabled(was_screen);
         return false;
-    }
-    for(int32_t i=0;i<count;i++){
-        klogf(KLOG_INFO,"xhci rescan: PCI[%d] type=%u name=%s BAR=0x%llx",i,controllers[i].type,controllers[i].name,controllers[i].register_base);
     }
     uint8_t xhci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_XHCI) continue;
         probe_stats.last_stage=1;
         controller_number=xhci_index++;
-        klogf(KLOG_INFO,"xhci%u: rescan initializing controller %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
-            klogf(KLOG_ERROR,"xhci%u: rescan init failed error=%u",controller_number,probe_stats.last_error);
             continue;
         }
-        klogf(KLOG_OK,"xhci%u: rescan controller ok disks=%u",controller_number,device_count);
         if(device_count) break;
     }
-    klogf(KLOG_INFO,"xhci: rescan done disks=%u connected=%u addressed=%u failures=%u error=%u stage=%u",device_count,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.failures,probe_stats.last_error,probe_stats.last_stage);
+    klog_set_screen_enabled(was_screen);
+    // краткий итог остаётся на экране userspace через syscall klog, но usbscan сам выводит детали
+    klogf(KLOG_INFO,"xhci: rescan done disks=%u connected=%u addressed=%u error=%u stage=%u",device_count,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.last_error,probe_stats.last_stage);
     return device_count>0;
 }
 

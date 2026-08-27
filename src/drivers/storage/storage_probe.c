@@ -117,19 +117,23 @@ static void inspect_pci_device(const struct pci_device_info *device, void *conte
 
 void storage_probe_init(void){
     if(probe_complete){
-        klogf(KLOG_DEBUG,"storage_probe: already complete %u controllers",controller_count);
         return;
     }
     probe_complete=true;
+    // Детальное PCI сканирование пишем только в ring+dmesg, без перерисовки GOP на реальном железе
+    bool was_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     klog(KLOG_INFO,"storage_probe: enumerating PCI bus (256*32*8)");
     pci_enumerate(inspect_pci_device,0);
     klogf(KLOG_INFO,"storage_probe: done %u controllers (ahci=%u nvme=%u xhci=%u ehci=%u)",controller_count,ahci_count,nvme_count,xhci_count,ehci_count);
+    klog_set_screen_enabled(was_screen);
+    // Краткий итог - показываем на экране загрузки (1 строка, без мерцания)
+    klogf(KLOG_INFO,"pci: %u storage/USB controller(s)",controller_count);
     if(controller_count==0){
-        klog(KLOG_WARN,"storage_probe: no AHCI/NVMe/xHCI/EHCI found - QEMU запущен без -device qemu-xhci / -drive if=none,media=disk?");
+        klog(KLOG_WARN,"storage_probe: no AHCI/NVMe/xHCI/EHCI found");
     }
-    if(xhci_count==0 && ehci_count==0){
-        // hint для пользователя
-        klog(KLOG_WARN,"storage_probe: нет xHCI/EHCI – USB storage невозможен, но UHCI устройства (если есть) всё равно не поддерживаются драйвером");
+    if(xhci_count==0 && ehci_count==0 && controller_count){
+        klog(KLOG_WARN,"storage_probe: нет xHCI/EHCI – USB storage невозможен");
     }
 }
 

@@ -612,7 +612,6 @@ static bool initialize_controller(const struct storage_controller_info *controll
 
 bool ehci_init(uint32_t linux_name_base){
     if(probe_complete){
-        klogf(KLOG_DEBUG,"ehci: init already done disks=%u",device_count);
         return device_count>0;
     }
     probe_complete=true;
@@ -620,33 +619,37 @@ bool ehci_init(uint32_t linux_name_base){
         klog(KLOG_ERROR,"ehci: mapping not ready");
         return false;
     }
+    bool was_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
-    klogf(KLOG_INFO,"ehci: init found %d controllers base=%u",count,linux_name_base);
-    if(count<0) return false;
-    for(int32_t i=0;i<count;i++) klogf(KLOG_INFO,"ehci: PCI[%d] %s type=%u BAR=0x%llx",i,controllers[i].name,controllers[i].type,controllers[i].register_base);
+    if(count<0){
+        klog_set_screen_enabled(was_screen);
+        return false;
+    }
     uint8_t ehci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_EHCI) continue;
         probe_stats.controllers++;
         probe_stats.last_stage=1;
         controller_number=ehci_index++;
-        klogf(KLOG_INFO,"ehci%u: init controller %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
-            klogf(KLOG_ERROR,"ehci%u: init failed",controller_number);
             continue;
         }
         if(device_count) break;
     }
-    klogf(KLOG_INFO,"ehci: init done disks=%u controllers=%u",device_count,probe_stats.controllers);
+    klog_set_screen_enabled(was_screen);
+    if(probe_stats.controllers==0){
+        klog(KLOG_INFO,"ehci: no controllers");
+    } else {
+        klogf(KLOG_INFO,"ehci: controllers=%u disks=%u",probe_stats.controllers,device_count);
+    }
     return device_count>0;
 }
 
 bool ehci_rescan(uint32_t linux_name_base){
-    klogf(KLOG_INFO,"ehci: rescan base=%u count=%u",linux_name_base,device_count);
     if(device_count){
-        klogf(KLOG_INFO,"ehci: rescan skip already %u",device_count);
         return true;
     }
     if(!mapping_ready){
@@ -660,23 +663,26 @@ bool ehci_rescan(uint32_t linux_name_base){
     probe_stats.failures=0;
     probe_stats.last_stage=0;
 
+    bool was_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
-    klogf(KLOG_INFO,"ehci: rescan found %d controllers",count);
-    if(count<0) return false;
+    if(count<0){
+        klog_set_screen_enabled(was_screen);
+        return false;
+    }
     uint8_t ehci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_EHCI) continue;
         probe_stats.last_stage=1;
         controller_number=ehci_index++;
-        klogf(KLOG_INFO,"ehci%u: rescan init %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
-            klogf(KLOG_ERROR,"ehci%u: rescan init failed",controller_number);
             continue;
         }
         if(device_count) break;
     }
+    klog_set_screen_enabled(was_screen);
     klogf(KLOG_INFO,"ehci: rescan done disks=%u connected=%u",device_count,probe_stats.connected_ports);
     return device_count>0;
 }
