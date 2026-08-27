@@ -1244,7 +1244,7 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
     }
     // limine.cfg - используем 8.3 валидное имя (limine.conf требует LFN, наш драйвер 8.3)
     {
-        const char *conf="timeout: 3\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
+        const char *conf="timeout: 10\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
         int32_t st = fat32_write_file("/boot/limine/limine.cfg", conf, strlen(conf));
         if(st<0) klogf(KLOG_WARN,"fat32_uefi: limine.cfg write failed %d",st);
         else klogf(KLOG_OK,"fat32_uefi: limine.cfg written");

@@ -87,6 +87,7 @@ struct ehci_device {
     uint16_t bulk_out_packet;
     bool bulk_in_toggle;
     bool bulk_out_toggle;
+    bool sync_cache_supported;
 };
 
 _Static_assert(sizeof(struct usb_cbw)==31,"USB BOT CBW size");
@@ -425,6 +426,7 @@ static bool identify_device(uint8_t index, uint32_t name_index, uint8_t port,
     info->port=port;
     info->operational=1;
     info->writable=1;
+    devices[index].sync_cache_supported=true;
     memset(command,0,sizeof(command));
     command[0]=SCSI_MODE_SENSE6;
     command[2]=0x3F;
@@ -722,10 +724,16 @@ bool ehci_write_sector(uint32_t lba, const void *buffer){
         return false;
     }
     if(!sector_command(SCSI_WRITE10,lba,(void*)buffer,false)) return false;
+    struct ehci_device *device=&devices[selected_device];
+    if(!device->sync_cache_supported) return true;
     uint8_t command[16];
     memset(command,0,sizeof(command));
     command[0]=SCSI_SYNC_CACHE10;
-    return bulk_only_command(selected_device,command,10,0,0,false);
+    if(bulk_only_command(selected_device,command,10,0,0,false)) return true;
+    device->sync_cache_supported=false;
+    klogf(KLOG_WARN,"ehci%u: dev %s rejected SYNCHRONIZE CACHE; WRITE(10) succeeded",
+          controller_number,device->info.name);
+    return true;
 }
 
 const char *ehci_device_name(void){

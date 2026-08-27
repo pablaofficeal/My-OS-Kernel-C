@@ -98,6 +98,7 @@ struct xhci_device {
     uint8_t bulk_out_dci;
     uint16_t bulk_in_packet;
     uint16_t bulk_out_packet;
+    bool sync_cache_supported;
 };
 
 _Static_assert(sizeof(struct xhci_trb)==16,"xHCI TRB size");
@@ -663,6 +664,7 @@ static bool identify_mass_storage(uint8_t index, uint32_t name_index,
     info->transport=STORAGE_TRANSPORT_USB_MSC;
     info->controller=controller_number;
     info->port=port;
+    devices[index].sync_cache_supported=true;
     memset(command,0,sizeof(command));
     command[0]=SCSI_MODE_SENSE6;
     command[2]=0x3F;
@@ -1197,10 +1199,16 @@ bool xhci_write_sector(uint32_t lba, const void *buffer){
         return false;
     }
     if(!scsi_sector_command(SCSI_WRITE10,lba,(void*)buffer,false)) return false;
+    struct xhci_device *device=&devices[selected_device];
+    if(!device->sync_cache_supported) return true;
     uint8_t command[16];
     memset(command,0,sizeof(command));
     command[0]=SCSI_SYNC_CACHE10;
-    return bulk_only_command(selected_device,command,10,0,0,false);
+    if(bulk_only_command(selected_device,command,10,0,0,false)) return true;
+    device->sync_cache_supported=false;
+    klogf(KLOG_WARN,"xhci%u: dev %s rejected SYNCHRONIZE CACHE; WRITE(10) succeeded",
+          controller_number,device->info.name);
+    return true;
 }
 
 const char *xhci_device_name(void){
