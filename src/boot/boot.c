@@ -17,6 +17,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "install_source.h"
 
 __attribute__((used, section(".requests_start_marker")))
 static volatile LIMINE_REQUESTS_START_MARKER;
@@ -54,6 +55,18 @@ static volatile struct limine_firmware_type_request firmware_type_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+static volatile struct limine_kernel_file_request kernel_file_request = {
+    .id = LIMINE_KERNEL_FILE_REQUEST,
+    .revision = 0
+};
+
+__attribute__((used, section(".requests")))
+static volatile struct limine_module_request module_request = {
+    .id = LIMINE_MODULE_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
@@ -61,6 +74,34 @@ static volatile LIMINE_REQUESTS_END_MARKER;
 struct limine_framebuffer *fb_ptr = 0;
 // export memmap request response for kernel use
 struct limine_memmap_response *memmap_response_ptr = 0;
+
+bool boot_get_kernel_image(const void **address, uint32_t *size){
+    if(!address || !size || !kernel_file_request.response
+       || !kernel_file_request.response->kernel_file
+       || !kernel_file_request.response->kernel_file->address
+       || kernel_file_request.response->kernel_file->size==0
+       || kernel_file_request.response->kernel_file->size>UINT32_MAX){
+        return false;
+    }
+    *address=kernel_file_request.response->kernel_file->address;
+    *size=(uint32_t)kernel_file_request.response->kernel_file->size;
+    return true;
+}
+
+bool boot_get_efi_loader(const void **address, uint32_t *size){
+    if(!address || !size || !module_request.response
+       || module_request.response->module_count==0
+       || !module_request.response->modules
+       || !module_request.response->modules[0]
+       || !module_request.response->modules[0]->address
+       || module_request.response->modules[0]->size<2
+       || module_request.response->modules[0]->size>UINT32_MAX){
+        return false;
+    }
+    *address=module_request.response->modules[0]->address;
+    *size=(uint32_t)module_request.response->modules[0]->size;
+    return true;
+}
 
 void _start(void) {
     // Limine already in 64-bit long mode, paging enabled

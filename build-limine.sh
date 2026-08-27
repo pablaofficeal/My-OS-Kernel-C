@@ -71,6 +71,7 @@ serial: yes
 /PureC OS 64-bit Limine+GOP
     protocol: limine
     kernel_path: boot():/boot/kernel.elf
+    module_path: boot():/EFI/BOOT/BOOTX64.EFI
 EOF
 # Fallback для поиска конфига
 cp iso_limine/boot/limine/limine.conf iso_limine/limine.conf

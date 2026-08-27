@@ -4,9 +4,7 @@
 #include "../kernel/klog.h"
 #include "../lib/string.h"
 #include <stddef.h>
-#include "../drivers/storage/limine_uefi.h"
-#include "../drivers/storage/limine_vbr.h"
-#include "../kernel_blob.h"
+#include "../boot/install_source.h"
 
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08
@@ -23,11 +21,30 @@
 #define FAT32_FORMAT_BLANK_SCAN        2048
 #define FAT32_FORMAT_MAX_SECTORS       UINT32_MAX
 #define FAT32_ESP_START_LBA 2048
+#define FAT32_ESP_SECTORS (512U*1024U*1024U/BLOCK_SECTOR_SIZE)
 #define FAT32_ESP_RESERVED FAT32_FORMAT_RESERVED_SECTORS
 #define FAT32_LFN_CHARACTER_CAPACITY 13
+#define GPT_ENTRY_COUNT 128
+#define GPT_ENTRY_SIZE 128
+#define GPT_ENTRY_SECTORS 32
+#define GPT_HEADER_SIZE 92
 
 static const uint8_t required_volume_label[11]={
     'P','U','R','E','C','O','S',' ',' ',' ',' '
+};
+
+static const uint8_t esp_volume_label[11]={
+    'P','U','R','E','C','-','E','S','P',' ',' '
+};
+
+static const uint8_t gpt_esp_type_guid[16]={
+    0x28,0x73,0x2A,0xC1,0x1F,0xF8,0xD2,0x11,
+    0xBA,0x4B,0x00,0xA0,0xC9,0x3E,0xC9,0x3B
+};
+
+static const uint8_t gpt_basic_data_type_guid[16]={
+    0xA2,0xA0,0xD0,0xEB,0xE5,0xB9,0x33,0x44,
+    0x87,0xC0,0x68,0xB6,0xB7,0x26,0x99,0xC7
 };
 
 struct fat32_volume {
@@ -93,6 +110,30 @@ static void write_u32(uint8_t *data, uint32_t value){
     data[1]=(uint8_t)(value>>8);
     data[2]=(uint8_t)(value>>16);
     data[3]=(uint8_t)(value>>24);
+}
+
+static uint64_t read_u64(const uint8_t *data){
+    return (uint64_t)read_u32(data)|((uint64_t)read_u32(data+4)<<32);
+}
+
+static void write_u64(uint8_t *data, uint64_t value){
+    write_u32(data,(uint32_t)value);
+    write_u32(data+4,(uint32_t)(value>>32));
+}
+
+static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t size){
+    for(uint32_t index=0;index<size;index++){
+        crc^=data[index];
+        for(uint8_t bit=0;bit<8;bit++){
+            uint32_t mask=(uint32_t)-(int32_t)(crc&1U);
+            crc=(crc>>1)^(0xEDB88320U&mask);
+        }
+    }
+    return crc;
+}
+
+static uint32_t crc32(const uint8_t *data, uint32_t size){
+    return ~crc32_update(0xFFFFFFFFU,data,size);
 }
 
 static uint8_t uppercase_ascii(uint8_t character){
@@ -548,7 +589,8 @@ static bool mount_boot_sector(uint32_t partition_lba){
         klogf(KLOG_DEBUG,"mount: LBA %u no boot sig %02x %02x",partition_lba,sector_buffer[510],sector_buffer[511]);
         return false;
     }
-    if(memcmp(&sector_buffer[71],required_volume_label,11)!=0){
+    if(memcmp(&sector_buffer[71],required_volume_label,11)!=0
+       && memcmp(&sector_buffer[71],esp_volume_label,11)!=0){
         klogf(KLOG_DEBUG,"mount: LBA %u label mismatch",partition_lba);
         return false;
     }
@@ -607,6 +649,34 @@ static bool mount_boot_sector(uint32_t partition_lba){
     return true;
 }
 
+static bool mount_gpt_partition(const uint8_t type_guid[16]){
+    if(!block_device_read(1,sector_buffer)) return false;
+    if(memcmp(sector_buffer,"EFI PART",8)!=0) return false;
+
+    uint64_t entries_lba64=read_u64(&sector_buffer[72]);
+    uint32_t entry_count=read_u32(&sector_buffer[80]);
+    uint32_t entry_size=read_u32(&sector_buffer[84]);
+    if(entries_lba64>UINT32_MAX || entry_count==0 || entry_count>GPT_ENTRY_COUNT
+       || entry_size!=GPT_ENTRY_SIZE){
+        return false;
+    }
+
+    uint32_t entries_lba=(uint32_t)entries_lba64;
+    uint32_t entries_per_sector=BLOCK_SECTOR_SIZE/GPT_ENTRY_SIZE;
+    for(uint32_t index=0;index<entry_count;index++){
+        if(index%entries_per_sector==0){
+            uint32_t entry_sector=entries_lba+index/entries_per_sector;
+            if(!block_device_read(entry_sector,second_sector_buffer)) return false;
+        }
+        uint32_t offset=(index%entries_per_sector)*GPT_ENTRY_SIZE;
+        if(memcmp(&second_sector_buffer[offset],type_guid,16)!=0) continue;
+        uint64_t first_lba=read_u64(&second_sector_buffer[offset+32]);
+        if(first_lba>UINT32_MAX) continue;
+        if(mount_boot_sector((uint32_t)first_lba)) return true;
+    }
+    return false;
+}
+
 bool fat32_init(void){
     if(volume.mounted) return true;
     if(!block_device_init()) return false;
@@ -614,6 +684,10 @@ bool fat32_init(void){
     uint32_t disk_count=block_device_count();
     for(uint32_t disk=0;disk<disk_count;disk++){
         if(!block_device_select(disk) || !block_device_read(0,sector_buffer)) continue;
+
+        // A normal UEFI installation keeps system data outside the ESP.
+        if(mount_gpt_partition(gpt_basic_data_type_guid)) return true;
+        if(!block_device_read(0,sector_buffer)) continue;
 
         uint32_t partition_lbas[4];
         uint8_t partition_count=0;
@@ -1054,7 +1128,9 @@ static bool write_zero_range(uint32_t first_lba, uint32_t count){
     return true;
 }
 
-static void build_format_boot_sector(const struct fat32_format_layout *layout){
+static void build_format_boot_sector(const struct fat32_format_layout *layout,
+                                     uint32_t hidden_sectors,
+                                     const uint8_t volume_label[11]){
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
     sector_buffer[0]=0xEB;
     sector_buffer[1]=0x58;
@@ -1067,6 +1143,7 @@ static void build_format_boot_sector(const struct fat32_format_layout *layout){
     sector_buffer[21]=0xF8;
     write_u16(&sector_buffer[24],63);
     write_u16(&sector_buffer[26],255);
+    write_u32(&sector_buffer[28],hidden_sectors);
     write_u32(&sector_buffer[32],layout->total_sectors);
     write_u32(&sector_buffer[36],layout->fat_size);
     write_u32(&sector_buffer[44],2);
@@ -1075,7 +1152,7 @@ static void build_format_boot_sector(const struct fat32_format_layout *layout){
     sector_buffer[64]=0x80;
     sector_buffer[66]=0x29;
     write_u32(&sector_buffer[67],0x50555245);
-    memcpy(&sector_buffer[71],required_volume_label,11);
+    memcpy(&sector_buffer[71],volume_label,11);
     memcpy(&sector_buffer[82],"FAT32   ",8);
     sector_buffer[510]=0x55;
     sector_buffer[511]=0xAA;
@@ -1110,7 +1187,7 @@ static bool write_format_metadata(const struct fat32_format_layout *layout){
         return false;
     }
 
-    build_format_boot_sector(layout);
+    build_format_boot_sector(layout,0,required_volume_label);
     if(!block_device_write(6,sector_buffer)) return false;
     return block_device_write(0,sector_buffer);
 }
@@ -1212,41 +1289,112 @@ int32_t fat32_format_device_force(const char *device_name, const char *serial_co
     return fat32_init()?0:FS_ERROR_IO;
 }
 
-static bool write_mbr_esp(uint32_t total_sectors){
-    if(total_sectors <= FAT32_ESP_START_LBA){
-        klogf(KLOG_ERROR,"write_mbr_esp: total %u too small",total_sectors);
-        return false;
+static void generate_guid(uint8_t guid[16], const char *serial, uint32_t salt){
+    uint32_t state=2166136261U^salt;
+    while(serial && *serial){
+        state^=(uint8_t)*serial++;
+        state*=16777619U;
     }
-    uint32_t part_sectors = total_sectors - FAT32_ESP_START_LBA;
+    for(uint8_t index=0;index<16;index++){
+        state=state*1664525U+1013904223U;
+        guid[index]=(uint8_t)(state>>24);
+    }
+    guid[7]=(uint8_t)((guid[7]&0x0F)|0x40);
+    guid[8]=(uint8_t)((guid[8]&0x3F)|0x80);
+}
+
+static void write_gpt_name(uint8_t *entry, const char *name){
+    for(uint8_t index=0;name[index] && index<36;index++){
+        write_u16(&entry[56+index*2],(uint8_t)name[index]);
+    }
+}
+
+static void build_gpt_header(uint32_t current_lba, uint32_t backup_lba,
+                             uint32_t entries_lba, uint32_t last_usable_lba,
+                             const uint8_t disk_guid[16], uint32_t entries_crc){
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
-    // Копируем BIOS boot code из limine_vbr (первые 440 байт) для dual BIOS+UEFI загрузки
-    // limine_vbr 512б содержит MBR код для superfloppy, берём 0..439
-    for(uint32_t i=0;i<440;i++) sector_buffer[i]=limine_vbr[i];
-    // Перезатираем BPB (3..61) нулями т.к. это MBR, не VBR
-    for(uint32_t i=3;i<62;i++) sector_buffer[i]=0;
-    // MBR signature будет перезаписан ниже
-    uint8_t *p = &sector_buffer[446];
-    p[0]=0x80; // bootable для BIOS
-    p[1]=0x00; p[2]=0x02; p[3]=0x00;
-    p[4]=0xEF;
-    p[5]=0xFF; p[6]=0xFF; p[7]=0xFF;
-    write_u32(&p[8], FAT32_ESP_START_LBA);
-    write_u32(&p[12], part_sectors);
-    sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
-    klogf(KLOG_INFO,"write_mbr_esp: writing MBR LBA0 part %u sectors %u (BIOS+UEFI)",FAT32_ESP_START_LBA,part_sectors);
-    if(!block_device_write(0, sector_buffer)){
-        klogf(KLOG_ERROR,"write_mbr_esp: block_device_write LBA0 failed (dev %s)",block_device_name());
+    memcpy(&sector_buffer[0],"EFI PART",8);
+    write_u32(&sector_buffer[8],0x00010000);
+    write_u32(&sector_buffer[12],GPT_HEADER_SIZE);
+    write_u64(&sector_buffer[24],current_lba);
+    write_u64(&sector_buffer[32],backup_lba);
+    write_u64(&sector_buffer[40],34);
+    write_u64(&sector_buffer[48],last_usable_lba);
+    memcpy(&sector_buffer[56],disk_guid,16);
+    write_u64(&sector_buffer[72],entries_lba);
+    write_u32(&sector_buffer[80],GPT_ENTRY_COUNT);
+    write_u32(&sector_buffer[84],GPT_ENTRY_SIZE);
+    write_u32(&sector_buffer[88],entries_crc);
+    write_u32(&sector_buffer[16],crc32(sector_buffer,GPT_HEADER_SIZE));
+}
+
+static bool write_gpt_layout(uint32_t total_sectors, const char *serial){
+    uint32_t data_start=FAT32_ESP_START_LBA+FAT32_ESP_SECTORS;
+    if(total_sectors<=data_start+GPT_ENTRY_SECTORS+65535){
+        klogf(KLOG_ERROR,"write_gpt: total %u too small",total_sectors);
         return false;
     }
-    // Verify readback
-    uint8_t verify[BLOCK_SECTOR_SIZE];
-    if(!block_device_read(0, verify) || verify[510]!=0x55 || verify[511]!=0xAA){
-        klogf(KLOG_WARN,"write_mbr_esp: verify failed");
+
+    uint32_t backup_header_lba=total_sectors-1;
+    uint32_t backup_entries_lba=backup_header_lba-GPT_ENTRY_SECTORS;
+    uint32_t last_usable_lba=backup_entries_lba-1;
+    uint8_t disk_guid[16];
+    uint8_t esp_guid[16];
+    uint8_t data_guid[16];
+    generate_guid(disk_guid,serial,0x47505444U^total_sectors);
+    generate_guid(esp_guid,serial,0x45535031U^total_sectors);
+    generate_guid(data_guid,serial,0x44415441U^total_sectors);
+
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    uint8_t *partition=&sector_buffer[446];
+    partition[1]=0x00; partition[2]=0x02; partition[3]=0x00;
+    partition[4]=0xEE;
+    partition[5]=0xFF; partition[6]=0xFF; partition[7]=0xFF;
+    write_u32(&partition[8],1);
+    write_u32(&partition[12],total_sectors-1);
+    sector_buffer[510]=0x55;
+    sector_buffer[511]=0xAA;
+    if(!block_device_write(0,sector_buffer)) return false;
+
+    uint32_t entries_crc=0xFFFFFFFFU;
+    for(uint8_t sector=0;sector<GPT_ENTRY_SECTORS;sector++){
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        if(sector==0){
+            memcpy(&sector_buffer[0],gpt_esp_type_guid,16);
+            memcpy(&sector_buffer[16],esp_guid,16);
+            write_u64(&sector_buffer[32],FAT32_ESP_START_LBA);
+            write_u64(&sector_buffer[40],data_start-1);
+            write_gpt_name(&sector_buffer[0],"PureC ESP");
+
+            memcpy(&sector_buffer[GPT_ENTRY_SIZE],gpt_basic_data_type_guid,16);
+            memcpy(&sector_buffer[GPT_ENTRY_SIZE+16],data_guid,16);
+            write_u64(&sector_buffer[GPT_ENTRY_SIZE+32],data_start);
+            write_u64(&sector_buffer[GPT_ENTRY_SIZE+40],last_usable_lba);
+            write_gpt_name(&sector_buffer[GPT_ENTRY_SIZE],"PureC System");
+        }
+        entries_crc=crc32_update(entries_crc,sector_buffer,BLOCK_SECTOR_SIZE);
+        if(!block_device_write(2+sector,sector_buffer)
+           || !block_device_write(backup_entries_lba+sector,sector_buffer)){
+            return false;
+        }
     }
+    entries_crc=~entries_crc;
+
+    build_gpt_header(1,backup_header_lba,2,last_usable_lba,
+                     disk_guid,entries_crc);
+    if(!block_device_write(1,sector_buffer)) return false;
+    build_gpt_header(backup_header_lba,1,backup_entries_lba,last_usable_lba,
+                     disk_guid,entries_crc);
+    if(!block_device_write(backup_header_lba,sector_buffer)) return false;
+
+    klogf(KLOG_OK,"write_gpt: ESP %u..%u data %u..%u",
+          FAT32_ESP_START_LBA,data_start-1,data_start,last_usable_lba);
     return true;
 }
 
-static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_format_layout *layout){
+static bool write_format_metadata_at(uint32_t part_lba,
+                                     const struct fat32_format_layout *layout,
+                                     const uint8_t volume_label[11]){
     uint32_t fat_start = part_lba + FAT32_ESP_RESERVED;
     uint32_t data_start = fat_start + FAT32_FORMAT_FAT_COUNT * layout->fat_size;
     klogf(KLOG_INFO,"write_format_at: part %u fat %u data %u fat_size %u spc %u",part_lba,fat_start,data_start,layout->fat_size,layout->sectors_per_cluster);
@@ -1290,7 +1438,7 @@ static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_forma
     }
 
     // Boot sector at part_lba
-    build_format_boot_sector(layout);
+    build_format_boot_sector(layout,part_lba,volume_label);
     if(!block_device_write(part_lba+6, sector_buffer)){
         klogf(KLOG_ERROR,"write_format_at: backup boot LBA %u failed",part_lba+6);
         return false;
@@ -1303,7 +1451,90 @@ static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_forma
     return true;
 }
 
-// UEFI install: MBR ESP + FAT32 + файлы загрузчика/ядра
+static int32_t create_directory_checked(const char *path){
+    int32_t status=fat32_create_directory(path);
+    return status==FS_ERROR_EXISTS?0:status;
+}
+
+static const char uefi_limine_config[]=
+    "timeout: 10\n"
+    "verbose: yes\n"
+    "/PureC OS (UEFI)\n"
+    "    protocol: limine\n"
+    "    kernel_path: boot():/boot/kernel.elf\n"
+    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n";
+
+static int32_t write_uefi_config(const char *directory,
+                                 const char *alias_path){
+    return write_lfn_file(directory,"limine.conf",alias_path,"limine~1.con",
+                          uefi_limine_config,sizeof(uefi_limine_config)-1);
+}
+
+static int32_t verify_installed_file(const char *path, uint32_t expected_size){
+    struct fat32_entry_ref entry;
+    int32_t status=resolve_entry(path,&entry,0);
+    if(status<0) return status;
+    return entry.size==expected_size?0:FS_ERROR_IO;
+}
+
+static int32_t install_uefi_payload(void){
+    static const char *directories[]={
+        "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine"
+    };
+    for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
+        int32_t status=create_directory_checked(directories[index]);
+        if(status<0) return status;
+    }
+
+    const void *kernel_image;
+    const void *efi_loader;
+    uint32_t kernel_image_size;
+    uint32_t efi_loader_size;
+    if(!boot_get_kernel_image(&kernel_image,&kernel_image_size)){
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)
+       || ((const uint8_t*)efi_loader)[0]!=0x4D
+       || ((const uint8_t*)efi_loader)[1]!=0x5A){
+        return FS_ERROR_NOT_FOUND;
+    }
+
+    int32_t status=fat32_write_file("/EFI/BOOT/BOOTX64.EFI",
+                                    efi_loader,efi_loader_size);
+    if(status<0) return status;
+    status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
+    if(status<0) return status;
+
+    static const struct {
+        const char *directory;
+        const char *alias_path;
+    } config_locations[]={
+        {"/","/limine~1.con"},
+        {"/boot/limine","/boot/limine/limine~1.con"},
+        {"/EFI/limine","/EFI/limine/limine~1.con"},
+        {"/EFI/BOOT","/EFI/BOOT/limine~1.con"},
+        {"/limine","/limine/limine~1.con"},
+        {"/boot","/boot/limine~1.con"}
+    };
+    for(uint8_t index=0;index<sizeof(config_locations)/sizeof(config_locations[0]);index++){
+        status=write_uefi_config(config_locations[index].directory,
+                                 config_locations[index].alias_path);
+        if(status<0) return status;
+    }
+
+    status=verify_installed_file("/EFI/BOOT/BOOTX64.EFI",efi_loader_size);
+    if(status<0) return status;
+    status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
+    if(status<0) return status;
+    for(uint8_t index=0;index<sizeof(config_locations)/sizeof(config_locations[0]);index++){
+        status=verify_installed_file(config_locations[index].alias_path,
+                                     sizeof(uefi_limine_config)-1);
+        if(status<0) return status;
+    }
+    return 0;
+}
+
+// UEFI install: GPT, a 512 MiB ESP, and a separate system partition.
 int32_t fat32_format_uefi_device(const char *device_name, const char *serial_confirmation){
     if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
     int32_t idx=block_device_find(device_name);
@@ -1311,6 +1542,9 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
     struct storage_device_info info;
     if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
     if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(info.serial[0] && strcmp(info.serial,serial_confirmation)!=0){
+        return FS_ERROR_CONFIRMATION;
+    }
     if(info.sector_size!=BLOCK_SECTOR_SIZE
        || info.sector_count>FAT32_FORMAT_MAX_SECTORS){
         klogf(KLOG_ERROR,"fat32_uefi: UNSUPPORTED ss=%u expected %u sectors=%llu max=%u",
@@ -1318,59 +1552,51 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
               FAT32_FORMAT_MAX_SECTORS);
         return FS_ERROR_UNSUPPORTED;
     }
-    if(info.sector_count <= FAT32_ESP_START_LBA+65535) return FS_ERROR_TOO_SMALL; // нужен минимум ~32MB ESP
-    uint32_t part_sectors = (uint32_t)info.sector_count - FAT32_ESP_START_LBA;
-    struct fat32_format_layout layout;
-    if(!calculate_format_layout(part_sectors,&layout)) return FS_ERROR_TOO_SMALL;
+    uint32_t total_sectors=(uint32_t)info.sector_count;
+    uint32_t data_start=FAT32_ESP_START_LBA+FAT32_ESP_SECTORS;
+    if(total_sectors<=data_start+GPT_ENTRY_SECTORS+65535) return FS_ERROR_TOO_SMALL;
+    uint32_t data_sectors=total_sectors-data_start-GPT_ENTRY_SECTORS-1;
+    struct fat32_format_layout esp_layout;
+    struct fat32_format_layout data_layout;
+    if(!calculate_format_layout(FAT32_ESP_SECTORS,&esp_layout)
+       || !calculate_format_layout(data_sectors,&data_layout)){
+        return FS_ERROR_TOO_SMALL;
+    }
     if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
-    klogf(KLOG_INFO,"fat32_uefi: formatting %s total %u part %u fat %u clusters %u spc %u",
-          device_name,(uint32_t)info.sector_count,part_sectors,layout.fat_size,layout.cluster_count,layout.sectors_per_cluster);
-    // Создаём MBR ESP
-    if(!write_mbr_esp((uint32_t)info.sector_count)){
-        klogf(KLOG_ERROR,"fat32_uefi: MBR write failed");
+    klogf(KLOG_INFO,"fat32_uefi: %s total %u ESP %u sectors data %u sectors",
+          device_name,total_sectors,FAT32_ESP_SECTORS,data_sectors);
+    if(!write_gpt_layout(total_sectors,info.serial)){
+        klogf(KLOG_ERROR,"fat32_uefi: GPT write failed");
         return FS_ERROR_IO;
     }
-    // Форматируем партицию
-    if(!write_format_metadata_at(FAT32_ESP_START_LBA,&layout)){
-        klogf(KLOG_ERROR,"fat32_uefi: FAT write failed");
+    if(!write_format_metadata_at(FAT32_ESP_START_LBA,&esp_layout,
+                                 esp_volume_label)){
+        klogf(KLOG_ERROR,"fat32_uefi: ESP format failed");
         return FS_ERROR_IO;
     }
     memset(&volume,0,sizeof(volume));
     memset(handles,0,sizeof(handles));
-    if(!fat32_init()){
-        klogf(KLOG_ERROR,"fat32_uefi: mount after format failed");
+    if(!mount_boot_sector(FAT32_ESP_START_LBA)){
+        klogf(KLOG_ERROR,"fat32_uefi: ESP mount failed");
         return FS_ERROR_IO;
     }
-    klogf(KLOG_OK,"fat32_uefi: formatted ESP %s part_lba %u",device_name,FAT32_ESP_START_LBA);
-    // Создаём структуру для UEFI: /EFI/BOOT/BOOTX64.EFI + /boot/kernel.elf + limine.conf
-    // Директории
-    (void)fat32_create_directory("/EFI");
-    (void)fat32_create_directory("/EFI/BOOT");
-    (void)fat32_create_directory("/boot");
-    (void)fat32_create_directory("/boot/limine");
-    // Пишем BOOTX64.EFI
-    {
-        int32_t st = fat32_write_file("/EFI/BOOT/BOOTX64.EFI", limine_uefi, limine_uefi_len);
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: BOOTX64.EFI write failed %d",st);
-        else klogf(KLOG_OK,"fat32_uefi: BOOTX64.EFI %u bytes written",limine_uefi_len);
+    int32_t status=install_uefi_payload();
+    if(status<0){
+        klogf(KLOG_ERROR,"fat32_uefi: boot payload failed %d",status);
+        return status;
     }
-    // Пишем kernel
-    {
-        int32_t st = fat32_write_file("/boot/kernel.elf", kernel_blob, kernel_blob_len);
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: kernel write failed %d",st);
-        else klogf(KLOG_OK,"fat32_uefi: kernel %u bytes written",kernel_blob_len);
+
+    if(!write_format_metadata_at(data_start,&data_layout,
+                                 required_volume_label)){
+        klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
+        return FS_ERROR_IO;
     }
-    // Стандартный limine.conf: LFN + совместимый короткий алиас LIMINE~1.CON.
-    {
-        const char *conf="timeout: 10\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
-        int32_t st=write_lfn_file("/boot/limine","limine.conf",
-                                  "/boot/limine/limine~1.con","limine~1.con",
-                                  conf,strlen(conf));
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: /boot/limine/limine.conf failed %d",st);
-        else klogf(KLOG_OK,"fat32_uefi: /boot/limine/limine.conf written");
-        st=write_lfn_file("/","limine.conf","/limine~1.con","limine~1.con",
-                          conf,strlen(conf));
-        if(st<0) klogf(KLOG_WARN,"fat32_uefi: /limine.conf failed %d",st);
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    if(!mount_boot_sector(data_start)){
+        klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
+        return FS_ERROR_IO;
     }
+    klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
 }

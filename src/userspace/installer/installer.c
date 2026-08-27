@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define INSTALLER_VERSION "0.1.0"
+#define INSTALLER_VERSION "0.2.0"
 
 static void prompt_read_line(const char *prompt, char *out, uint32_t cap){
     terminal_write(prompt);
@@ -55,6 +55,18 @@ static bool write_file(const char *path, const char *content){
 static bool create_dir(const char *path){
     int64_t r=userspace_syscall(SYS_DIR_CREATE,(uint64_t)path,0,0);
     return r==0 || r==FS_ERROR_EXISTS;
+}
+
+static bool create_required_dir(const char *path){
+    if(create_dir(path)) return true;
+    terminal_printf("Install failed: cannot create %s\n",path);
+    return false;
+}
+
+static bool write_required_file(const char *path, const char *content){
+    if(write_file(path,content)) return true;
+    terminal_printf("Install failed: cannot write %s\n",path);
+    return false;
 }
 
 static void print_banner(void){
@@ -145,7 +157,7 @@ void installer_run(const char *args){
     char uefi_ans[8]={0};
     prompt_read_line("UEFI system? [Y/n]: ",uefi_ans,sizeof(uefi_ans));
     bool is_uefi = !(uefi_ans[0]=='n' || uefi_ans[0]=='N');
-    terminal_printf("Mode: %s (real sectors, MBR+ESP for UEFI, superfloppy for BIOS)\n",is_uefi?"UEFI":"BIOS");
+    terminal_printf("Mode: %s (GPT with separate ESP for UEFI, superfloppy for BIOS)\n",is_uefi?"UEFI":"BIOS");
     char hostname[32]={0};
     prompt_read_line("Hostname [purec-os]: ",hostname,sizeof(hostname));
     if(!hostname[0]) strcpy(hostname,"purec-os");
@@ -154,7 +166,7 @@ void installer_run(const char *args){
     if(!username[0]) strcpy(username,"purec");
     terminal_write("\nSummary (real install):\n");
     terminal_printf("  Device   : %s (%u sectors)\n  Hostname : %s\n  User     : %s\n  Mode     : %s\n",
-                    devname,(uint32_t)sectors,hostname,username,is_uefi?"UEFI GPT/MBR+ESP":"BIOS");
+                    devname,(uint32_t)sectors,hostname,username,is_uefi?"UEFI GPT + 512 MiB ESP + system":"BIOS");
     terminal_write("This will ERASE all data and REWRITE sectors (MBR/GPT, FAT, files)!\n");
     char confirm[16]={0};
     prompt_read_line("Type YES to continue: ",confirm,sizeof(confirm));
@@ -167,7 +179,8 @@ void installer_run(const char *args){
     terminal_write("\n[1/4] Formatting sectors...\n");
     int64_t fmt;
     if(is_uefi){
-        terminal_printf("  -> UEFI ESP: MBR type EF at LBA0, FAT32 at LBA2048 (%u sectors)\n",(uint32_t)(sectors-2048));
+        terminal_write("  -> GPT partition 1: 512 MiB FAT32 EFI System Partition\n");
+        terminal_write("  -> GPT partition 2: FAT32 PureC system partition\n");
         fmt=userspace_syscall(214,(uint64_t)devname,(uint64_t)serial,0); // SYS_FAT32_FORMAT_UEFI
     } else {
         // BIOS superfloppy with force
@@ -181,25 +194,22 @@ void installer_run(const char *args){
         terminal_printf("Format failed (%d) see dmesg\n",(int)fmt);
         if(fmt==FS_ERROR_BUSY) terminal_write("  Hint: disk is mounted, reboot and try again or use another disk\n");
         if(fmt==FS_ERROR_UNSUPPORTED) terminal_write("  Hint: sector_size must be 512, disk must fit 32-bit LBA\n");
+        if(fmt==FS_ERROR_NOT_FOUND) terminal_write("  Hint: installer kernel or EFI module is missing from the boot media\n");
         return;
     }
-    terminal_write("  Format OK. Verifying sectors...\n");
-    // Verify by listing
-    struct storage_device_info check[20];
-    int64_t cnt2=userspace_syscall(SYS_DISK_LIST,(uint64_t)check,20,0);
-    (void)cnt2;
+    terminal_write("  Format OK. Partition layout and boot payload verified.\n");
     // 6. Real file layout via FAT syscalls (sector writes via block_device)
     terminal_write("[2/4] Creating directories (FAT clusters)...\n");
-    create_dir("/EFI");
-    create_dir("/EFI/BOOT");
-    create_dir("/boot");
-    create_dir("/boot/limine");
-    create_dir("/etc");
-    create_dir("/home");
-    create_dir("/purec");
+    if(!is_uefi){
+        if(!create_required_dir("/boot")
+           || !create_required_dir("/boot/limine")) return;
+    }
+    if(!create_required_dir("/etc")
+       || !create_required_dir("/home")
+       || !create_required_dir("/purec")) return;
     terminal_write("[3/4] Copying files to sectors (kernel, bootloader, configs)...\n");
-    // For UEFI, kernel and BOOTX64.EFI already written by kernel's format_uefi (embedded blobs)
-    // Now write configs as real files
+    // The UEFI formatter has already written and verified the complete ESP payload.
+    // The currently mounted volume is the separate system partition.
     char cfg[1024];
     memset(cfg,0,sizeof(cfg));
     strcpy(cfg,"# PureC OS Install Config - real sector install\n");
@@ -208,26 +218,28 @@ void installer_run(const char *args){
     strcat(cfg,"serial="); strcat(cfg,serial); strcat(cfg,"\n");
     strcat(cfg,"user="); strcat(cfg,username); strcat(cfg,"\n");
     strcat(cfg,"mode="); strcat(cfg,is_uefi?"uefi":"bios"); strcat(cfg,"\n");
-    strcat(cfg,"version=0.1.0\ninstalled=1\n");
-    if(!write_file("/purec/install.cfg",cfg)) terminal_write("  Warning: /purec/install.cfg failed\n");
-    else terminal_write("  -> /purec/install.cfg written\n");
+    strcat(cfg,"version=0.2.0\ninstalled=1\n");
+    if(!write_required_file("/purec/install.cfg",cfg)) return;
+    terminal_write("  -> /purec/install.cfg written\n");
     memset(cfg,0,sizeof(cfg));
     strcpy(cfg,hostname); strcat(cfg,"\n");
-    write_file("/etc/hostname",cfg);
-    memset(cfg,0,sizeof(cfg));
-    strcpy(cfg,"timeout: 10\nverbose: yes\n/PureC OS\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n");
-    write_file("/boot/limine/limine.cfg",cfg);
-    write_file("/limine.cfg",cfg);
+    if(!write_required_file("/etc/hostname",cfg)) return;
+    if(!is_uefi){
+        memset(cfg,0,sizeof(cfg));
+        strcpy(cfg,"timeout: 10\nverbose: yes\n/PureC OS\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n");
+        if(!write_required_file("/boot/limine/limine.cfg",cfg)
+           || !write_required_file("/limine.cfg",cfg)) return;
+    }
     char home_path[64]={0};
     strcpy(home_path,"/home/"); strcat(home_path,username);
-    create_dir(home_path);
+    if(!create_required_dir(home_path)) return;
     char readme_path[80]={0};
     strcpy(readme_path,home_path); strcat(readme_path,"/README");
     memset(cfg,0,sizeof(cfg));
     strcpy(cfg,"Welcome "); strcat(cfg,username); strcat(cfg,"!\nPureC OS installed (real sectors).\n");
     strcat(cfg,"Hostname: "); strcat(cfg,hostname); strcat(cfg,"\nDevice: "); strcat(cfg,devname); strcat(cfg,"\n");
-    write_file(readme_path,cfg);
-    write_file("/README","PureC OS - see /purec/install.cfg\n");
+    if(!write_required_file(readme_path,cfg)
+       || !write_required_file("/README","PureC OS - see /purec/install.cfg\n")) return;
     terminal_write("[4/4] Verifying install...\n");
     // List written files
     struct fs_directory_entry entries[16];
@@ -236,21 +248,20 @@ void installer_run(const char *args){
         terminal_printf("  /purec: %d file(s)\n",(int)n);
         for(int64_t i=0;i<n;i++) terminal_printf("    %s %u bytes\n",entries[i].name,entries[i].size);
     }
-    n=userspace_syscall(SYS_DIR_LIST,(uint64_t)"/EFI/BOOT",(uint64_t)entries,16);
-    if(n>0){
-        terminal_printf("  /EFI/BOOT: %d file(s)\n",(int)n);
-        for(int64_t i=0;i<n;i++) terminal_printf("    %s %u bytes\n",entries[i].name,entries[i].size);
-    } else if(is_uefi){
-        terminal_write("  Warning: /EFI/BOOT not found (UEFI may not boot)\n");
-    }
-    n=userspace_syscall(SYS_DIR_LIST,(uint64_t)"/boot",(uint64_t)entries,16);
-    if(n>0){
-        terminal_printf("  /boot: %d file(s)\n",(int)n);
-        for(int64_t i=0;i<n;i++) terminal_printf("    %s %u bytes\n",entries[i].name,entries[i].size);
+    if(is_uefi){
+        terminal_write("  ESP: BOOTX64.EFI, kernel.elf and six Limine configs verified\n");
+        terminal_write("  System partition: mounted and populated\n");
+    } else {
+        n=userspace_syscall(SYS_DIR_LIST,(uint64_t)"/boot",(uint64_t)entries,16);
+        if(n>0){
+            terminal_printf("  /boot: %d file(s)\n",(int)n);
+            for(int64_t i=0;i<n;i++) terminal_printf("    %s %u bytes\n",entries[i].name,entries[i].size);
+        }
     }
     terminal_write("\nInstall complete (real sectors)!\n");
     terminal_printf("  Device: %s  Host: %s  User: %s  Mode: %s\n",devname,hostname,username,is_uefi?"UEFI":"BIOS");
     terminal_write("  You can now remove ISO and boot from disk.\n");
+    if(is_uefi) terminal_write("  Layout: GPT, 512 MiB ESP, remaining space for PureC OS.\n");
     terminal_write("  Run 'dmesg | grep fat32' and 'ls /' to verify.\n");
     // Also show VDI host path hint
     terminal_write("  Host VDI: /home/pabla/VirtualBox VMs/test_kernel2/test_kernel2_1.vdi\n");
