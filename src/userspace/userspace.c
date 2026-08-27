@@ -175,8 +175,12 @@ static void handle_desktop_mouse(void){
     }
 
     if(!consumed && desktop_apps_is_visible()){
-        consumed=desktop_apps_contains_point(mouse.x,mouse.y);
-        redraw=desktop_apps_handle_mouse(mouse.x,mouse.y,mouse.buttons,pressed,released,desktop_width,desktop_height);
+        bool app_redraw=false;
+        consumed=desktop_apps_handle_mouse(
+            mouse.x,mouse.y,mouse.buttons,pressed,released,
+            desktop_width,desktop_height,&app_redraw
+        );
+        redraw=redraw || app_redraw;
     }
     if(!consumed && explorer_window_is_visible()){
         consumed=explorer_window_contains_point(mouse.x,mouse.y);
