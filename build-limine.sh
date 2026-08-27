@@ -1,11 +1,7 @@
 #!/bin/bash
 set -e
-# build-limine.sh - PureC OS Limine ISO (BIOS+UEFI, GOP)
-# Требует: limine (pacman -S limine), xorriso, mtools
-# Использует kernel.elf из ./build.sh (hybrid ENTRY _start + multiboot)
 
 echo "🔨 Building Limine kernel (higher half, GOP)..."
-# Пересобираем kernel-limine.elf с higher half (0xffffffff80000000)
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/system_info.c -o system_info_limine.o
@@ -42,9 +38,12 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/games/snake.c -o snake_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/installer/installer.c -o installer_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/monitor/monitor.c -o monitor_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/scheduler.c -o scheduler_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/drivers/power.c -o power_limine.o
 nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm_limine.o
-x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o system_info_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o userspace_limine.o terminal_limine.o commands_limine.o shell_path_limine.o nano_limine.o snake_limine.o installer_limine.o monitor_limine.o gdt_asm_limine.o idt_asm_limine.o
+nasm -f elf64 src/arch/x86_64/scheduler.asm -o scheduler_asm_limine.o
+x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o system_info_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o userspace_limine.o terminal_limine.o commands_limine.o shell_path_limine.o nano_limine.o snake_limine.o installer_limine.o monitor_limine.o scheduler_limine.o power_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o
 echo "✅ kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel-limine.elf | head -n12
 
@@ -76,7 +75,6 @@ serial: yes
     kernel_path: boot():/boot/kernel.elf
     module_path: boot():/EFI/BOOT/BOOTX64.EFI
 EOF
-# Fallback для поиска конфига
 cp iso_limine/boot/limine/limine.conf iso_limine/limine.conf
 
 cp "$LIMINE_SHARE/limine-bios.sys" iso_limine/boot/limine/ 2>/dev/null || true
@@ -84,7 +82,6 @@ cp "$LIMINE_SHARE/limine-bios-cd.bin" iso_limine/boot/limine/ 2>/dev/null || tru
 cp "$LIMINE_SHARE/limine-uefi-cd.bin" iso_limine/boot/limine/ 2>/dev/null || true
 cp "$LIMINE_SHARE/BOOTX64.EFI" iso_limine/EFI/BOOT/ 2>/dev/null || true
 cp "$LIMINE_SHARE/BOOTIA32.EFI" iso_limine/EFI/BOOT/ 2>/dev/null || true
-# Дублируем bios.sys в корень для надежности
 cp "$LIMINE_SHARE/limine-bios.sys" iso_limine/ 2>/dev/null || true
 cp "$LIMINE_SHARE/limine-bios.sys" iso_limine/boot/ 2>/dev/null || true
 

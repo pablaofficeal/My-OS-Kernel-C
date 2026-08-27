@@ -152,7 +152,7 @@ void power_reboot(void){
             // Instead, try legacy: write to port 0xCF9 already did
             (void)reset_value; (void)reset_addr;
         }
-        klog(KLOG_INFO, "power: FADT found at %p, trying ACPI reset", fadt);
+        klogf(KLOG_INFO, "power: FADT found at %p, trying ACPI reset", fadt);
     }
     // Triple fault
     klog(KLOG_ERROR, "power: reboot fallback triple fault");

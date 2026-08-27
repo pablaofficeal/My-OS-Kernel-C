@@ -4,7 +4,7 @@
 #include "../kernel/panic.h"
 #include "../arch/x86_64/gdt.h"
 #include "../boot/limine.h"
-#include <string.h>
+#include "../lib/string.h"
 
 extern struct limine_smp_response *smp_response_ptr;
 
@@ -17,27 +17,7 @@ static uint32_t core_count = 1;
 static void thread_trampoline(void);
 static struct thread *pick_next(void);
 
-void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp){
-    __asm__ volatile(
-        "pushq %%rbp\n\t"
-        "pushq %%rbx\n\t"
-        "pushq %%r12\n\t"
-        "pushq %%r13\n\t"
-        "pushq %%r14\n\t"
-        "pushq %%r15\n\t"
-        "movq %%rsp, (%%rdi)\n\t"
-        "movq (%%rsi), %%rsp\n\t"
-        "popq %%r15\n\t"
-        "popq %%r14\n\t"
-        "popq %%r13\n\t"
-        "popq %%r12\n\t"
-        "popq %%rbx\n\t"
-        "popq %%rbp\n\t"
-        "ret\n\t"
-        : : "D"(old_rsp), "S"(new_rsp) : "memory"
-    );
-    __builtin_unreachable();
-}
+extern void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp);
 
 static void thread_trampoline(void){
     // This runs as new thread's first execution after ret
@@ -255,6 +235,6 @@ void scheduler_schedule(void){
 
 void scheduler_start(void){
     if(!initialized) return;
-    klog(KLOG_INFO, "sched: starting with %u threads", scheduler_thread_count());
+    klogf(KLOG_INFO, "sched: starting with %u threads", scheduler_thread_count());
     scheduler_yield();
 }

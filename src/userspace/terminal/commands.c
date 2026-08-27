@@ -934,6 +934,10 @@ void commands_execute(const char *line){
         terminal_printf("Mouse debug panel: %s\n",enabled ? "on" : "off");
     } else if(strcmp(command,"reboot")==0){
         reboot_system();
+    } else if(strcmp(command,"poweroff")==0 || strcmp(command,"shutdown")==0){
+        shutdown_system();
+    } else if(strcmp(command,"battery")==0){
+        show_battery();
     } else if(strcmp(command,"halt")==0){
         terminal_write("System halted.\n");
         for(;;) __asm__ volatile("cli; hlt");
