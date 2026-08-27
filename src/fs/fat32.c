@@ -14,6 +14,10 @@
 #define FAT32_MAX_OPEN_FILES      16
 #define FAT32_DESCRIPTOR_BASE     3
 #define FAT32_MAX_COMPONENT       12
+#define FAT32_FORMAT_RESERVED_SECTORS 32
+#define FAT32_FORMAT_FAT_COUNT         2
+#define FAT32_FORMAT_BLANK_SCAN        2048
+#define FAT32_FORMAT_MAX_SECTORS       0x10000000U
 
 static const uint8_t required_volume_label[11]={
     'P','U','R','E','C','O','S',' ',' ',' ',' '
@@ -49,6 +53,13 @@ struct fat32_handle {
     uint32_t size;
     uint32_t position;
     bool used;
+};
+
+struct fat32_format_layout {
+    uint32_t total_sectors;
+    uint32_t fat_size;
+    uint32_t cluster_count;
+    uint8_t sectors_per_cluster;
 };
 
 static struct fat32_volume volume;
@@ -711,4 +722,165 @@ int32_t fat32_create_directory(const char *path){
                                   directory_cluster);
     if(status<0) (void)fat_write_entry(directory_cluster,0);
     return status;
+}
+
+static bool sector_is_zero(const uint8_t *sector){
+    for(uint16_t index=0;index<BLOCK_SECTOR_SIZE;index++){
+        if(sector[index]!=0) return false;
+    }
+    return true;
+}
+
+static int32_t verify_blank_device(uint32_t total_sectors){
+    uint32_t scan_count=total_sectors<FAT32_FORMAT_BLANK_SCAN
+        ? total_sectors : FAT32_FORMAT_BLANK_SCAN;
+    for(uint32_t lba=0;lba<scan_count;lba++){
+        if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+        if(!sector_is_zero(sector_buffer)) return FS_ERROR_NOT_BLANK;
+    }
+    if(total_sectors>scan_count){
+        if(!block_device_read(total_sectors-1,sector_buffer)) return FS_ERROR_IO;
+        if(!sector_is_zero(sector_buffer)) return FS_ERROR_NOT_BLANK;
+    }
+    return 0;
+}
+
+static bool calculate_format_layout(uint32_t total_sectors,
+                                    struct fat32_format_layout *layout){
+    if(!layout || total_sectors<65590 || total_sectors>FAT32_FORMAT_MAX_SECTORS){
+        return false;
+    }
+
+    uint8_t sectors_per_cluster;
+    if(total_sectors<=532480) sectors_per_cluster=1;
+    else if(total_sectors<=16777216) sectors_per_cluster=8;
+    else if(total_sectors<=33554432) sectors_per_cluster=16;
+    else if(total_sectors<=67108864) sectors_per_cluster=32;
+    else sectors_per_cluster=64;
+
+    uint32_t fat_size=1;
+    uint32_t cluster_count=0;
+    for(uint8_t iteration=0;iteration<32;iteration++){
+        uint64_t overhead=FAT32_FORMAT_RESERVED_SECTORS
+            +(uint64_t)FAT32_FORMAT_FAT_COUNT*fat_size;
+        if(overhead>=total_sectors) return false;
+        cluster_count=(uint32_t)((total_sectors-overhead)/sectors_per_cluster);
+        uint32_t required=(uint32_t)(((uint64_t)(cluster_count+2)*4
+                                      +BLOCK_SECTOR_SIZE-1)/BLOCK_SECTOR_SIZE);
+        if(required==fat_size) break;
+        fat_size=required;
+    }
+    if(cluster_count<65525 || cluster_count>0x0FFFFFF5) return false;
+
+    layout->total_sectors=total_sectors;
+    layout->fat_size=fat_size;
+    layout->cluster_count=cluster_count;
+    layout->sectors_per_cluster=sectors_per_cluster;
+    return true;
+}
+
+static bool write_zero_range(uint32_t first_lba, uint32_t count){
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    for(uint32_t index=0;index<count;index++){
+        if(!block_device_write(first_lba+index,sector_buffer)) return false;
+    }
+    return true;
+}
+
+static void build_format_boot_sector(const struct fat32_format_layout *layout){
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    sector_buffer[0]=0xEB;
+    sector_buffer[1]=0x58;
+    sector_buffer[2]=0x90;
+    memcpy(&sector_buffer[3],"PURECOS ",8);
+    write_u16(&sector_buffer[11],BLOCK_SECTOR_SIZE);
+    sector_buffer[13]=layout->sectors_per_cluster;
+    write_u16(&sector_buffer[14],FAT32_FORMAT_RESERVED_SECTORS);
+    sector_buffer[16]=FAT32_FORMAT_FAT_COUNT;
+    sector_buffer[21]=0xF8;
+    write_u16(&sector_buffer[24],63);
+    write_u16(&sector_buffer[26],255);
+    write_u32(&sector_buffer[32],layout->total_sectors);
+    write_u32(&sector_buffer[36],layout->fat_size);
+    write_u32(&sector_buffer[44],2);
+    write_u16(&sector_buffer[48],1);
+    write_u16(&sector_buffer[50],6);
+    sector_buffer[64]=0x80;
+    sector_buffer[66]=0x29;
+    write_u32(&sector_buffer[67],0x50555245);
+    memcpy(&sector_buffer[71],required_volume_label,11);
+    memcpy(&sector_buffer[82],"FAT32   ",8);
+    sector_buffer[510]=0x55;
+    sector_buffer[511]=0xAA;
+}
+
+static bool write_format_metadata(const struct fat32_format_layout *layout){
+    uint32_t fat_start=FAT32_FORMAT_RESERVED_SECTORS;
+    uint32_t data_start=fat_start+FAT32_FORMAT_FAT_COUNT*layout->fat_size;
+    if(!write_zero_range(0,FAT32_FORMAT_RESERVED_SECTORS)) return false;
+    if(!write_zero_range(fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size)){
+        return false;
+    }
+    if(!write_zero_range(data_start,layout->sectors_per_cluster)) return false;
+
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    write_u32(&sector_buffer[0],0x0FFFFFF8);
+    write_u32(&sector_buffer[4],0xFFFFFFFF);
+    write_u32(&sector_buffer[8],0x0FFFFFFF);
+    for(uint8_t fat=0;fat<FAT32_FORMAT_FAT_COUNT;fat++){
+        uint32_t lba=fat_start+(uint32_t)fat*layout->fat_size;
+        if(!block_device_write(lba,sector_buffer)) return false;
+    }
+
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    write_u32(&sector_buffer[0],0x41615252);
+    write_u32(&sector_buffer[484],0x61417272);
+    write_u32(&sector_buffer[488],layout->cluster_count-1);
+    write_u32(&sector_buffer[492],3);
+    write_u32(&sector_buffer[508],0xAA550000);
+    if(!block_device_write(1,sector_buffer)
+       || !block_device_write(7,sector_buffer)){
+        return false;
+    }
+
+    build_format_boot_sector(layout);
+    if(!block_device_write(6,sector_buffer)) return false;
+    return block_device_write(0,sector_buffer);
+}
+
+int32_t fat32_format_device(const char *device_name,
+                            const char *serial_confirmation,
+                            const char *erase_confirmation){
+    if(!device_name || !device_name[0] || !serial_confirmation
+       || !erase_confirmation){
+        return FS_ERROR_INVALID;
+    }
+    if(volume.mounted) return FS_ERROR_BUSY;
+
+    int32_t device_index=block_device_find(device_name);
+    if(device_index<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)device_index,&info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(!info.serial[0] || strcmp(info.serial,serial_confirmation)!=0
+       || strcmp(erase_confirmation,"ERASE")!=0){
+        return FS_ERROR_CONFIRMATION;
+    }
+    if(info.sector_size!=BLOCK_SECTOR_SIZE
+       || info.sector_count>FAT32_FORMAT_MAX_SECTORS){
+        return FS_ERROR_UNSUPPORTED;
+    }
+
+    struct fat32_format_layout layout;
+    if(!calculate_format_layout((uint32_t)info.sector_count,&layout)){
+        return FS_ERROR_TOO_SMALL;
+    }
+    if(!block_device_select((uint32_t)device_index)) return FS_ERROR_INVALID;
+    int32_t status=verify_blank_device(layout.total_sectors);
+    if(status<0) return status;
+    if(!write_format_metadata(&layout)) return FS_ERROR_IO;
+
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    return fat32_init() ? 0 : FS_ERROR_IO;
 }

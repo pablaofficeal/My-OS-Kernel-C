@@ -87,6 +87,10 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_STORAGE_CONTROLLERS:
             return storage_controller_list(
                 (struct storage_controller_info*)(uintptr_t)a1,(uint32_t)a2);
+        case SYS_FAT32_FORMAT:
+            return fat32_format_device((const char*)(uintptr_t)a1,
+                                       (const char*)(uintptr_t)a2,
+                                       (const char*)(uintptr_t)a3);
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");
@@ -115,13 +119,13 @@ void syscall_init(void){
         ahci_get_probe_stats(&ahci_stats);
         klogf(KLOG_INFO,"pci-storage: %u AHCI/NVMe controller(s) detected",
               storage_controller_count());
-        klogf(KLOG_INFO,"ata: %u disk(s) detected",block_device_count());
+        klogf(KLOG_INFO,"storage: %u operational disk(s) detected",block_device_count());
         klogf(KLOG_INFO,"ahci: %u SATA disk(s) identified",ahci_device_count());
         klogf(KLOG_DEBUG,"ahci: controllers=%u ports=%u sata=%u identify_failures=%u",
               ahci_stats.controllers,ahci_stats.implemented_ports,
               ahci_stats.sata_ports,ahci_stats.identify_failures);
         if(fat32_init()){
-            klogf(KLOG_OK,"fat32: mounted from ATA %s",fat32_device_name());
+            klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
         } else {
             klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found");
         }

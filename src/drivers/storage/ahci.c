@@ -10,6 +10,7 @@
 #define AHCI_TIMEOUT            10000000U
 
 #define AHCI_GHC_AE             (1U<<31)
+#define AHCI_CAP_64_BIT         (1U<<31)
 #define AHCI_PORT_CMD_ST        (1U<<0)
 #define AHCI_PORT_CMD_FRE       (1U<<4)
 #define AHCI_PORT_CMD_FR        (1U<<14)
@@ -22,7 +23,15 @@
 #define AHCI_SIGNATURE_ATA      0x00000101
 #define AHCI_FIS_HOST_TO_DEVICE 0x27
 #define ATA_COMMAND_IDENTIFY    0xEC
+#define ATA_COMMAND_READ_DMA    0xC8
+#define ATA_COMMAND_WRITE_DMA   0xCA
+#define ATA_COMMAND_READ_DMA_EXT  0x25
+#define ATA_COMMAND_WRITE_DMA_EXT 0x35
+#define ATA_COMMAND_FLUSH       0xE7
+#define ATA_COMMAND_FLUSH_EXT   0xEA
+#define AHCI_NO_DEVICE          0xFF
 
+#define HBA_CAP 0
 #define HBA_GHC 1
 #define HBA_PI  3
 #define PORT_CLB   0
@@ -61,21 +70,29 @@ struct ahci_command_table {
     struct ahci_prdt_entry prdt[1];
 };
 
+struct ahci_device {
+    struct storage_device_info info;
+    volatile uint32_t *port;
+    bool lba48;
+};
+
 _Static_assert(sizeof(struct ahci_command_header)==32,"AHCI command header size");
 _Static_assert(sizeof(struct ahci_prdt_entry)==16,"AHCI PRDT entry size");
 _Static_assert(sizeof(struct ahci_command_table)==144,"AHCI command table size");
 
-static struct storage_device_info devices[AHCI_DEVICE_LIMIT];
+static struct ahci_device devices[AHCI_DEVICE_LIMIT];
 static struct ahci_command_header command_list[AHCI_COMMAND_SLOT_LIMIT]
     __attribute__((aligned(1024)));
 static uint8_t received_fis[256] __attribute__((aligned(256)));
 static struct ahci_command_table command_table __attribute__((aligned(128)));
 static uint16_t identify_words[256] __attribute__((aligned(512)));
+static uint8_t dma_buffer[512] __attribute__((aligned(512)));
 static uint64_t hhdm_offset;
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
 static struct ahci_probe_stats probe_stats;
 static uint8_t device_count;
+static uint8_t selected_device=AHCI_NO_DEVICE;
 static bool mapping_ready;
 static bool probe_complete;
 
@@ -127,18 +144,23 @@ static bool port_has_sata_disk(volatile uint32_t *port){
         && port[PORT_SIG]==AHCI_SIGNATURE_ATA;
 }
 
-static bool issue_identify(volatile uint32_t *port){
+static bool is_addressed_command(uint8_t command){
+    return command==ATA_COMMAND_READ_DMA || command==ATA_COMMAND_WRITE_DMA
+        || command==ATA_COMMAND_READ_DMA_EXT || command==ATA_COMMAND_WRITE_DMA_EXT;
+}
+
+static bool issue_command(volatile uint32_t *port, uint8_t command, uint32_t lba,
+                          void *data, bool write, bool lba48){
     if(!stop_port(port)) return false;
 
     memset(command_list,0,sizeof(command_list));
     memset(received_fis,0,sizeof(received_fis));
     memset(&command_table,0,sizeof(command_table));
-    memset(identify_words,0,sizeof(identify_words));
 
     uint64_t command_list_physical=kernel_pointer_physical(command_list);
     uint64_t received_fis_physical=kernel_pointer_physical(received_fis);
     uint64_t command_table_physical=kernel_pointer_physical(&command_table);
-    uint64_t identify_physical=kernel_pointer_physical(identify_words);
+    uint64_t data_physical=data ? kernel_pointer_physical(data) : 0;
 
     port[PORT_CLB]=(uint32_t)command_list_physical;
     port[PORT_CLBU]=(uint32_t)(command_list_physical>>32);
@@ -148,16 +170,30 @@ static bool issue_identify(volatile uint32_t *port){
     port[PORT_IS]=0xFFFFFFFF;
     port[PORT_SERR]=0xFFFFFFFF;
 
-    command_list[0].flags=5;
-    command_list[0].prdt_length=1;
+    command_list[0].flags=(uint16_t)(5|(write ? 1<<6 : 0));
+    command_list[0].prdt_length=data ? 1 : 0;
     command_list[0].command_table_base=(uint32_t)command_table_physical;
     command_list[0].command_table_base_upper=(uint32_t)(command_table_physical>>32);
     command_table.command_fis[0]=AHCI_FIS_HOST_TO_DEVICE;
     command_table.command_fis[1]=0x80;
-    command_table.command_fis[2]=ATA_COMMAND_IDENTIFY;
-    command_table.prdt[0].data_base=(uint32_t)identify_physical;
-    command_table.prdt[0].data_base_upper=(uint32_t)(identify_physical>>32);
-    command_table.prdt[0].byte_count=(1U<<31)|511;
+    command_table.command_fis[2]=command;
+    if(is_addressed_command(command)){
+        command_table.command_fis[4]=(uint8_t)lba;
+        command_table.command_fis[5]=(uint8_t)(lba>>8);
+        command_table.command_fis[6]=(uint8_t)(lba>>16);
+        command_table.command_fis[7]=0x40;
+        if(lba48){
+            command_table.command_fis[8]=(uint8_t)(lba>>24);
+        } else {
+            command_table.command_fis[7]|=(uint8_t)((lba>>24)&0x0F);
+        }
+        command_table.command_fis[12]=1;
+    }
+    if(data){
+        command_table.prdt[0].data_base=(uint32_t)data_physical;
+        command_table.prdt[0].data_base_upper=(uint32_t)(data_physical>>32);
+        command_table.prdt[0].byte_count=(1U<<31)|511;
+    }
 
     __sync_synchronize();
     if(!start_port(port)) return false;
@@ -179,6 +215,11 @@ static bool issue_identify(volatile uint32_t *port){
     return false;
 }
 
+static bool issue_identify(volatile uint32_t *port){
+    memset(identify_words,0,sizeof(identify_words));
+    return issue_command(port,ATA_COMMAND_IDENTIFY,0,identify_words,false,false);
+}
+
 static void copy_identify_text(char *output, uint32_t capacity,
                                uint16_t first_word, uint16_t word_count){
     uint32_t length=(uint32_t)word_count*2;
@@ -191,8 +232,10 @@ static void copy_identify_text(char *output, uint32_t capacity,
     output[length]='\0';
 }
 
-static void fill_device_info(struct storage_device_info *info, uint8_t name_index,
-                             uint8_t controller, uint8_t port){
+static void fill_device_info(struct ahci_device *device, uint8_t name_index,
+                             uint8_t controller, uint8_t port_index,
+                             volatile uint32_t *port){
+    struct storage_device_info *info=&device->info;
     memset(info,0,sizeof(*info));
     info->name[0]='/';
     info->name[1]='d';
@@ -214,9 +257,11 @@ static void fill_device_info(struct storage_device_info *info, uint8_t name_inde
     info->sector_size=512;
     info->transport=STORAGE_TRANSPORT_AHCI;
     info->controller=controller;
-    info->port=port;
-    info->writable=0;
-    info->operational=0;
+    info->port=port_index;
+    info->writable=1;
+    info->operational=1;
+    device->port=port;
+    device->lba48=(identify_words[83]&(1<<10))!=0;
     copy_identify_text(info->serial,STORAGE_SERIAL_CAPACITY,10,10);
     copy_identify_text(info->model,STORAGE_MODEL_CAPACITY,27,20);
 }
@@ -242,6 +287,15 @@ bool ahci_init(uint32_t linux_name_base){
         pci_write_config32(controllers[index].bus,controllers[index].slot,
                            controllers[index].function,0x04,pci_command|0x06);
         volatile uint32_t *hba=(volatile uint32_t*)(uintptr_t)(hhdm_offset+abar);
+        uint64_t dma_addresses=kernel_pointer_physical(command_list)
+            |kernel_pointer_physical(received_fis)
+            |kernel_pointer_physical(&command_table)
+            |kernel_pointer_physical(identify_words)
+            |kernel_pointer_physical(dma_buffer);
+        if((dma_addresses>>32)!=0 && !(hba[HBA_CAP]&AHCI_CAP_64_BIT)){
+            ahci_index++;
+            continue;
+        }
         hba[HBA_GHC]|=AHCI_GHC_AE;
         uint32_t implemented_ports=hba[HBA_PI];
         for(uint8_t port_index=0;port_index<AHCI_PORT_LIMIT
@@ -257,8 +311,8 @@ bool ahci_init(uint32_t linux_name_base){
             }
             fill_device_info(&devices[device_count],
                              (uint8_t)(linux_name_base+device_count),
-                             ahci_index,port_index);
-            if(devices[device_count].sector_count) device_count++;
+                             ahci_index,port_index,port);
+            if(devices[device_count].info.sector_count) device_count++;
         }
         ahci_index++;
     }
@@ -269,8 +323,46 @@ uint32_t ahci_device_count(void){ return device_count; }
 
 bool ahci_get_device_info(uint32_t index, struct storage_device_info *info){
     if(!info || index>=device_count) return false;
-    *info=devices[index];
+    *info=devices[index].info;
     return true;
+}
+
+bool ahci_select_device(uint32_t index){
+    if(index>=device_count) return false;
+    selected_device=(uint8_t)index;
+    return true;
+}
+
+bool ahci_read_sector(uint32_t lba, void *buffer){
+    if(!buffer || selected_device>=device_count) return false;
+    struct ahci_device *device=&devices[selected_device];
+    if(lba>=device->info.sector_count) return false;
+    if(!device->lba48 && lba>0x0FFFFFFF) return false;
+    uint8_t command=device->lba48 ? ATA_COMMAND_READ_DMA_EXT : ATA_COMMAND_READ_DMA;
+    memset(dma_buffer,0,sizeof(dma_buffer));
+    if(!issue_command(device->port,command,lba,dma_buffer,false,device->lba48)){
+        return false;
+    }
+    memcpy(buffer,dma_buffer,sizeof(dma_buffer));
+    return true;
+}
+
+bool ahci_write_sector(uint32_t lba, const void *buffer){
+    if(!buffer || selected_device>=device_count) return false;
+    struct ahci_device *device=&devices[selected_device];
+    if(lba>=device->info.sector_count) return false;
+    if(!device->lba48 && lba>0x0FFFFFFF) return false;
+    memcpy(dma_buffer,buffer,sizeof(dma_buffer));
+    uint8_t command=device->lba48 ? ATA_COMMAND_WRITE_DMA_EXT : ATA_COMMAND_WRITE_DMA;
+    if(!issue_command(device->port,command,lba,dma_buffer,true,device->lba48)){
+        return false;
+    }
+    command=device->lba48 ? ATA_COMMAND_FLUSH_EXT : ATA_COMMAND_FLUSH;
+    return issue_command(device->port,command,0,0,false,device->lba48);
+}
+
+const char *ahci_device_name(void){
+    return selected_device<device_count ? devices[selected_device].info.name : "none";
 }
 
 void ahci_get_probe_stats(struct ahci_probe_stats *stats){

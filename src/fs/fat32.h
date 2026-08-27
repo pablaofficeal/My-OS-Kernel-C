@@ -14,6 +14,9 @@
 #define FS_ERROR_UNSUPPORTED -8
 #define FS_ERROR_BUSY        -9
 #define FS_ERROR_READ_ONLY  -10
+#define FS_ERROR_CONFIRMATION -11
+#define FS_ERROR_NOT_BLANK    -12
+#define FS_ERROR_TOO_SMALL    -13
 
 bool fat32_init(void);
 bool fat32_is_mounted(void);
@@ -27,3 +30,6 @@ int32_t fat32_list(const char *path, struct fs_directory_entry *entries,
                    uint32_t capacity);
 int32_t fat32_create_file(const char *path);
 int32_t fat32_create_directory(const char *path);
+int32_t fat32_format_device(const char *device_name,
+                            const char *serial_confirmation,
+                            const char *erase_confirmation);

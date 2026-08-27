@@ -4,6 +4,7 @@
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
+#include "../../fs/fat32.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"
@@ -222,7 +223,7 @@ static void show_disks(void){
     }
 
     if(controller_count>0){
-        terminal_write("PCI storage controllers (detection only):\n");
+        terminal_write("PCI storage controllers:\n");
         for(int64_t index=0;index<controller_count;index++){
             const char *type=controllers[index].type==STORAGE_CONTROLLER_AHCI
                 ? "AHCI" : "NVMe";
@@ -242,9 +243,44 @@ static void show_disks(void){
                                 (unsigned int)controllers[index].register_base);
             }
             terminal_write(controllers[index].type==STORAGE_CONTROLLER_AHCI
-                ? "  block I/O: IDENTIFY only\n"
+                ? "  block I/O: DMA read/write\n"
                 : "  block I/O: driver not initialized\n");
         }
+    }
+}
+
+static void format_fat32(const char *arguments){
+    char device[STORAGE_DEVICE_NAME_CAPACITY];
+    char serial[STORAGE_SERIAL_CAPACITY];
+    char approval[6];
+    char extra[2];
+    const char *remaining;
+    const char *tail;
+    split_command(arguments,device,sizeof(device),&remaining);
+    split_command(remaining,serial,sizeof(serial),&tail);
+    split_command(tail,approval,sizeof(approval),&remaining);
+    split_command(remaining,extra,sizeof(extra),&tail);
+    if(!device[0] || !serial[0] || strcmp(approval,"ERASE")!=0 || extra[0]){
+        terminal_write("Use: mkfs.fat32 <device> <exact-serial> ERASE\n");
+        terminal_write("The serial is shown by the disks command.\n");
+        return;
+    }
+
+    terminal_printf("Formatting %s as PURECOS FAT32; do not power off...\n",device);
+    int64_t status=invoke_syscall(SYS_FAT32_FORMAT,(uint64_t)device,
+                                  (uint64_t)serial,(uint64_t)approval);
+    if(status==FS_ERROR_CONFIRMATION){
+        terminal_write("mkfs.fat32: erase confirmation does not match\n");
+    } else if(status==FS_ERROR_NOT_BLANK){
+        terminal_write("mkfs.fat32: refused because the disk is not blank\n");
+    } else if(status==FS_ERROR_BUSY){
+        terminal_write("mkfs.fat32: refused while a FAT32 volume is mounted\n");
+    } else if(status==FS_ERROR_TOO_SMALL){
+        terminal_write("mkfs.fat32: disk size is not supported for FAT32\n");
+    } else if(status<0){
+        terminal_printf("mkfs.fat32: failed (error %d)\n",(int)status);
+    } else {
+        terminal_printf("mkfs.fat32: created and mounted PURECOS on %s\n",device);
     }
 }
 
@@ -258,6 +294,7 @@ static void show_help(void){
     terminal_write("  touch <file>      create an empty FAT32 file\n");
     terminal_write("  mkdir <directory> create a FAT32 directory\n");
     terminal_write("  disks             list disks and storage controllers\n");
+    terminal_write("  mkfs.fat32 DEV SERIAL ERASE  format a blank disk\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -315,6 +352,8 @@ void commands_execute(const char *line){
         create_path("mkdir",arguments,SYS_DIR_CREATE);
     } else if(strcmp(command,"disks")==0){
         show_disks();
+    } else if(strcmp(command,"mkfs.fat32")==0){
+        format_fat32(arguments);
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);

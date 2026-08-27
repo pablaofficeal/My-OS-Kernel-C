@@ -1,43 +1,105 @@
 #include "block_device.h"
 #include "ahci.h"
 #include "ata_pio.h"
+#include "../../lib/string.h"
+
+#define BLOCK_TRANSPORT_NONE 0
+
+static uint8_t active_transport;
+static uint32_t active_index;
 
 bool block_device_init(void){
     bool ata_available=ata_pio_init();
     bool ahci_available=ahci_init(ata_pio_device_count());
+    if(active_transport==BLOCK_TRANSPORT_NONE){
+        if(ata_available){
+            active_transport=STORAGE_TRANSPORT_ATA_PIO;
+            active_index=0;
+            (void)ata_pio_select_device(0);
+        } else if(ahci_available){
+            active_transport=STORAGE_TRANSPORT_AHCI;
+            active_index=0;
+            (void)ahci_select_device(0);
+        }
+    }
     return ata_available || ahci_available;
 }
 
 uint32_t block_device_count(void){
-    (void)ata_pio_init();
-    return ata_pio_device_count();
+    (void)block_device_init();
+    return ata_pio_device_count()+ahci_device_count();
+}
+
+bool block_device_get_info(uint32_t index, struct storage_device_info *info){
+    if(!info) return false;
+    (void)block_device_init();
+    uint32_t ata_count=ata_pio_device_count();
+    bool status=index<ata_count
+        ? ata_pio_get_device_info(index,info)
+        : ahci_get_device_info(index-ata_count,info);
+    if(status){
+        uint8_t transport=index<ata_count
+            ? STORAGE_TRANSPORT_ATA_PIO : STORAGE_TRANSPORT_AHCI;
+        uint32_t transport_index=index<ata_count ? index : index-ata_count;
+        info->selected=active_transport==transport && active_index==transport_index;
+    }
+    return status;
+}
+
+int32_t block_device_find(const char *name){
+    if(!name) return -1;
+    uint32_t count=block_device_count();
+    for(uint32_t index=0;index<count;index++){
+        struct storage_device_info info;
+        if(block_device_get_info(index,&info) && strcmp(info.name,name)==0){
+            return (int32_t)index;
+        }
+    }
+    return -1;
 }
 
 int32_t block_device_list(struct storage_device_info *devices, uint32_t capacity){
     if(!devices || capacity==0 || capacity>0x7FFFFFFF) return -1;
     (void)block_device_init();
-    uint32_t ata_count=ata_pio_device_count();
-    uint32_t ahci_count=ahci_device_count();
+    uint32_t available=block_device_count();
     uint32_t count=0;
-    for(uint32_t index=0;index<ata_count && count<capacity;index++){
-        if(!ata_pio_get_device_info(index,&devices[index])) return -1;
-        count++;
-    }
-    for(uint32_t index=0;index<ahci_count && count<capacity;index++){
-        if(!ahci_get_device_info(index,&devices[count])) return -1;
+    while(count<available && count<capacity){
+        if(!block_device_get_info(count,&devices[count])) return -1;
         count++;
     }
     return (int32_t)count;
 }
 
-bool block_device_select(uint32_t index){ return ata_pio_select_device(index); }
+bool block_device_select(uint32_t index){
+    (void)block_device_init();
+    uint32_t ata_count=ata_pio_device_count();
+    if(index<ata_count){
+        if(!ata_pio_select_device(index)) return false;
+        active_transport=STORAGE_TRANSPORT_ATA_PIO;
+        active_index=index;
+        return true;
+    }
+    uint32_t ahci_index=index-ata_count;
+    if(!ahci_select_device(ahci_index)) return false;
+    active_transport=STORAGE_TRANSPORT_AHCI;
+    active_index=ahci_index;
+    return true;
+}
 
 bool block_device_read(uint32_t lba, void *buffer){
-    return ata_pio_read_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_read_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_read_sector(lba,buffer);
+    return false;
 }
 
 bool block_device_write(uint32_t lba, const void *buffer){
-    return ata_pio_write_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_write_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_write_sector(lba,buffer);
+    return false;
 }
 
-const char *block_device_name(void){ return ata_pio_device_name(); }
+const char *block_device_name(void){
+    if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_device_name();
+    if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_device_name();
+    return "none";
+}
