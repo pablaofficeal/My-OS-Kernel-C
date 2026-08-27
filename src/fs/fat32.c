@@ -500,7 +500,7 @@ bool fat32_init(void){
         for(uint8_t index=0;index<4;index++){
             uint16_t offset=(uint16_t)(446+index*16);
             uint8_t type=sector_buffer[offset+4];
-            if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
+            if(type==0x0B || type==0x0C || type==0x1B || type==0x1C || type==0xEF){
                 uint32_t lba=read_u32(&sector_buffer[offset+8]);
                 if(lba) partition_lbas[partition_count++]=lba;
             }
