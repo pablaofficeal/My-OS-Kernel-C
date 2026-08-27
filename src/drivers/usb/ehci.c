@@ -7,7 +7,7 @@
 #include "../../lib/string.h"
 
 #define EHCI_DEVICE_LIMIT 4
-#define EHCI_TIMEOUT      10000000U
+#define EHCI_TIMEOUT      50000000U
 #define EHCI_MMIO_MAP_SIZE 0x1000U
 #define EHCI_NO_DEVICE    0xFF
 
@@ -35,6 +35,9 @@
 #define USB_DESCRIPTOR_ENDPOINT      5
 #define USB_CLASS_MASS_STORAGE       8
 #define USB_PROTOCOL_BULK_ONLY       0x50
+#define USB_CLASS_HID                3
+#define USB_CLASS_HUB                9
+#define USB_HID_PROTOCOL_MOUSE       2
 
 #define SCSI_TEST_UNIT_READY 0x00
 #define SCSI_INQUIRY         0x12
@@ -332,6 +335,26 @@ static bool parse_mass_storage(uint16_t total, uint8_t *configuration,
     return *configuration && *bulk_in && *bulk_out;
 }
 
+static bool detect_hid_mouse(uint16_t total){
+    bool is_mouse=false;
+    for(uint16_t offset=0;offset+2<=total;){
+        uint8_t length=descriptor_buffer[offset];
+        uint8_t type=descriptor_buffer[offset+1];
+        if(length<2 || offset+length>total) return false;
+        if(type==USB_DESCRIPTOR_INTERFACE && length>=9){
+            if(descriptor_buffer[offset+5]==USB_CLASS_HID
+               && descriptor_buffer[offset+7]==USB_HID_PROTOCOL_MOUSE){
+                is_mouse=true;
+            }
+            if(descriptor_buffer[offset+5]==USB_CLASS_HUB){
+                klogf(KLOG_INFO,"ehci%u: hub detected on port (behind hub mouse not supported)",controller_number);
+            }
+        }
+        offset+=length;
+    }
+    return is_mouse;
+}
+
 static bool bulk_only_command(uint8_t index, const uint8_t *command,
                               uint8_t command_length, void *data,
                               uint32_t data_length, bool data_in){
@@ -462,7 +485,14 @@ static bool enumerate_port(uint8_t port, uint32_t name_index){
     uint8_t configuration=0,bulk_in=0,bulk_out=0;
     uint16_t in_packet=0,out_packet=0;
     if(!parse_mass_storage(total,&configuration,&bulk_in,&in_packet,
-                           &bulk_out,&out_packet)) return false;
+                           &bulk_out,&out_packet)){
+        if(detect_hid_mouse(total)){
+            klogf(KLOG_WARN,"ehci%u: HID boot mouse found on port%u but EHCI HID not implemented – подключите мышь к USB3 (xHCI, синий порт) или используйте PS/2",controller_number,port);
+        } else {
+            klogf(KLOG_DEBUG,"ehci%u: port%u no mass-storage interface (maybe HID hub)",controller_number,port);
+        }
+        return false;
+    }
     probe_stats.last_stage=5;
     if(!control_transfer(address,packet,0,9,configuration,0,0,0,false)) return false;
     memset(&devices[index],0,sizeof(devices[index]));
