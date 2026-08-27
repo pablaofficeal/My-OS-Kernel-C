@@ -16,6 +16,7 @@
 #include "../../kernel/system_info.h"
 #include "../../lib/string.h"
 #include "../games/snake.h"
+#include "../installer/installer.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -586,6 +587,8 @@ static bool installer_create_dir(const char *path){
 }
 
 static void run_installer(const char *args){
+    installer_run(args);
+    return;
     terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
     static struct storage_device_info devs[20];
     int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
