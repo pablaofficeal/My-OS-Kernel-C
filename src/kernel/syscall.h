@@ -59,6 +59,9 @@ struct usb_scan_status {
     uint32_t xhci_addressed_devices;
     uint32_t xhci_disks;
     uint32_t xhci_hid_mice;
+    uint32_t xhci_hid_interfaces;
+    uint32_t xhci_hubs;
+    uint32_t xhci_mouse_transfer_errors;
     uint32_t xhci_failures;
     uint32_t xhci_stage;
     uint32_t xhci_error;

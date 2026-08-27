@@ -26,11 +26,11 @@
 #define ICON_Y           48
 #define ICON_W           58
 #define ICON_H           72
-#define HTOP_ICON_X      24
-#define TERMINAL_ICON_X  104
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
+static uint32_t htop_icon_x=420;
+static uint32_t terminal_icon_x=500;
 static uint8_t previous_mouse_buttons;
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
@@ -40,20 +40,20 @@ static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
 }
 
 static void draw_htop_icon(void){
-    gop_draw_rect(HTOP_ICON_X,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(HTOP_ICON_X+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_line(HTOP_ICON_X+11,ICON_Y+31,HTOP_ICON_X+19,ICON_Y+21,0x89B4FA);
-    gop_draw_line(HTOP_ICON_X+19,ICON_Y+21,HTOP_ICON_X+28,ICON_Y+27,0x89B4FA);
-    gop_draw_line(HTOP_ICON_X+28,ICON_Y+27,HTOP_ICON_X+39,ICON_Y+14,0xA6E3A1);
-    gop_draw_line(HTOP_ICON_X+39,ICON_Y+14,HTOP_ICON_X+47,ICON_Y+19,0xA6E3A1);
-    gop_draw_text_at(HTOP_ICON_X+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
+    gop_draw_rect(htop_icon_x,ICON_Y,ICON_W,50,0x313244);
+    gop_draw_rect(htop_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
+    gop_draw_line(htop_icon_x+11,ICON_Y+31,htop_icon_x+19,ICON_Y+21,0x89B4FA);
+    gop_draw_line(htop_icon_x+19,ICON_Y+21,htop_icon_x+28,ICON_Y+27,0x89B4FA);
+    gop_draw_line(htop_icon_x+28,ICON_Y+27,htop_icon_x+39,ICON_Y+14,0xA6E3A1);
+    gop_draw_line(htop_icon_x+39,ICON_Y+14,htop_icon_x+47,ICON_Y+19,0xA6E3A1);
+    gop_draw_text_at(htop_icon_x+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_terminal_icon(void){
-    gop_draw_rect(TERMINAL_ICON_X,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(TERMINAL_ICON_X+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_text_at(TERMINAL_ICON_X+13,ICON_Y+18,">_",0xA6E3A1,0x1E1E2E);
-    gop_draw_text_at(TERMINAL_ICON_X,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
+    gop_draw_rect(terminal_icon_x,ICON_Y,ICON_W,50,0x313244);
+    gop_draw_rect(terminal_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
+    gop_draw_text_at(terminal_icon_x+13,ICON_Y+18,">_",0xA6E3A1,0x1E1E2E);
+    gop_draw_text_at(terminal_icon_x,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_desktop(void){
@@ -61,6 +61,8 @@ static void draw_desktop(void){
     desktop_height=gop_get_height();
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
+    htop_icon_x=desktop_width>560 ? 420 : desktop_width-140;
+    terminal_icon_x=htop_icon_x+72;
 
     gop_clear(DESKTOP_BG);
     gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
@@ -104,11 +106,11 @@ static void handle_desktop_mouse(void){
                                       desktop_width,desktop_height) || redraw;
     }
     if(pressed && !consumed
-       && point_inside(mouse.x,mouse.y,HTOP_ICON_X,ICON_Y,ICON_W,ICON_H)){
+       && point_inside(mouse.x,mouse.y,htop_icon_x,ICON_Y,ICON_W,ICON_H)){
         monitor_run();
         redraw=true;
     } else if(pressed && !consumed
-              && point_inside(mouse.x,mouse.y,TERMINAL_ICON_X,ICON_Y,
+              && point_inside(mouse.x,mouse.y,terminal_icon_x,ICON_Y,
                               ICON_W,ICON_H)){
         terminal_set_visible(true);
         redraw=true;
@@ -143,10 +145,11 @@ void userspace_init(void){
     draw_desktop();
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing terminal");
     terminal_init(desktop_width,desktop_height);
+    terminal_set_visible(true);
 
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
-    userspace_set_mouse_debug(false);
+    userspace_set_mouse_debug(true);
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
@@ -164,6 +167,9 @@ void userspace_run(void){
         }
         monitor_window_update();
 
-        timer_sleep(1);
+        __asm__ volatile("pause");
+        for(volatile uint32_t wait=0;wait<10000;wait++){
+            __asm__ volatile("nop");
+        }
     }
 }

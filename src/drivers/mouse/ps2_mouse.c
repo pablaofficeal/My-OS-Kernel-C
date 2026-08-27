@@ -1,4 +1,5 @@
 #include "ps2_mouse.h"
+#include "usb_mouse.h"
 #include "../pic.h"
 #include "../serial.h"
 #include "../gop.h"
@@ -77,6 +78,7 @@ static void draw_debug_overlay(void){
     if(!debug_overlay_enabled) return;
     if(!gop_is_available()) return;
     const uint32_t x=12, y=38, bg=0x313244;
+    struct usb_mouse_info usb=usb_mouse_get_info();
     gop_draw_rect(x, y, 380, 84, bg);
     gop_draw_text_at(x+6, y+5, "MOUSE DEBUG", 0x89DCEB, bg);
     gop_draw_text_at(x+6, y+17, "INIT EN IF MIM SIM", 0xCDD6F4, bg);
@@ -89,11 +91,11 @@ static void draw_debug_overlay(void){
     draw_hex(x+6,   y+49, debug_state.irq_count, 8);
     draw_hex(x+86,  y+49, debug_state.poll_count, 8);
     draw_hex(x+166, y+49, debug_state.packet_count, 8);
-    gop_draw_text_at(x+6, y+61, "STAT BYTE X    Y", 0xCDD6F4, bg);
-    draw_hex(x+6,   y+71, debug_state.controller_status, 2);
-    draw_hex(x+46,  y+71, debug_state.last_byte, 2);
-    draw_hex(x+86,  y+71, (uint32_t)state.x, 4);
-    draw_hex(x+134, y+71, (uint32_t)state.y, 4);
+    gop_draw_text_at(x+6, y+61, "X    Y    USB REPORTS", 0xCDD6F4, bg);
+    draw_hex(x+6,   y+71, (uint32_t)state.x, 4);
+    draw_hex(x+54,  y+71, (uint32_t)state.y, 4);
+    draw_hex(x+102, y+71, usb.connected, 2);
+    draw_hex(x+142, y+71, usb.reports, 8);
 }
 
 static void save_bg(int32_t x,int32_t y){

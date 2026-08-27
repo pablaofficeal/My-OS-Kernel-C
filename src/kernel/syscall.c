@@ -119,6 +119,9 @@ int64_t syscall_handler(struct syscall_regs *r){
                 status->xhci_addressed_devices=xhci_stats.addressed_devices;
                 status->xhci_disks=xhci_stats.mass_storage_devices;
                 status->xhci_hid_mice=xhci_stats.hid_mice;
+                status->xhci_hid_interfaces=xhci_stats.hid_interfaces;
+                status->xhci_hubs=xhci_stats.hubs;
+                status->xhci_mouse_transfer_errors=xhci_stats.mouse_transfer_errors;
                 status->xhci_failures=xhci_stats.failures;
                 status->xhci_stage=xhci_stats.last_stage;
                 status->xhci_error=xhci_stats.last_error;
@@ -189,7 +192,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             for(;;) __asm__ volatile("cli; hlt");
         case SYS_SLEEP:
             if(a1>UINT32_MAX) return -1;
-            timer_sleep((uint32_t)a1);
+            for(volatile uint64_t wait=0;wait<a1*1000000ULL;wait++){
+                __asm__ volatile("nop");
+            }
             return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");

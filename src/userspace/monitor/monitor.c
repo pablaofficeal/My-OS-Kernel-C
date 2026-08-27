@@ -4,7 +4,6 @@
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
-#include "../../drivers/timer.h"
 #include "../../kernel/syscall.h"
 
 #include <stdbool.h>
@@ -16,7 +15,6 @@
 #define WINDOW_HEIGHT 330
 #define TITLE_HEIGHT 34
 #define MONITOR_DISK_LIMIT 3
-#define REFRESH_TICKS 500
 #define COLOR_BORDER 0x45475A
 #define COLOR_WINDOW 0x1E1E2E
 #define COLOR_TITLE 0xA6E3A1
@@ -34,7 +32,14 @@ static bool visible;
 static bool dragging;
 static int32_t drag_offset_x;
 static int32_t drag_offset_y;
-static uint64_t last_refresh;
+static uint64_t last_refresh_tsc;
+static uint64_t refresh_interval_tsc=1500000000ULL;
+
+static uint64_t read_tsc(void){
+    uint32_t low,high;
+    __asm__ volatile("rdtsc":"=a"(low),"=d"(high));
+    return ((uint64_t)high<<32)|low;
+}
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -97,6 +102,7 @@ static void draw_contents(void){
                                COLOR_CLOSE,COLOR_WINDOW,9);
         return;
     }
+    if(cpu.frequency_hz) refresh_interval_tsc=cpu.frequency_hz/2;
 
     gop_draw_text_sized_at(window_x+22,content_y,cpu.name,
                            COLOR_TEXT,COLOR_WINDOW,9);
@@ -146,7 +152,7 @@ void monitor_window_draw(void){
                            COLOR_WINDOW,COLOR_CLOSE,10);
     draw_contents();
     mouse_end_framebuffer_update();
-    last_refresh=timer_ticks();
+    last_refresh_tsc=read_tsc();
 }
 
 void monitor_run(void){
@@ -158,7 +164,7 @@ void monitor_run(void){
     if(window_y+window_height>screen_height) window_y=30;
     visible=true;
     dragging=false;
-    last_refresh=timer_ticks()-REFRESH_TICKS;
+    last_refresh_tsc=0;
 }
 
 void monitor_window_close(void){
@@ -208,7 +214,8 @@ bool monitor_window_handle_mouse(int32_t x, int32_t y, uint8_t buttons,
 }
 
 void monitor_window_update(void){
-    if(visible && !dragging && timer_ticks()-last_refresh>=REFRESH_TICKS){
+    if(visible && !dragging
+       && read_tsc()-last_refresh_tsc>=refresh_interval_tsc){
         monitor_window_draw();
     }
 }

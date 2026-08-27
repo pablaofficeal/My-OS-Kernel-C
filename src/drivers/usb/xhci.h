@@ -35,6 +35,9 @@ struct xhci_probe_stats {
     uint32_t addressed_devices;
     uint32_t mass_storage_devices;
     uint32_t hid_mice;
+    uint32_t hid_interfaces;
+    uint32_t hubs;
+    uint32_t mouse_transfer_errors;
     uint32_t failures;
     uint32_t last_stage;
     uint32_t last_error;

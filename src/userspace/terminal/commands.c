@@ -350,11 +350,13 @@ static void rescan_usb(void){
         return;
     }
     terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
-    terminal_printf("xhci: controllers=%u ports=%u scratchpads=%u connected=%u addressed=%u disks=%u mice=%u stage=%u\n",
+    terminal_printf("xhci: controllers=%u ports=%u connected=%u addressed=%u disks=%u mice=%u stage=%u\n",
                     status.xhci_controllers,status.xhci_max_ports,
-                    status.xhci_scratchpad_count,
                     status.xhci_connected_ports,status.xhci_addressed_devices,
                     status.xhci_disks,status.xhci_hid_mice,status.xhci_stage);
+    terminal_printf("xhci-hid: interfaces=%u hubs=%u transfer-errors=%u scratchpads=%u\n",
+                    status.xhci_hid_interfaces,status.xhci_hubs,
+                    status.xhci_mouse_transfer_errors,status.xhci_scratchpad_count);
     terminal_printf("xhci: error=%u (%s) usbsts=0x%x\n",
                     status.xhci_error,xhci_error_name(status.xhci_error),
                     status.xhci_usb_status);
@@ -790,6 +792,8 @@ static void show_mouse(void){
     struct mouse_state state=mouse_get_state();
     struct mouse_debug_state debug=mouse_get_debug_state();
     struct usb_mouse_info usb=usb_mouse_get_info();
+    struct xhci_probe_stats xhci;
+    xhci_get_probe_stats(&xhci);
     terminal_printf("mouse: x=%d y=%d dx=%d dy=%d buttons=0x%x\n",
                     state.x,state.y,state.dx,state.dy,(unsigned int)state.buttons);
     terminal_printf("driver: initialized=%u enabled=%u irq=%u poll=%u packets=%u\n",
@@ -799,6 +803,12 @@ static void show_mouse(void){
                     (unsigned int)usb.connected,(unsigned int)usb.port,
                     (unsigned int)usb.vendor_id,(unsigned int)usb.product_id,
                     usb.reports);
+    terminal_printf("xhci: controllers=%u connected=%u addressed=%u hid=%u mice=%u\n",
+                    xhci.controllers,xhci.connected_ports,xhci.addressed_devices,
+                    xhci.hid_interfaces,xhci.hid_mice);
+    terminal_printf("xhci: hubs=%u transfer-errors=%u last-error=%u completion=%u\n",
+                    xhci.hubs,xhci.mouse_transfer_errors,
+                    xhci.last_error,xhci.last_completion_code);
 }
 
 static void reboot_system(void){

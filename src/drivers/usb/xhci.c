@@ -47,6 +47,7 @@
 #define USB_CLASS_MASS_STORAGE      8
 #define USB_PROTOCOL_BULK_ONLY      0x50
 #define USB_CLASS_HID               3
+#define USB_CLASS_HUB               9
 #define USB_HID_SUBCLASS_BOOT       1
 #define USB_HID_PROTOCOL_MOUSE      2
 
@@ -109,6 +110,7 @@ struct xhci_device {
     uint8_t kind;
     uint8_t interrupt_in_dci;
     uint16_t interrupt_packet;
+    uint8_t interrupt_errors;
     bool interrupt_pending;
     bool sync_cache_supported;
 };
@@ -260,10 +262,16 @@ static bool dispatch_mouse_event(const struct xhci_trb *event){
         uint32_t remaining=event->status&0xFFFFFF;
         uint32_t received=remaining<requested ? requested-remaining : requested;
         if(code==XHCI_COMPLETION_SUCCESS || code==XHCI_COMPLETION_SHORT){
+            device->interrupt_errors=0;
             if(received>=3) usb_mouse_report(mouse_reports[index],received);
         } else {
-            device->kind=XHCI_DEVICE_DISABLED;
-            usb_mouse_detach();
+            probe_stats.mouse_transfer_errors++;
+            probe_stats.last_completion_code=code;
+            device->interrupt_errors++;
+            if(device->interrupt_errors>=3){
+                device->kind=XHCI_DEVICE_DISABLED;
+                usb_mouse_detach();
+            }
         }
         return true;
     }
@@ -583,8 +591,13 @@ static bool find_boot_mouse_interface(uint16_t total_length,
         if(type==USB_DESCRIPTOR_CONFIGURATION && length>=9){
             *configuration=descriptor_buffer[offset+5];
         } else if(type==USB_DESCRIPTOR_INTERFACE && length>=9){
+            if(descriptor_buffer[offset+5]==USB_CLASS_HID){
+                probe_stats.hid_interfaces++;
+            }
+            if(descriptor_buffer[offset+5]==USB_CLASS_HUB){
+                probe_stats.hubs++;
+            }
             mouse_interface=descriptor_buffer[offset+5]==USB_CLASS_HID
-                && descriptor_buffer[offset+6]==USB_HID_SUBCLASS_BOOT
                 && descriptor_buffer[offset+7]==USB_HID_PROTOCOL_MOUSE;
             if(mouse_interface) *interface_number=descriptor_buffer[offset+2];
         } else if(type==USB_DESCRIPTOR_ENDPOINT && length>=7
@@ -687,6 +700,7 @@ static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
     devices[index].kind=XHCI_DEVICE_MOUSE;
     devices[index].interrupt_in_dci=dci;
     devices[index].interrupt_packet=packet_size;
+    devices[index].interrupt_errors=0;
     devices[index].interrupt_pending=false;
     return true;
 }
@@ -1274,6 +1288,9 @@ bool xhci_rescan(uint32_t linux_name_base){
     probe_stats.addressed_devices=0;
     probe_stats.mass_storage_devices=0;
     probe_stats.hid_mice=0;
+    probe_stats.hid_interfaces=0;
+    probe_stats.hubs=0;
+    probe_stats.mouse_transfer_errors=0;
     probe_stats.failures=0;
     probe_stats.last_stage=0;
     probe_stats.last_error=XHCI_PROBE_OK;
