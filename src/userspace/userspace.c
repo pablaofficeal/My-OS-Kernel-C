@@ -1,5 +1,6 @@
 #include "userspace.h"
 #include "terminal/terminal.h"
+#include "monitor/monitor.h"
 #include "../drivers/gop.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
@@ -22,9 +23,38 @@
 #define MOUSE_DEBUG_Y    38
 #define MOUSE_DEBUG_W    380
 #define MOUSE_DEBUG_H    84
+#define ICON_Y           48
+#define ICON_W           58
+#define ICON_H           72
+#define HTOP_ICON_X      24
+#define TERMINAL_ICON_X  104
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
+static uint8_t previous_mouse_buttons;
+
+static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
+                         uint32_t width, uint32_t height){
+    return x>=(int32_t)left && y>=(int32_t)top
+        && x<(int32_t)(left+width) && y<(int32_t)(top+height);
+}
+
+static void draw_htop_icon(void){
+    gop_draw_rect(HTOP_ICON_X,ICON_Y,ICON_W,50,0x313244);
+    gop_draw_rect(HTOP_ICON_X+7,ICON_Y+8,44,30,0x1E1E2E);
+    gop_draw_line(HTOP_ICON_X+11,ICON_Y+31,HTOP_ICON_X+19,ICON_Y+21,0x89B4FA);
+    gop_draw_line(HTOP_ICON_X+19,ICON_Y+21,HTOP_ICON_X+28,ICON_Y+27,0x89B4FA);
+    gop_draw_line(HTOP_ICON_X+28,ICON_Y+27,HTOP_ICON_X+39,ICON_Y+14,0xA6E3A1);
+    gop_draw_line(HTOP_ICON_X+39,ICON_Y+14,HTOP_ICON_X+47,ICON_Y+19,0xA6E3A1);
+    gop_draw_text_at(HTOP_ICON_X+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
+}
+
+static void draw_terminal_icon(void){
+    gop_draw_rect(TERMINAL_ICON_X,ICON_Y,ICON_W,50,0x313244);
+    gop_draw_rect(TERMINAL_ICON_X+7,ICON_Y+8,44,30,0x1E1E2E);
+    gop_draw_text_at(TERMINAL_ICON_X+13,ICON_Y+18,">_",0xA6E3A1,0x1E1E2E);
+    gop_draw_text_at(TERMINAL_ICON_X,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
+}
 
 static void draw_desktop(void){
     desktop_width=gop_get_width();
@@ -37,11 +67,54 @@ static void draw_desktop(void){
     gop_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
     gop_draw_text_at(120,8,"Userspace 0.2.0",TOPBAR_FG,TOPBAR_BG);
 
-    const char *status="terminal: module  |  help  dmesg  mouse  debug";
+    const char *status="desktop: icons  |  drag title bars  |  help";
     uint32_t status_width=(uint32_t)strlen(status)*8;
     uint32_t status_x=desktop_width>status_width+12
         ? desktop_width-status_width-12 : 220;
     gop_draw_text_at(status_x,8,status,TOPBAR_MUTED,TOPBAR_BG);
+    draw_htop_icon();
+    draw_terminal_icon();
+}
+
+static void redraw_scene(void){
+    mouse_begin_framebuffer_update();
+    draw_desktop();
+    if(terminal_is_visible()) terminal_redraw();
+    if(monitor_window_is_visible()) monitor_window_draw();
+    mouse_end_framebuffer_update();
+}
+
+static void handle_desktop_mouse(void){
+    struct mouse_state mouse=mouse_get_state();
+    bool pressed=(mouse.buttons&1) && !(previous_mouse_buttons&1);
+    bool released=!(mouse.buttons&1) && (previous_mouse_buttons&1);
+    bool redraw=false;
+    bool consumed=false;
+
+    if(monitor_window_is_visible()){
+        consumed=monitor_window_contains_point(mouse.x,mouse.y);
+        redraw=monitor_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
+                                            pressed,released,
+                                            desktop_width,desktop_height);
+    }
+    if(!consumed && terminal_is_visible()){
+        consumed=terminal_contains_point(mouse.x,mouse.y);
+        redraw=terminal_handle_mouse(mouse.x,mouse.y,mouse.buttons,
+                                      pressed,released,
+                                      desktop_width,desktop_height) || redraw;
+    }
+    if(pressed && !consumed
+       && point_inside(mouse.x,mouse.y,HTOP_ICON_X,ICON_Y,ICON_W,ICON_H)){
+        monitor_run();
+        redraw=true;
+    } else if(pressed && !consumed
+              && point_inside(mouse.x,mouse.y,TERMINAL_ICON_X,ICON_Y,
+                              ICON_W,ICON_H)){
+        terminal_set_visible(true);
+        redraw=true;
+    }
+    previous_mouse_buttons=mouse.buttons;
+    if(redraw) redraw_scene();
 }
 
 uint32_t userspace_get_width(void){ return desktop_width; }
@@ -83,9 +156,13 @@ void userspace_run(void){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        handle_desktop_mouse();
 
         char c;
-        while(keyboard_try_getc(&c)) terminal_handle_key(c);
+        while(keyboard_try_getc(&c)){
+            if(terminal_is_visible()) terminal_handle_key(c);
+        }
+        monitor_window_update();
 
         timer_sleep(1);
     }

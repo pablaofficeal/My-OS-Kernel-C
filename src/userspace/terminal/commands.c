@@ -777,7 +777,7 @@ static void show_help(void){
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
     terminal_write("  systeminfo        show detailed CPU and RAM info\n");
-    terminal_write("  monitor | htop    live CPU/RAM/disk monitor (q exits)\n");
+    terminal_write("  htop              open the system monitor window\n");
     terminal_write("  font [SIZE|FACE]  change session font\n");
     terminal_write("  snake             start the Snake game\n");
     terminal_write("  mouse             show PS/2 and USB mouse state\n");
@@ -872,7 +872,7 @@ void commands_execute(const char *line){
                         terminal_get_font_size(),terminal_get_font_size());
     } else if(strcmp(command,"systeminfo")==0){
         show_systeminfo();
-    } else if(strcmp(command,"monitor")==0 || strcmp(command,"htop")==0){
+    } else if(strcmp(command,"htop")==0){
         monitor_run();
     } else if(strcmp(command,"font")==0){
         configure_font(arguments);

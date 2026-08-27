@@ -34,6 +34,10 @@ static uint32_t cursor_x, cursor_y;
 static char input_buffer[SHELL_BUFFER_SIZE];
 static uint32_t input_length;
 static uint32_t glyph_size=DEFAULT_GLYPH_SIZE;
+static bool window_visible=true;
+static bool window_dragging;
+static int32_t drag_offset_x;
+static int32_t drag_offset_y;
 
 static uint32_t line_height(void){ return glyph_size+3; }
 
@@ -103,6 +107,7 @@ static void write_signed(int64_t value){
 }
 
 static void draw_window(void){
+    if(!window_visible) return;
     gop_draw_rect(window_x+5,window_y+5,window_w,window_h,WINDOW_SHADOW);
     gop_draw_rect(window_x,window_y,window_w,window_h,WINDOW_BORDER);
     gop_draw_rect(window_x+1,window_y+1,window_w-2,window_h-2,WINDOW_BG);
@@ -142,6 +147,7 @@ void terminal_init(uint32_t screen_width, uint32_t screen_height){
 }
 
 void terminal_handle_key(char c){
+    if(!window_visible) return;
     if(nano_is_active()){
         nano_handle_key(c);
         return;
@@ -157,6 +163,7 @@ void terminal_handle_key(char c){
     if(c=='\b' || c==127){
         if(input_length){
             input_length--;
+            input_buffer[input_length]=0;
             terminal_putc('\b');
         }
         return;
@@ -164,6 +171,7 @@ void terminal_handle_key(char c){
     if(c<' ' || c>'~') return;
     if(input_length<SHELL_BUFFER_SIZE-1){
         input_buffer[input_length++]=c;
+        input_buffer[input_length]=0;
         terminal_putc(c);
     }
 }
@@ -261,3 +269,65 @@ const char *terminal_get_font_face(void){
 
 uint32_t terminal_get_window_width(void){ return window_w; }
 uint32_t terminal_get_window_height(void){ return window_h; }
+
+void terminal_redraw(void){
+    if(!window_visible) return;
+    draw_window();
+    terminal_prompt();
+    if(input_length) terminal_write(input_buffer);
+}
+
+void terminal_set_visible(bool visible){
+    window_visible=visible;
+    window_dragging=false;
+}
+
+bool terminal_is_visible(void){ return window_visible; }
+
+static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
+                         uint32_t width, uint32_t height){
+    return x>=(int32_t)left && y>=(int32_t)top
+        && x<(int32_t)(left+width) && y<(int32_t)(top+height);
+}
+
+bool terminal_contains_point(int32_t x, int32_t y){
+    return window_visible && point_inside(x,y,window_x,window_y,window_w,window_h);
+}
+
+bool terminal_handle_mouse(int32_t x, int32_t y, uint8_t buttons,
+                           bool pressed, bool released,
+                           uint32_t screen_width, uint32_t screen_height){
+    if(!window_visible) return false;
+    if(pressed && point_inside(x,y,window_x+window_w-58,window_y+8,18,18)){
+        window_visible=false;
+        window_dragging=false;
+        return true;
+    }
+    if(pressed && point_inside(x,y,window_x+window_w-34,window_y+8,18,18)){
+        window_visible=false;
+        window_dragging=false;
+        return true;
+    }
+    if(pressed && point_inside(x,y,window_x,window_y,window_w,TITLE_HEIGHT)){
+        window_dragging=true;
+        drag_offset_x=x-(int32_t)window_x;
+        drag_offset_y=y-(int32_t)window_y;
+    }
+    if(window_dragging && (buttons&1)){
+        int32_t next_x=x-drag_offset_x;
+        int32_t next_y=y-drag_offset_y;
+        int32_t max_x=(int32_t)screen_width-(int32_t)window_w-6;
+        int32_t max_y=(int32_t)screen_height-(int32_t)window_h-6;
+        if(next_x<0) next_x=0;
+        if(next_y<28) next_y=28;
+        if(next_x>max_x) next_x=max_x;
+        if(next_y>max_y) next_y=max_y;
+        window_x=(uint32_t)next_x;
+        window_y=(uint32_t)next_y;
+    }
+    if(released && window_dragging){
+        window_dragging=false;
+        return true;
+    }
+    return false;
+}

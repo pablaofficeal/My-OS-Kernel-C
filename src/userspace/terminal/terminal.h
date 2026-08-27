@@ -4,6 +4,13 @@
 
 void terminal_init(uint32_t screen_width, uint32_t screen_height);
 void terminal_handle_key(char c);
+void terminal_redraw(void);
+void terminal_set_visible(bool visible);
+bool terminal_is_visible(void);
+bool terminal_contains_point(int32_t x, int32_t y);
+bool terminal_handle_mouse(int32_t x, int32_t y, uint8_t buttons,
+                           bool pressed, bool released,
+                           uint32_t screen_width, uint32_t screen_height);
 
 void terminal_putc(char c);
 void terminal_write(const char *text);
