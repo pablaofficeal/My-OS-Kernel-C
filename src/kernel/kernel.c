@@ -1,13 +1,11 @@
 #include "kernel.h"
 #include "../drivers/gop.h"
 #include "../drivers/serial.h"
-#include "../drivers/vga.h"
-#include "../drivers/mouse/ps2_mouse.h"
-#include "../arch/x86_64/gdt.h"
-#include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
 #include "../kernel/klog.h"
 #include "../kernel/system_info.h"
+#include "../kernel/boot_diag.h"
+#include "../kernel/panic.h"
 #include "../userspace/userspace.h"
 #include "../lib/string.h"
 // Forward declaration of memmap response from boot.c
@@ -20,20 +18,15 @@ static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t 
     return ret;
 }
 
-static void idle_forever(void){
-    __asm__ volatile("sti");
-    for(;;){
-        ps2_mouse_poll();
-        __asm__ volatile("pause");
-    }
-}
-
 void kernel_main(struct limine_framebuffer *fb) {
     (void)fb;
     klog(KLOG_INFO, "Entering kernel_main...");
     klog(KLOG_INFO, "Kernel: 64-bit long mode, GOP active");
 
+    boot_diag_checkpoint(BOOT_STAGE_SYSTEM_INFO, "probing CPU and memory map");
     system_info_init(memmap_response_ptr);
+    if(system_info_usable_ram_bytes()==0)
+        kernel_panic("memory map contains no usable RAM");
     klogf(KLOG_OK, "CPU detected: %s", system_info_cpu_name());
     klogf(KLOG_OK, "Usable RAM: %lu MB", system_info_usable_ram_bytes() / (1024 * 1024));
     klogf(KLOG_INFO, "Framebuffer: %dx%d", gop_get_width(), gop_get_height());
@@ -43,7 +36,7 @@ void kernel_main(struct limine_framebuffer *fb) {
     __asm__ volatile("int3");
     klog(KLOG_OK, "int3 handled, IDT working");
 
-    klog(KLOG_INFO, "Initializing syscall layer...");
+    boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "initializing syscall layer");
     syscall_init();
     klog(KLOG_OK, "Syscall int 0x80 ready");
 
@@ -57,21 +50,16 @@ void kernel_main(struct limine_framebuffer *fb) {
 
     klog(KLOG_INFO, "Boot log complete");
     klogf(KLOG_DEBUG, "Verbose mode: %s (debug visible)", klog_is_verbose() ? "on" : "off");
-    klog(KLOG_OK, "Booting userspace...");
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "about to call userspace_init");
+    klog(KLOG_OK, "Booting userspace initialization...");
 
     // пауза чтобы увидеть boot log как в Linux (1 сек)
     { volatile uint64_t dummy=0; for(uint64_t i=0;i<30000000ULL;i++){ __asm__ volatile("pause"); dummy+=i; } (void)dummy; }
-    serial_write_string("[KERNEL] hiding boot screen, entering userspace\n");
-    // скрываем boot log и переключаемся в userspace (как в Linux: boot splash -> login)
-    klog_set_screen_enabled(false);
     serial_write_string("[USERSPACE] init\n");
     userspace_init();
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN, "userspace_init returned; entering event loop");
     serial_write_string("[USERSPACE] run\n");
     userspace_run();
 
-    // fallback если userspace вернётся
-    mouse_redraw();
-    klog_set_screen_enabled(true);
-    klog(KLOG_WARN, "Userspace exited, fallback to idle");
-    idle_forever();
+    kernel_panic("userspace_run returned unexpectedly");
 }

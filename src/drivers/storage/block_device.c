@@ -4,18 +4,30 @@
 #include "../usb/xhci.h"
 #include "../usb/ehci.h"
 #include "../../lib/string.h"
+#include "../../kernel/klog.h"
 
 #define BLOCK_TRANSPORT_NONE 0
 
 static uint8_t active_transport;
 static uint32_t active_index;
+static bool initialization_complete;
+static bool initialization_result;
 
 bool block_device_init(void){
+    if(initialization_complete) return initialization_result;
+    klog(KLOG_INFO,"storage init: probing legacy ATA PIO");
     bool ata_available=ata_pio_init();
+    klogf(KLOG_INFO,"storage init: ATA PIO complete, disks=%u",ata_pio_device_count());
+    klog(KLOG_INFO,"storage init: probing AHCI SATA");
     bool ahci_available=ahci_init(ata_pio_device_count());
+    klogf(KLOG_INFO,"storage init: AHCI complete, disks=%u",ahci_device_count());
+    klog(KLOG_INFO,"storage init: probing xHCI USB");
     bool usb_available=xhci_init(ata_pio_device_count()+ahci_device_count());
+    klogf(KLOG_INFO,"storage init: xHCI complete, disks=%u",xhci_device_count());
+    klog(KLOG_INFO,"storage init: probing EHCI USB 2.0");
     bool ehci_available=ehci_init(ata_pio_device_count()+ahci_device_count()
                                   +xhci_device_count());
+    klogf(KLOG_INFO,"storage init: EHCI complete, disks=%u",ehci_device_count());
     if(active_transport==BLOCK_TRANSPORT_NONE){
         if(ata_available){
             active_transport=STORAGE_TRANSPORT_ATA_PIO;
@@ -35,7 +47,9 @@ bool block_device_init(void){
             (void)ehci_select_device(0);
         }
     }
-    return ata_available || ahci_available || usb_available || ehci_available;
+    initialization_result=ata_available || ahci_available || usb_available || ehci_available;
+    initialization_complete=true;
+    return initialization_result;
 }
 
 uint32_t block_device_rescan_usb(void){

@@ -15,6 +15,8 @@
 #include "../kernel/syscall.h"
 #include "../kernel/kernel.h"
 #include "../kernel/klog.h"
+#include "../kernel/boot_diag.h"
+#include "../kernel/panic.h"
 
 __attribute__((used, section(".requests_start_marker")))
 static volatile LIMINE_REQUESTS_START_MARKER;
@@ -62,18 +64,31 @@ struct limine_memmap_response *memmap_response_ptr = 0;
 
 void _start(void) {
     // Limine already in 64-bit long mode, paging enabled
+    serial_init();
+    serial_write_string("[EARLY 01] entered _start\n");
     if (LIMINE_BASE_REVISION_SUPPORTED == false) {
-        for(;;) __asm__ volatile("hlt");
+        serial_write_string("[EARLY PANIC] unsupported Limine base revision\n");
+        for(;;) __asm__ volatile("cli; hlt");
     }
+    serial_write_string("[EARLY 02] Limine base revision supported\n");
     if (framebuffer_request.response == NULL
-     || framebuffer_request.response->framebuffer_count < 1) {
-        for(;;) __asm__ volatile("hlt");
+     || framebuffer_request.response->framebuffer_count < 1
+     || framebuffer_request.response->framebuffers[0] == NULL) {
+        serial_write_string("[EARLY PANIC] Limine supplied no framebuffer\n");
+        for(;;) __asm__ volatile("cli; hlt");
     }
+    serial_write_string("[EARLY 03] framebuffer response present\n");
 
     fb_ptr = framebuffer_request.response->framebuffers[0];
+    if(!fb_ptr->address || !fb_ptr->width || !fb_ptr->height || !fb_ptr->pitch){
+        serial_write_string("[EARLY PANIC] invalid framebuffer geometry or address\n");
+        for(;;) __asm__ volatile("cli; hlt");
+    }
+    if(fb_ptr->bpp != 32){
+        serial_write_string("[EARLY PANIC] framebuffer is not 32 bpp\n");
+        for(;;) __asm__ volatile("cli; hlt");
+    }
     memmap_response_ptr = memmap_request.response;
-
-    serial_init();
 
     // HHDM для VGA 0xB8000 в higher half (иначе #PF и ребут)
     if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
@@ -97,6 +112,13 @@ void _start(void) {
 
     // первичный экран как в Linux: показываем всё по дефолту
     klog_init();
+    boot_diag_checkpoint(BOOT_STAGE_ENTRY, "Limine _start reached");
+    boot_diag_checkpoint(BOOT_STAGE_BOOT_PROTOCOL, "boot responses captured");
+    if(!gop_is_available()) kernel_panic("framebuffer driver initialization failed");
+    if(!hhdm_request.response) kernel_panic("Limine HHDM response is missing");
+    if(!kernel_address_request.response) kernel_panic("Limine kernel address response is missing");
+    if(!memmap_response_ptr) kernel_panic("Limine memory map response is missing");
+    boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "32-bpp framebuffer validated");
     klog(KLOG_OK, "Limine boot: 64-bit long mode, paging enabled");
     klogf(KLOG_INFO, "HHDM offset: 0x%llx", hhdm_request.response ? hhdm_request.response->offset : 0);
     if(gop_is_available()){
@@ -112,13 +134,15 @@ void _start(void) {
 
     klog(KLOG_INFO, "Loading GDT...");
     gdt_init();
-    klog(KLOG_OK, "GDT loaded (null, code64 0x9A, data 0x92)");
+    klog(KLOG_OK, "GDT loaded (code/data, TSS, emergency IST stacks)");
 
     klog(KLOG_INFO, "Loading IDT...");
     idt_init();
     syscall_init();
-    klog(KLOG_OK, "IDT loaded (256 vectors, ist=0, DPL3 for 0x80)");
+    klog(KLOG_OK, "IDT loaded (256 vectors, DF/NMI/MC IST, DPL3 for 0x80)");
+    boot_diag_checkpoint(BOOT_STAGE_DESCRIPTOR_TABLES, "GDT and all 256 IDT vectors loaded");
 
+    boot_diag_checkpoint(BOOT_STAGE_INTERRUPTS, "initializing PS/2 mouse");
     klog(KLOG_INFO, "Initializing PS/2 mouse...");
     ps2_mouse_init();
     klog(KLOG_OK, "PS/2 mouse ready (IRQ12)");
@@ -128,8 +152,10 @@ void _start(void) {
     klog(KLOG_DEBUG, "CLI executed, preparing STI");
     __asm__ volatile("sti");
     klog(KLOG_OK, "Interrupts enabled (STI)");
+    boot_diag_checkpoint(BOOT_STAGE_INTERRUPTS, "interrupts enabled");
 
+    boot_diag_checkpoint(BOOT_STAGE_KERNEL_MAIN, "calling kernel_main");
     kernel_main(fb_ptr);
 
-    for(;;) __asm__ volatile("cli; hlt");
+    kernel_panic("kernel_main returned unexpectedly");
 }

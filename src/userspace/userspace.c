@@ -4,6 +4,8 @@
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../kernel/klog.h"
+#include "../kernel/boot_diag.h"
+#include "../kernel/panic.h"
 #include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -52,13 +54,26 @@ void userspace_set_mouse_debug(bool enabled){
 }
 
 void userspace_init(void){
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: validating framebuffer");
+    if(!gop_is_available()) kernel_panic("userspace requires an active framebuffer");
+    if(gop_get_width() < 320 || gop_get_height() < 240)
+        kernel_panic("framebuffer is too small for userspace");
+
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing keyboard");
     keyboard_init();
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: drawing desktop");
+    // draw_desktop clears the boot log; subsequent diagnostics remain in the
+    // ring and serial, while panic forcibly restores a visible panic screen.
+    klog_set_screen_enabled(false);
     draw_desktop();
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing terminal");
     terminal_init(desktop_width,desktop_height);
 
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
     userspace_set_mouse_debug(true);
     klog_set_screen_enabled(false);
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
 
 void userspace_run(void){

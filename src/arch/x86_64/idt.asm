@@ -1,14 +1,7 @@
 [BITS 64]
 section .text
 global idt_load
-global isr_stub_0
-global isr_stub_3
-global isr_stub_8
-global isr_stub_13
-global isr_stub_14
-global isr_stub_32
-global isr_stub_44
-global isr_stub_128
+global isr_stub_table
 
 extern isr_handler
 
@@ -29,14 +22,26 @@ isr_stub_%1:
     jmp isr_common
 %endmacro
 
-ISR_NOERR 0
-ISR_NOERR 3
-ISR_ERR   8
-ISR_ERR   13
-ISR_ERR   14
-ISR_NOERR 32
-ISR_NOERR 44
-ISR_NOERR 128
+%assign vector 0
+%rep 256
+%if vector = 8 || vector = 10 || vector = 11 || vector = 12 || vector = 13 || vector = 14 || vector = 17 || vector = 21 || vector = 29 || vector = 30
+ISR_ERR vector
+%else
+ISR_NOERR vector
+%endif
+%assign vector vector + 1
+%endrep
+
+section .rodata
+align 8
+isr_stub_table:
+%assign vector 0
+%rep 256
+    dq isr_stub_%+vector
+%assign vector vector + 1
+%endrep
+
+section .text
 
 isr_common:
     push rax

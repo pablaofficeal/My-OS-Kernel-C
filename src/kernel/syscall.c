@@ -1,5 +1,6 @@
 #include "syscall.h"
 #include "klog.h"
+#include "boot_diag.h"
 #include "../drivers/serial.h"
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
@@ -135,7 +136,9 @@ void syscall_init(void){
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
     if(!filesystem_checked){
         filesystem_checked=true;
+        boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage: scanning PCI controllers");
         storage_probe_init();
+        boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage: initializing block transports");
         (void)block_device_init();
         struct ahci_probe_stats ahci_stats;
         struct xhci_probe_stats xhci_stats;
@@ -164,5 +167,6 @@ void syscall_init(void){
         } else {
             klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found");
         }
+        boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage and filesystem probe complete");
     }
 }
