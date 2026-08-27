@@ -509,6 +509,16 @@ bool fat32_init(void){
             if(mount_boot_sector(partition_lbas[index])) return true;
         }
         if(mount_boot_sector(0)) return true;
+        // Fallback для ESP: пробуем напрямую 2048 (UEFI) даже если тип не распознан
+        if(mount_boot_sector(2048)){
+            klogf(KLOG_INFO,"fat32: fallback mount LBA 2048 succeeded");
+            return true;
+        }
+    }
+    // Глобальный fallback: попробуем 2048 на всех дисках если MBR не распознан
+    for(uint32_t disk=0;disk<disk_count;disk++){
+        if(!block_device_select(disk)) continue;
+        if(mount_boot_sector(2048)) return true;
     }
     return false;
 }

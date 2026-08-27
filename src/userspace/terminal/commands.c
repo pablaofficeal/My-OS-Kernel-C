@@ -30,6 +30,12 @@ static inline void outb(uint16_t port, uint8_t value){
     __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
 }
 
+static char savelog_buf[32768];
+static uint32_t savelog_pos;
+static void savelog_cb(char c){
+    if(savelog_pos+1<sizeof(savelog_buf)) savelog_buf[savelog_pos++]=c;
+}
+
 static bool is_space(char c){ return c==' ' || c=='\t'; }
 
 static void split_command(const char *line, char *command, uint32_t capacity,
@@ -838,6 +844,15 @@ void commands_execute(const char *line){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);
         terminal_write("\n--- end kernel log ---\n");
+        terminal_write("Hint: run 'savelog' to save to /dmesg.txt for host mount\n");
+    } else if(strcmp(command,"savelog")==0){
+        terminal_write("Saving dmesg to /dmesg.txt...\n");
+        savelog_pos=0;
+        klog_foreach(savelog_cb);
+        savelog_buf[savelog_pos]=0;
+        int64_t r=userspace_syscall(SYS_FILE_WRITE,(uint64_t)"/dmesg.txt",(uint64_t)savelog_buf,savelog_pos);
+        if(r>=0) terminal_printf("Saved %u bytes to /dmesg.txt (host: /home/pabla/VirtualBox VMs/test_kernel2/test_kernel2_1.vdi)\n",savelog_pos);
+        else terminal_printf("Failed to save (%d) - is FS mounted? try 'disks'\n",(int)r);
     } else if(strcmp(command,"uname")==0){
         terminal_write("PureC OS 0.1.0 x86_64\n");
     } else if(strcmp(command,"about")==0){
