@@ -38,6 +38,7 @@ struct usb_scan_status {
     uint32_t xhci_completion_code;
     uint32_t xhci_max_ports;
     uint32_t xhci_usb_status;
+    uint32_t xhci_scratchpad_count;
     uint32_t ehci_connected_ports;
     uint32_t ehci_high_speed_ports;
     uint32_t ehci_disks;

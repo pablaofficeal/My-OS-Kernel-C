@@ -338,8 +338,9 @@ static void rescan_usb(void){
         return;
     }
     terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
-    terminal_printf("xhci: controllers=%u ports=%u connected=%u addressed=%u disks=%u stage=%u\n",
+    terminal_printf("xhci: controllers=%u ports=%u scratchpads=%u connected=%u addressed=%u disks=%u stage=%u\n",
                     status.xhci_controllers,status.xhci_max_ports,
+                    status.xhci_scratchpad_count,
                     status.xhci_connected_ports,status.xhci_addressed_devices,
                     status.xhci_disks,status.xhci_stage);
     terminal_printf("xhci: error=%u (%s) usbsts=0x%x\n",

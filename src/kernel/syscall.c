@@ -117,6 +117,7 @@ int64_t syscall_handler(struct syscall_regs *r){
                 status->xhci_completion_code=xhci_stats.last_completion_code;
                 status->xhci_max_ports=xhci_stats.max_ports;
                 status->xhci_usb_status=xhci_stats.usb_status;
+                status->xhci_scratchpad_count=xhci_stats.scratchpad_count;
                 status->ehci_connected_ports=ehci_stats.connected_ports;
                 status->ehci_high_speed_ports=ehci_stats.high_speed_ports;
                 status->ehci_disks=ehci_stats.mass_storage_devices;
@@ -127,10 +128,10 @@ int64_t syscall_handler(struct syscall_regs *r){
                   xhci_stats.connected_ports,xhci_stats.addressed_devices,
                   xhci_stats.mass_storage_devices,xhci_stats.failures,
                   xhci_stats.last_stage);
-            klogf(KLOG_INFO,"usb-rescan: xhci error=%u port=%u portsc=0x%x completion=%u usbsts=0x%x",
-                  xhci_stats.last_error,xhci_stats.last_port,
-                  xhci_stats.last_portsc,xhci_stats.last_completion_code,
-                  xhci_stats.usb_status);
+            klogf(KLOG_INFO,"usb-rescan: xhci error=%u scratchpads=%u port=%u portsc=0x%x completion=%u usbsts=0x%x",
+                  xhci_stats.last_error,xhci_stats.scratchpad_count,
+                  xhci_stats.last_port,xhci_stats.last_portsc,
+                  xhci_stats.last_completion_code,xhci_stats.usb_status);
             klogf(KLOG_INFO,"usb-rescan: ehci connected=%u high-speed=%u disks=%u failures=%u stage=%u",
                   ehci_stats.connected_ports,ehci_stats.high_speed_ports,
                   ehci_stats.mass_storage_devices,ehci_stats.failures,

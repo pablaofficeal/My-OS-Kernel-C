@@ -42,6 +42,7 @@ struct xhci_probe_stats {
     uint32_t last_completion_code;
     uint32_t max_ports;
     uint32_t usb_status;
+    uint32_t scratchpad_count;
 };
 
 void xhci_set_address_mapping(uint64_t hhdm_offset, uint64_t kernel_physical_base,

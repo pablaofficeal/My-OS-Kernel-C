@@ -11,7 +11,7 @@
 #define XHCI_EVENT_ENTRIES      128
 #define XHCI_TIMEOUT            10000000U
 #define XHCI_MMIO_MAP_SIZE      0x100000U
-#define XHCI_SCRATCHPAD_LIMIT   32
+#define XHCI_SCRATCHPAD_LIMIT   1023
 #define XHCI_NO_DEVICE          0xFF
 
 #define XHCI_CMD_RUN            (1U<<0)
@@ -109,7 +109,8 @@ static uint64_t device_context_base[256] __attribute__((aligned(64)));
 static struct xhci_trb command_trbs[XHCI_RING_ENTRIES] __attribute__((aligned(64)));
 static struct xhci_trb event_trbs[XHCI_EVENT_ENTRIES] __attribute__((aligned(64)));
 static struct xhci_erst_entry event_segment __attribute__((aligned(64)));
-static uint64_t scratchpad_pointers[XHCI_SCRATCHPAD_LIMIT] __attribute__((aligned(64)));
+static uint64_t scratchpad_pointers[XHCI_SCRATCHPAD_LIMIT]
+    __attribute__((aligned(65536)));
 static uint8_t scratchpad_pages[XHCI_SCRATCHPAD_LIMIT][4096] __attribute__((aligned(4096)));
 static uint8_t input_contexts[XHCI_DEVICE_LIMIT][4096] __attribute__((aligned(64)));
 static uint8_t output_contexts[XHCI_DEVICE_LIMIT][4096] __attribute__((aligned(64)));
@@ -791,6 +792,7 @@ static bool initialize_controller(const struct storage_controller_info *controll
     memset(device_context_base,0,sizeof(device_context_base));
     uint16_t scratchpads=(uint16_t)((hcsparams2>>27)&0x1F)
         |(uint16_t)((hcsparams2>>16)&0x3E0);
+    probe_stats.scratchpad_count=scratchpads;
     if(scratchpads>XHCI_SCRATCHPAD_LIMIT){
         probe_stats.last_error=XHCI_PROBE_SCRATCHPADS;
         return false;
@@ -884,6 +886,7 @@ bool xhci_rescan(uint32_t linux_name_base){
     probe_stats.last_completion_code=0;
     probe_stats.max_ports=0;
     probe_stats.usb_status=0;
+    probe_stats.scratchpad_count=0;
 
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
