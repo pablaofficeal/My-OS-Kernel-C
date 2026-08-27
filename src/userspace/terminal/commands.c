@@ -423,7 +423,7 @@ static void print_mkfs_error(int64_t status, const char *device){
             struct storage_device_info devs[20];
             int64_t c=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
             for(int64_t i=0;i<c;i++) if(strcmp(devs[i].name,device)==0){
-                terminal_printf("  sectors=%llu ss=%u op=%u wr=%u\n",devs[i].sector_count,devs[i].sector_size,devs[i].operational,devs[i].writable);
+                terminal_printf("  sectors=%u ss=%u op=%u wr=%u\n",(uint32_t)devs[i].sector_count,devs[i].sector_size,devs[i].operational,devs[i].writable);
                 break;
             }
         }
@@ -474,7 +474,7 @@ static void format_fat32(const char *arguments){
         struct storage_device_info devs[20];
         int64_t c=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
         for(int64_t i=0;i<c;i++) if(strcmp(devs[i].name,device)==0){
-            terminal_printf("Device %s: %s %llu MB serial %s %s\n",devs[i].name,devs[i].model,devs[i].sector_count/2048,devs[i].serial,devs[i].operational?"operational":"not operational");
+            terminal_printf("Device %s: %s %u MB serial %s %s\n",devs[i].name,devs[i].model,(uint32_t)(devs[i].sector_count/2048),devs[i].serial,devs[i].operational?"operational":"not operational");
             break;
         }
         char ans[16]={0};
@@ -595,8 +595,8 @@ static void run_installer(const char *args){
     }
     terminal_write("Available disks:\n");
     for(int64_t i=0;i<cnt;i++){
-        uint64_t mb=devs[i].sector_count/2048;
-        terminal_printf("  [%d] %s  %llu MB  %s  serial=%s  %s  %s\n",
+        uint32_t mb=(uint32_t)(devs[i].sector_count/2048);
+        terminal_printf("  [%d] %s  %u MB  %s  serial=%s  %s  %s\n",
                         (int)i,devs[i].name,mb,devs[i].model,devs[i].serial,
                         devs[i].operational?"op":"offline",
                         devs[i].writable?"rw":"ro");
@@ -649,7 +649,7 @@ static void run_installer(const char *args){
         }
         break;
     }
-    terminal_printf("Target: %s  %s  %llu MB  serial=%s\n",devname,model,sectors/2048,serial);
+    terminal_printf("Target: %s  %s  %u MB  serial=%s\n",devname,model,(uint32_t)(sectors/2048),serial);
     char hostname[32]={0};
     prompt_read_line("Hostname [purec-os]: ",hostname,sizeof(hostname));
     if(!hostname[0]) strcpy(hostname,"purec-os");
@@ -661,19 +661,27 @@ static void run_installer(const char *args){
     terminal_write("This will ERASE all data on the target disk!\n");
     char confirm[16]={0};
     prompt_read_line("Type YES to continue: ",confirm,sizeof(confirm));
-    if(strcmp(confirm,"YES")!=0){
-        terminal_write("Aborted.\n");
+    bool is_yes = (strcmp(confirm,"YES")==0 || strcmp(confirm,"yes")==0 || strcmp(confirm,"Yes")==0 || strcmp(confirm,"YES\n")==0 || strcmp(confirm,"y")==0 || strcmp(confirm,"Y")==0);
+    if(!is_yes){
+        terminal_write("Aborted (need YES/yes).\n");
         return;
     }
     terminal_printf("Formatting %s as PURECOS FAT32...\n",devname);
     int64_t fmt=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)devname,(uint64_t)serial,(uint64_t)"ERASE");
-    if(fmt==FS_ERROR_NOT_BLANK){
-        terminal_write("Disk not blank, retrying with --force...\n");
+    if(fmt==FS_ERROR_NOT_BLANK || fmt==FS_ERROR_BUSY){
+        if(fmt==FS_ERROR_BUSY) terminal_write("Volume busy (mounted), forcing unmount+format...\n");
+        else terminal_write("Disk not blank, retrying with --force...\n");
         fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
+        if(fmt==FS_ERROR_BUSY){
+            // еще раз через force с принудительным размонтированием - пробуем прямой force
+            terminal_write("Retrying force again...\n");
+            fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
+        }
     }
     if(fmt<0){
         print_mkfs_error(fmt,devname);
         terminal_write("Install failed at format\n");
+        terminal_write("Hint: run 'disks' to see mounted device, or reboot and run install on empty disk\n");
         return;
     }
     terminal_write("Creating filesystem structure...\n");

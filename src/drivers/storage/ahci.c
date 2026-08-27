@@ -266,6 +266,19 @@ static void fill_device_info(struct ahci_device *device, uint8_t name_index,
     device->lba48=(identify_words[83]&(1<<10))!=0;
     copy_identify_text(info->serial,STORAGE_SERIAL_CAPACITY,10,10);
     copy_identify_text(info->model,STORAGE_MODEL_CAPACITY,27,20);
+    if(!info->serial[0]){
+        const char *hex="0123456789ABCDEF";
+        memcpy(info->serial,"AHCI-",5);
+        for(uint8_t i=0;i<4;i++) info->serial[5+i]=hex[(controller>> (12 - i*4)) &0xF];
+        info->serial[9]='-';
+        for(uint8_t i=0;i<4;i++) info->serial[10+i]=hex[(port_index>> (12 - i*4)) &0xF];
+        info->serial[14]='-';
+        info->serial[15]='P';
+        info->serial[16]=hex[(port_index>>4)&0xF];
+        info->serial[17]=hex[port_index&0xF];
+        info->serial[18]=0;
+    }
+    if(!info->model[0]) memcpy(info->model,"AHCI Disk",10);
 }
 
 bool ahci_init(uint32_t linux_name_base){
