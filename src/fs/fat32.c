@@ -825,7 +825,6 @@ int32_t fat32_rename(const char *path, const char *new_name){
     uint32_t parent;
     int32_t status=resolve_entry(path,&entry,&parent);
     if(status<0) return status;
-    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY) return FS_ERROR_NOT_FILE;
     if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
     if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
 

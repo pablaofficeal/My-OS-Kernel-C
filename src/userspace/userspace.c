@@ -1,4 +1,5 @@
 #include "userspace.h"
+#include "explorer/explorer.h"
 #include "terminal/terminal.h"
 #include "monitor/monitor.h"
 #include "../drivers/gop.h"
@@ -30,6 +31,7 @@
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
+static uint32_t explorer_icon_x=348;
 static uint32_t htop_icon_x=420;
 static uint32_t terminal_icon_x=500;
 static uint8_t previous_mouse_buttons;
@@ -50,6 +52,14 @@ static void draw_htop_icon(void){
     gop_draw_text_at(htop_icon_x+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
 }
 
+static void draw_explorer_icon(void){
+    gop_draw_rect(explorer_icon_x,ICON_Y,ICON_W,50,0x313244);
+    gop_draw_rect(explorer_icon_x+7,ICON_Y+13,44,27,0xF9E2AF);
+    gop_draw_rect(explorer_icon_x+10,ICON_Y+9,20,8,0xF9E2AF);
+    gop_draw_rect(explorer_icon_x+10,ICON_Y+18,38,4,0xFAB387);
+    gop_draw_text_at(explorer_icon_x+7,ICON_Y+55,"Files",TOPBAR_FG,DESKTOP_BG);
+}
+
 static void draw_terminal_icon(void){
     gop_draw_rect(terminal_icon_x,ICON_Y,ICON_W,50,0x313244);
     gop_draw_rect(terminal_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
@@ -62,12 +72,14 @@ static void draw_desktop(void){
     desktop_height=gop_get_height();
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
-    htop_icon_x=desktop_width>560 ? 420 : desktop_width-140;
+    explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
+    htop_icon_x=explorer_icon_x+72;
     terminal_icon_x=htop_icon_x+72;
 
     gop_clear(DESKTOP_BG);
     gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
     gop_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
+    draw_explorer_icon();
     draw_htop_icon();
     draw_terminal_icon();
 }
@@ -77,6 +89,7 @@ static void redraw_scene(void){
     draw_desktop();
     if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
+    if(explorer_window_is_visible()) explorer_window_draw();
     mouse_end_framebuffer_update();
 }
 
@@ -87,11 +100,18 @@ static void handle_desktop_mouse(void){
     bool redraw=false;
     bool consumed=false;
 
-    if(monitor_window_is_visible()){
+    if(explorer_window_is_visible()){
+        consumed=explorer_window_contains_point(mouse.x,mouse.y);
+        redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
+                                             pressed,released,
+                                             desktop_width,desktop_height);
+    }
+    if(!consumed && monitor_window_is_visible()){
         consumed=monitor_window_contains_point(mouse.x,mouse.y);
         redraw=monitor_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
                                             pressed,released,
-                                            desktop_width,desktop_height);
+                                            desktop_width,desktop_height)
+            || redraw;
     }
     if(!consumed && terminal_is_visible()){
         consumed=terminal_contains_point(mouse.x,mouse.y);
@@ -100,6 +120,10 @@ static void handle_desktop_mouse(void){
                                       desktop_width,desktop_height) || redraw;
     }
     if(pressed && !consumed
+       && point_inside(mouse.x,mouse.y,explorer_icon_x,ICON_Y,ICON_W,ICON_H)){
+        explorer_open(desktop_width,desktop_height);
+        redraw=true;
+    } else if(pressed && !consumed
        && point_inside(mouse.x,mouse.y,htop_icon_x,ICON_Y,ICON_W,ICON_H)){
         monitor_run();
         redraw=true;
@@ -169,7 +193,8 @@ void userspace_terminal_thread(void *arg){
     for(;;){
         char c;
         while(keyboard_try_getc(&c)){
-            if(terminal_is_visible()) terminal_handle_key(c);
+            if(!explorer_window_handle_key(c) && terminal_is_visible())
+                terminal_handle_key(c);
         }
         // Yield so input thread can run even while terminal is idle
         scheduler_yield();
@@ -187,7 +212,8 @@ void userspace_run(void){
 
         char c;
         while(keyboard_try_getc(&c)){
-            if(terminal_is_visible()) terminal_handle_key(c);
+            if(!explorer_window_handle_key(c) && terminal_is_visible())
+                terminal_handle_key(c);
         }
         monitor_window_update();
 
