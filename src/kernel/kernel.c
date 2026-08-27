@@ -6,6 +6,7 @@
 #include "../kernel/system_info.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "../arch/x86_64/mmio.h"
 #include "../userspace/userspace.h"
 #include "../lib/string.h"
 // Forward declaration of memmap response from boot.c
@@ -37,6 +38,13 @@ void kernel_main(struct limine_framebuffer *fb) {
     klog(KLOG_OK, "int3 handled, IDT working");
 
     boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "initializing syscall layer");
+    klog(KLOG_INFO, "Initializing PCI MMIO mapper...");
+    mmio_init();
+    if(mmio_is_ready()){
+        klog(KLOG_OK, "PCI MMIO mapper ready (uncached 4 KiB mappings)");
+    } else {
+        klog(KLOG_WARN, "PCI MMIO mapper unavailable; AHCI/xHCI/EHCI disabled");
+    }
     syscall_init();
     klog(KLOG_OK, "Syscall int 0x80 ready");
 

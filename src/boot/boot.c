@@ -13,7 +13,6 @@
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../arch/x86_64/mmio.h"
-#include "../kernel/syscall.h"
 #include "../kernel/kernel.h"
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
@@ -95,9 +94,9 @@ void _start(void) {
     if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
     else vga_set_hhdm(0);
     if(hhdm_request.response && kernel_address_request.response){
-        mmio_init(hhdm_request.response->offset,
-                  kernel_address_request.response->physical_base,
-                  kernel_address_request.response->virtual_base);
+        mmio_configure(hhdm_request.response->offset,
+                       kernel_address_request.response->physical_base,
+                       kernel_address_request.response->virtual_base);
         ahci_set_address_mapping(hhdm_request.response->offset,
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);
@@ -122,9 +121,7 @@ void _start(void) {
     if(!hhdm_request.response) kernel_panic("Limine HHDM response is missing");
     if(!kernel_address_request.response) kernel_panic("Limine kernel address response is missing");
     if(!memmap_response_ptr) kernel_panic("Limine memory map response is missing");
-    if(!mmio_is_ready()) kernel_panic("no free PML4 slot is available for PCI MMIO");
     boot_diag_checkpoint(BOOT_STAGE_FRAMEBUFFER, "32-bpp framebuffer validated");
-    klog(KLOG_OK, "PCI MMIO mapper ready (uncached 4 KiB mappings)");
     klog(KLOG_OK, "Limine boot: 64-bit long mode, paging enabled");
     klogf(KLOG_INFO, "HHDM offset: 0x%llx", hhdm_request.response ? hhdm_request.response->offset : 0);
     if(gop_is_available()){
@@ -144,7 +141,6 @@ void _start(void) {
 
     klog(KLOG_INFO, "Loading IDT...");
     idt_init();
-    syscall_init();
     klog(KLOG_OK, "IDT loaded (256 vectors, DF/NMI/MC IST, DPL3 for 0x80)");
     boot_diag_checkpoint(BOOT_STAGE_DESCRIPTOR_TABLES, "GDT and all 256 IDT vectors loaded");
 

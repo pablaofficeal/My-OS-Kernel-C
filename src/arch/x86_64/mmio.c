@@ -31,6 +31,7 @@ static uint64_t mmio_virtual_cursor;
 static struct mmio_region regions[MMIO_REGION_LIMIT];
 static uint8_t region_count;
 static uint8_t physical_address_bits;
+static bool configured;
 static bool ready;
 
 static void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx,
@@ -94,15 +95,21 @@ static bool map_page(uint64_t virtual_address, uint64_t physical_address){
     return true;
 }
 
-void mmio_init(uint64_t hhdm_offset,
-               uint64_t kernel_physical_base,
-               uint64_t kernel_virtual_base){
+void mmio_configure(uint64_t hhdm_offset,
+                    uint64_t kernel_physical_base,
+                    uint64_t kernel_virtual_base){
     ready=false;
-    table_pool_used=0;
-    region_count=0;
     direct_map_offset=hhdm_offset;
     kernel_phys_base=kernel_physical_base;
     kernel_virt_base=kernel_virtual_base;
+    configured=true;
+}
+
+void mmio_init(void){
+    ready=false;
+    if(!configured) return;
+    table_pool_used=0;
+    region_count=0;
     physical_address_bits=36;
     uint32_t eax,ebx,ecx,edx;
     cpuid(0x80000000U,&eax,&ebx,&ecx,&edx);
