@@ -271,24 +271,37 @@ static bool get_descriptor(uint8_t address, uint16_t packet_size, uint8_t type,
 static bool reset_port(uint8_t port){
     volatile uint32_t *status=&operational[17+port-1];
     uint32_t value=*status;
-    if(!(value&EHCI_PORT_CONNECT)) return false;
+    klogf(KLOG_DEBUG,"ehci%u: port%u reset entry PORTSC=0x%08x",controller_number,port,value);
+    if(!(value&EHCI_PORT_CONNECT)){
+        klogf(KLOG_DEBUG,"ehci%u: port%u no CONNECT",controller_number,port);
+        return false;
+    }
+    klogf(KLOG_INFO,"ehci%u: port%u CONNECT=1 POWER=%u ENABLE=%u OWNER=%u",
+          controller_number,port,(value>>12)&1,(value>>2)&1,(value>>13)&1);
     probe_stats.connected_ports++;
     if(!(value&EHCI_PORT_POWER)){
+        klogf(KLOG_WARN,"ehci%u: port%u POWER 0 -> set",controller_number,port);
         *status=(value&~EHCI_PORT_CHANGES)|EHCI_PORT_POWER;
         delay();
         value=*status;
+        klogf(KLOG_INFO,"ehci%u: port%u after POWER set PORTSC=0x%08x",controller_number,port,value);
     }
+    klogf(KLOG_INFO,"ehci%u: port%u issuing RESET",controller_number,port);
     *status=(value&~(EHCI_PORT_CHANGES|EHCI_PORT_ENABLE))|EHCI_PORT_RESET;
     delay();
     value=*status;
+    klogf(KLOG_DEBUG,"ehci%u: port%u after RESET pulse PORTSC=0x%08x",controller_number,port,value);
     *status=value&~(EHCI_PORT_CHANGES|EHCI_PORT_RESET|EHCI_PORT_ENABLE);
     delay();
     value=*status;
+    klogf(KLOG_INFO,"ehci%u: port%u after clear PORTSC=0x%08x CONNECT=%u ENABLE=%u",controller_number,port,value,value&1,(value>>2)&1);
     if(!(value&EHCI_PORT_CONNECT) || !(value&EHCI_PORT_ENABLE)){
+        klogf(KLOG_WARN,"ehci%u: port%u handoff to companion (OWNER=1) PORTSC=0x%08x",controller_number,port,value);
         *status=(value&~EHCI_PORT_CHANGES)|EHCI_PORT_OWNER;
         return false;
     }
     probe_stats.high_speed_ports++;
+    klogf(KLOG_OK,"ehci%u: port%u high-speed enabled PORTSC=0x%08x",controller_number,port,value);
     return true;
 }
 
@@ -493,9 +506,13 @@ static bool take_ownership(const struct storage_controller_info *controller,
 
 static bool initialize_controller(const struct storage_controller_info *controller,
                                   uint32_t linux_name_base){
-    if(!controller->register_base) return false;
+    if(!controller->register_base){
+        klogf(KLOG_ERROR,"ehci%u: BAR zero pci %u:%u.%u",controller_number,controller->bus,controller->slot,controller->function);
+        return false;
+    }
     uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
                                             controller->function,0x04);
+    klogf(KLOG_INFO,"ehci%u: PCI %u:%u.%u BAR=0x%llx CMD=0x%04x",controller_number,controller->bus,controller->slot,controller->function,controller->register_base,pci_command);
     pci_write_config32(controller->bus,controller->slot,controller->function,
                        0x04,pci_command|0x06);
     capability_base=(volatile uint8_t*)mmio_map(controller->register_base,
@@ -511,22 +528,48 @@ static bool initialize_controller(const struct storage_controller_info *controll
     volatile uint32_t *capability=(volatile uint32_t*)(void*)capability_base;
     uint32_t structural=capability[1];
     uint32_t capability_parameters=capability[2];
-    if(capability_length<0x10 || !take_ownership(controller,capability_parameters)){
+    uint8_t hcs_iv=capability_base[0];
+    klogf(KLOG_INFO,"ehci%u: CAPLEN=0x%02x HCSPARAMS=0x%08x HCCPARAMS=0x%08x ports=%u",controller_number,capability_length,structural,capability_parameters,structural&0x0F);
+    if(capability_length<0x10){
+        klogf(KLOG_ERROR,"ehci%u: caplen too short 0x%02x",controller_number,capability_length);
+        return false;
+    }
+    if(!take_ownership(controller,capability_parameters)){
+        klogf(KLOG_ERROR,"ehci%u: BIOS handoff failed",controller_number);
         return false;
     }
     uint8_t ports=(uint8_t)(structural&0x0F);
-    if(!ports) return false;
+    if(!ports){
+        klogf(KLOG_ERROR,"ehci%u: zero ports structural=0x%08x",controller_number,structural);
+        return false;
+    }
     operational=(volatile uint32_t*)(void*)(capability_base+capability_length);
+    klogf(KLOG_INFO,"ehci%u: operational=%p USBCMD=0x%08x USBSTS=0x%08x",controller_number,(void*)operational,operational[0],operational[1]);
     operational[0]&=~EHCI_CMD_RUN;
-    if(!wait_register(&operational[1],EHCI_STS_HALTED,true)) return false;
+    if(!wait_register(&operational[1],EHCI_STS_HALTED,true)){
+        klogf(KLOG_ERROR,"ehci%u: halt timeout STS=0x%08x",controller_number,operational[1]);
+        return false;
+    }
     operational[0]|=EHCI_CMD_RESET;
-    if(!wait_register(&operational[0],EHCI_CMD_RESET,false)) return false;
+    if(!wait_register(&operational[0],EHCI_CMD_RESET,false)){
+        klogf(KLOG_ERROR,"ehci%u: reset timeout",controller_number);
+        return false;
+    }
 
     dma_segment=(uint32_t)(physical_address(&queue_head)>>32);
-    if(!(capability_parameters&1) && dma_segment) return false;
-    if(!same_dma_segment(descriptors)||!same_dma_segment(setup_packet)
-       ||!same_dma_segment(descriptor_buffer)||!same_dma_segment(transfer_buffer)
-       ||!same_dma_segment(&command_block)||!same_dma_segment(&command_status)){
+    klogf(KLOG_INFO,"ehci%u: dma_segment=0x%08x cap 64bit=%u",controller_number,dma_segment,(capability_parameters&1)!=0);
+    if(!(capability_parameters&1) && dma_segment){
+        klogf(KLOG_ERROR,"ehci%u: DMA above 4G unsupported",controller_number);
+        return false;
+    }
+    bool same = same_dma_segment(descriptors)&&same_dma_segment(setup_packet)
+       &&same_dma_segment(descriptor_buffer)&&same_dma_segment(transfer_buffer)
+       &&same_dma_segment(&command_block)&&same_dma_segment(&command_status);
+    if(!same){
+        klogf(KLOG_ERROR,"ehci%u: DMA buffers cross 4G segment dma_seg=0x%08x",controller_number,dma_segment);
+        klogf(KLOG_INFO,"ehci%u: addrs: qh 0x%llx desc 0x%llx setup 0x%llx buf 0x%llx xfer 0x%llx cbw 0x%llx csw 0x%llx",
+              controller_number,physical_address(&queue_head),physical_address(descriptors),physical_address(setup_packet),
+              physical_address(descriptor_buffer),physical_address(transfer_buffer),physical_address(&command_block),physical_address(&command_status));
         return false;
     }
     operational[2]=0;
@@ -534,42 +577,82 @@ static bool initialize_controller(const struct storage_controller_info *controll
     operational[6]=(uint32_t)physical_address(&queue_head);
     operational[16]=1;
     operational[0]=(operational[0]&~(3U<<2))|EHCI_CMD_RUN;
-    if(!wait_register(&operational[1],EHCI_STS_HALTED,false)) return false;
+    klogf(KLOG_INFO,"ehci%u: RUN set USBCMD=0x%08x USBSTS=0x%08x",controller_number,operational[0],operational[1]);
+    if(!wait_register(&operational[1],EHCI_STS_HALTED,false)){
+        klogf(KLOG_ERROR,"ehci%u: RUN timeout STS=0x%08x",controller_number,operational[1]);
+        return false;
+    }
     probe_stats.last_stage=2;
+    // dump all ports raw before probing
+    for(uint8_t p=1;p<=ports;p++){
+        volatile uint32_t *pp=&operational[17+p-1];
+        klogf(KLOG_INFO,"ehci%u: port%u pre-scan PORTSC=0x%08x",controller_number,p,*pp);
+    }
     for(uint8_t port=1;port<=ports && device_count<EHCI_DEVICE_LIMIT;port++){
-        if(!reset_port(port)) continue;
+        klogf(KLOG_INFO,"ehci%u: probing port %u",controller_number,port);
+        if(!reset_port(port)){
+            klogf(KLOG_DEBUG,"ehci%u: port %u reset failed, maybe companion",controller_number,port);
+            continue;
+        }
         if(!enumerate_port(port,linux_name_base+device_count)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"ehci%u: port %u enumerate failed",controller_number,port);
+        } else {
+            klogf(KLOG_OK,"ehci%u: port %u MSC ready disks=%u",controller_number,port,probe_stats.mass_storage_devices);
         }
     }
+    // post-scan dump
+    for(uint8_t p=1;p<=ports;p++){
+        volatile uint32_t *pp=&operational[17+p-1];
+        klogf(KLOG_DEBUG,"ehci%u: port%u post-scan PORTSC=0x%08x",controller_number,p,*pp);
+    }
+    klogf(KLOG_INFO,"ehci%u: scan done connected=%u highspeed=%u disks=%u failures=%u",controller_number,probe_stats.connected_ports,probe_stats.high_speed_ports,probe_stats.mass_storage_devices,probe_stats.failures);
     return true;
 }
 
 bool ehci_init(uint32_t linux_name_base){
-    if(probe_complete) return device_count>0;
+    if(probe_complete){
+        klogf(KLOG_DEBUG,"ehci: init already done disks=%u",device_count);
+        return device_count>0;
+    }
     probe_complete=true;
-    if(!mapping_ready) return false;
+    if(!mapping_ready){
+        klog(KLOG_ERROR,"ehci: mapping not ready");
+        return false;
+    }
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
+    klogf(KLOG_INFO,"ehci: init found %d controllers base=%u",count,linux_name_base);
     if(count<0) return false;
+    for(int32_t i=0;i<count;i++) klogf(KLOG_INFO,"ehci: PCI[%d] %s type=%u BAR=0x%llx",i,controllers[i].name,controllers[i].type,controllers[i].register_base);
     uint8_t ehci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_EHCI) continue;
         probe_stats.controllers++;
         probe_stats.last_stage=1;
         controller_number=ehci_index++;
+        klogf(KLOG_INFO,"ehci%u: init controller %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"ehci%u: init failed",controller_number);
             continue;
         }
         if(device_count) break;
     }
+    klogf(KLOG_INFO,"ehci: init done disks=%u controllers=%u",device_count,probe_stats.controllers);
     return device_count>0;
 }
 
 bool ehci_rescan(uint32_t linux_name_base){
-    if(device_count) return true;
-    if(!mapping_ready) return false;
+    klogf(KLOG_INFO,"ehci: rescan base=%u count=%u",linux_name_base,device_count);
+    if(device_count){
+        klogf(KLOG_INFO,"ehci: rescan skip already %u",device_count);
+        return true;
+    }
+    if(!mapping_ready){
+        klog(KLOG_ERROR,"ehci: rescan mapping not ready");
+        return false;
+    }
     selected_device=EHCI_NO_DEVICE;
     probe_stats.connected_ports=0;
     probe_stats.high_speed_ports=0;
@@ -579,18 +662,22 @@ bool ehci_rescan(uint32_t linux_name_base){
 
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
+    klogf(KLOG_INFO,"ehci: rescan found %d controllers",count);
     if(count<0) return false;
     uint8_t ehci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_EHCI) continue;
         probe_stats.last_stage=1;
         controller_number=ehci_index++;
+        klogf(KLOG_INFO,"ehci%u: rescan init %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"ehci%u: rescan init failed",controller_number);
             continue;
         }
         if(device_count) break;
     }
+    klogf(KLOG_INFO,"ehci: rescan done disks=%u connected=%u",device_count,probe_stats.connected_ports);
     return device_count>0;
 }
 

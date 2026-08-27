@@ -331,10 +331,12 @@ static const char *xhci_error_name(uint32_t error){
 
 static void rescan_usb(void){
     terminal_write("usbscan: rescanning xHCI/EHCI root ports...\n");
+    terminal_write("usbscan: (подробный дамп смотри в dmesg)\n");
     struct usb_scan_status status={0};
     int64_t count=userspace_syscall(SYS_USB_RESCAN,(uint64_t)&status,0,0);
     if(count<0){
         terminal_write("usbscan: controller scan failed\n");
+        terminal_write("usbscan: hint - проверь dmesg на pci scan: нашли ли xhci контроллер? QEMU должен быть запущен с -device qemu-xhci\n");
         return;
     }
     terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
@@ -351,14 +353,34 @@ static void rescan_usb(void){
                         status.xhci_last_port,status.xhci_portsc,
                         status.xhci_completion_code);
     }
-    if(status.ehci_connected_ports || status.ehci_failures){
-        terminal_printf("ehci: connected=%u high-speed=%u disks=%u failures=%u stage=%u\n",
-                        status.ehci_connected_ports,status.ehci_high_speed_ports,
-                        status.ehci_disks,status.ehci_failures,status.ehci_stage);
-    }
+    // Always show EHCI even if zero, для диагностики когда устройства попали на другой шине
+    terminal_printf("ehci: connected=%u high-speed=%u disks=%u failures=%u stage=%u\n",
+                    status.ehci_connected_ports,status.ehci_high_speed_ports,
+                    status.ehci_disks,status.ehci_failures,status.ehci_stage);
+    // Expand diagnostics for the reported case: 3 devices but 0 connected => почти наверняка устройства не на xHCI bus
     if(count==0){
         terminal_write("usbscan: report the xhci lines above\n");
+        terminal_write("--- диагностика ---\n");
+        if(status.xhci_controllers==0){
+            terminal_write("DIAG: нет xHCI контроллеров! Запусти QEMU с: -device qemu-xhci\n");
+            terminal_write("  полный пример: qemu-system-x86_64 -cdrom purec_limine.iso -device qemu-xhci -drive if=none,id=usb0,file=usbdisk.img,format=raw -device usb-storage,bus=xhci.0,drive=usb0\n");
+        } else if(status.xhci_connected_ports==0){
+            terminal_write("DIAG: xhci виден, но connected=0 -> порты не видят CCS.\n");
+            terminal_write("  причины (по порядку проверки через dmesg):\n");
+            terminal_write("  1) Устройства на другом USB контроллере (UHCI/OHCI/EHCI). Смотри в dmesg: 'pci usb: ... progIF -> UHCI/OHCI' - они игнорируются драйвером.\n");
+            terminal_write("  2) Укажи шину явно: -device usb-storage,bus=xhci.0,drive=...\n");
+            terminal_write("  3) Проверь MMIO BAR и PORTSC дамп в dmesg: все порты 0x00000000 => непройден BIOS handoff или BAR неверный.\n");
+            terminal_write("  4) QEMU after VM capture: сделай еще раз usbscan после attach, либо reboot.\n");
+            terminal_write("  полный dmesg: введи 'dmesg' для детального лога каждого PORTSC и xECP.\n");
+        } else if(status.xhci_addressed_devices==0){
+            terminal_write("DIAG: устройства подключены но не за-addressed -> смотри в dmesg Enable Slot / Address Device ошибки, completion code\n");
+        } else if(status.xhci_disks==0){
+            terminal_write("DIAG: за-addressed но нет BOT интерфейса/SCSI -> проверь что образ - это mass-storage (не hub/клава) и что в dmesg есть 'BOT interface' строки\n");
+        }
+    } else {
+        terminal_printf("usbscan: OK %d disk(s) ready, проверь 'disks' для списка /dev/sdX\n",(int)count);
     }
+    terminal_write("tip: после починки проверяй 'disks' и 'dmesg | tail'\n");
 }
 
 static void format_fat32(const char *arguments){

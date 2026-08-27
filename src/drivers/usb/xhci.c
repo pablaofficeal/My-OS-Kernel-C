@@ -239,6 +239,12 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
         if((event->control&1)==event_cycle){
             __sync_synchronize();
             struct xhci_trb copy=*event;
+            uint32_t ev_ctrl = copy.control;
+            uint32_t ev_status = copy.status;
+            uint8_t type=(uint8_t)((ev_ctrl>>10)&0x3F);
+            uint8_t event_slot=(uint8_t)(ev_ctrl>>24);
+            uint8_t event_endpoint=(uint8_t)((ev_ctrl>>16)&0x1F);
+            uint8_t code=(uint8_t)(ev_status>>24);
             event_index++;
             if(event_index==XHCI_EVENT_ENTRIES){
                 event_index=0;
@@ -247,25 +253,35 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
             uint64_t dequeue=physical_address(&event_trbs[event_index]);
             interrupter[6]=(uint32_t)dequeue|8;
             interrupter[7]=(uint32_t)(dequeue>>32);
-            uint8_t type=(uint8_t)((copy.control>>10)&0x3F);
-            uint8_t event_slot=(uint8_t)(copy.control>>24);
-            uint8_t event_endpoint=(uint8_t)((copy.control>>16)&0x1F);
+            klogf(KLOG_DEBUG,"xhci%u: event raw type=%u slot=%u ep=%u code=%u wanted=%u slot-filter=%u ep-filter=%u ctl=0x%08x sts=0x%08x param=0x%08x%08x",
+                  controller_number,type,event_slot,event_endpoint,code,wanted_type,slot,endpoint,ev_ctrl,ev_status,copy.parameter_high,copy.parameter_low);
             if(type==wanted_type && (!slot || event_slot==slot)
                && (!endpoint || event_endpoint==endpoint)){
                 if(result) *result=copy;
-                uint8_t code=(uint8_t)(copy.status>>24);
                 probe_stats.last_completion_code=code;
                 bool success=code==XHCI_COMPLETION_SUCCESS
                     || (wanted_type==XHCI_EVENT_TRANSFER
                         && code==XHCI_COMPLETION_SHORT);
-                if(!success) probe_stats.last_error=XHCI_PROBE_COMPLETION;
+                if(!success){
+                    probe_stats.last_error=XHCI_PROBE_COMPLETION;
+                    klogf(KLOG_ERROR,"xhci%u: event completion error type=%u slot=%u ep=%u code=%u (expected SUCCESS/SHORT)",controller_number,type,event_slot,event_endpoint,code);
+                } else {
+                    klogf(KLOG_DEBUG,"xhci%u: event SUCCESS type=%u slot=%u code=%u",controller_number,type,event_slot,code);
+                }
                 return success;
+            } else {
+                klogf(KLOG_DEBUG,"xhci%u: event skipped (filter mismatch) got type %u slot %u ep %u wanted %u/%u/%u",controller_number,type,event_slot,event_endpoint,wanted_type,slot,endpoint);
             }
         } else {
+            if((wait & 0x1FFFFF)==0 && wait!=0){
+                klogf(KLOG_DEBUG,"xhci%u: next_event wait %u, no new event cycle=%u want=%u slot=%u",controller_number,wait,event_cycle,wanted_type,slot);
+            }
             __asm__ volatile("pause");
         }
     }
     probe_stats.last_error=XHCI_PROBE_EVENT_TIMEOUT;
+    klogf(KLOG_ERROR,"xhci%u: event timeout wanted=%u slot=%u ep=%u idx=%u cycle=%u usbsts=0x%08x",
+          controller_number,wanted_type,slot,endpoint,event_index,event_cycle,operational?operational[1]:0xFFFFFFFF);
     return false;
 }
 
@@ -275,11 +291,17 @@ static bool submit_command(uint64_t parameter, uint32_t type, uint8_t slot,
     trb->parameter_low=(uint32_t)parameter;
     trb->parameter_high=(uint32_t)(parameter>>32);
     trb->control=(type<<10)|((uint32_t)slot<<24)|command_ring.cycle;
+    klogf(KLOG_DEBUG,"xhci%u: submit CMD type=%u slot=%u param=0x%llx cycle=%u enqueue=%u",
+          controller_number,type,slot,parameter,command_ring.cycle,command_ring.enqueue);
     __sync_synchronize();
     doorbells[0]=0;
     struct xhci_trb event;
-    if(!next_event(XHCI_EVENT_COMMAND,0,0,&event)) return false;
+    if(!next_event(XHCI_EVENT_COMMAND,0,0,&event)){
+        klogf(KLOG_ERROR,"xhci%u: CMD type=%u slot=%u timeout/no-success",controller_number,type,slot);
+        return false;
+    }
     if(result_slot) *result_slot=(uint8_t)(event.control>>24);
+    klogf(KLOG_INFO,"xhci%u: CMD type=%u slot=%u OK result_slot=%u code=%u",controller_number,type,slot,result_slot?*result_slot:0,(event.status>>24)&0xFF);
     return true;
 }
 
@@ -292,10 +314,14 @@ static bool transfer(uint8_t device_index, uint8_t endpoint,
     trb->parameter_high=(uint32_t)(address>>32);
     trb->status=length;
     trb->control=(XHCI_TRB_NORMAL<<10)|(1U<<5)|ring->cycle;
+    klogf(KLOG_DEBUG,"xhci%u: transfer dev=%u slot=%u ep=%u len=%u addr=0x%llx cycle=%u",
+          controller_number,device_index,devices[device_index].slot_id,endpoint,length,address,ring->cycle);
     __sync_synchronize();
     uint8_t slot=devices[device_index].slot_id;
     doorbells[slot]=endpoint;
-    return next_event(XHCI_EVENT_TRANSFER,slot,endpoint,0);
+    bool ok=next_event(XHCI_EVENT_TRANSFER,slot,endpoint,0);
+    if(!ok) klogf(KLOG_ERROR,"xhci%u: transfer failed dev=%u ep=%u len=%u",controller_number,device_index,endpoint,length);
+    return ok;
 }
 
 static bool control_transfer(uint8_t device_index, uint8_t request_type,
@@ -334,51 +360,97 @@ static uint16_t initial_packet_size(uint8_t speed){
     return 8;
 }
 
+static void xhci_log_port(uint8_t port_number, uint32_t portsc, const char *when){
+    uint8_t ccs=(portsc&1)!=0;
+    uint8_t ped=(portsc>>1)&1;
+    uint8_t pr=(portsc>>4)&1;
+    uint8_t pp=(portsc>>9)&1;
+    uint8_t speed=(portsc>>10)&0xF;
+    uint8_t csc=(portsc>>17)&1;
+    uint8_t pec=(portsc>>18)&1;
+    uint8_t wrc=(portsc>>19)&1;
+    uint8_t occ=(portsc>>20)&1;
+    uint8_t prc=(portsc>>21)&1;
+    uint8_t plc=(portsc>>22)&1;
+    uint8_t cec=(portsc>>23)&1;
+    uint8_t cas=(portsc>>24)&1;
+    klogf(KLOG_INFO,"xhci%u: port%u %s PORTSC=0x%08x CCS=%u PED=%u PR=%u PP=%u speed=%u CSC=%u PEC=%u WRC=%u OCC=%u PRC=%u PLC=%u CEC=%u CAS=%u",
+          controller_number,port_number,when,portsc,ccs,ped,pr,pp,speed,csc,pec,wrc,occ,prc,plc,cec,cas);
+}
+
 static bool reset_port(uint8_t port_number, uint8_t *speed){
     volatile uint8_t *port_base=(volatile uint8_t*)(void*)operational+0x400;
     volatile uint32_t *port=(volatile uint32_t*)(void*)(port_base
                                                 +(port_number-1)*0x10);
     uint32_t status=port[0];
-    if(!(status&XHCI_PORT_CONNECTED)) return false;
+    klogf(KLOG_DEBUG,"xhci%u: port%u: reset_port entry PORTSC=0x%08x",controller_number,port_number,status);
+    xhci_log_port(port_number,status,"probe-entry");
+    if(!(status&XHCI_PORT_CONNECTED)){
+        klogf(KLOG_DEBUG,"xhci%u: port%u no CCS, skip (PORTSC=0x%08x)",controller_number,port_number,status);
+        return false;
+    }
     probe_stats.connected_ports++;
     probe_stats.last_port=port_number;
     probe_stats.last_portsc=status;
+    klogf(KLOG_INFO,"xhci%u: port%u CCS=1 detected, PED=%u PP=%u speed=%u CSC=%u",
+          controller_number,port_number,(status>>1)&1,(status>>9)&1,(status>>10)&0xF,(status>>17)&1);
     if(status&XHCI_PORT_ENABLED){
         *speed=(uint8_t)((status>>XHCI_PORT_SPEED_SHIFT)&0x0F);
+        klogf(KLOG_INFO,"xhci%u: port%u already enabled speed=%u, clearing CSC/PEC",controller_number,port_number,*speed);
         port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                           |XHCI_PORT_RESET))|(status&XHCI_PORT_CHANGE_BITS);
-        if(!*speed) probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+        uint32_t after=port[0];
+        xhci_log_port(port_number,after,"after-clear-enabled");
+        if(!*speed){
+            probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+            klogf(KLOG_WARN,"xhci%u: port%u enabled but speed=0 -> reset failed",controller_number,port_number);
+        }
         return *speed!=0;
     }
     if(!(status&XHCI_PORT_POWER)){
+        klogf(KLOG_WARN,"xhci%u: port%u PP=0, powering on",controller_number,port_number);
         port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                           |XHCI_PORT_RESET))|XHCI_PORT_POWER;
         delay_ms(20);
         status=port[0];
+        xhci_log_port(port_number,status,"after-PP-set");
         if(!(status&XHCI_PORT_CONNECTED)){
             probe_stats.last_error=XHCI_PROBE_PORT_RESET;
             probe_stats.last_portsc=status;
+            klogf(KLOG_WARN,"xhci%u: port%u lost CCS after powering PP (PORTSC=0x%08x)",controller_number,port_number,status);
             return false;
+        }
+        if(!(status&XHCI_PORT_POWER)){
+            klogf(KLOG_WARN,"xhci%u: port%u PP still 0 after SET (PORTSC=0x%08x)",controller_number,port_number,status);
         }
     }
     uint32_t writable=status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                                |XHCI_PORT_RESET);
+    klogf(KLOG_INFO,"xhci%u: port%u issuing PR (Port Reset) write 0x%08x",controller_number,port_number,writable|XHCI_PORT_POWER|XHCI_PORT_RESET);
     port[0]=writable|XHCI_PORT_POWER|XHCI_PORT_RESET;
     if(!wait_register(&port[0],XHCI_PORT_RESET,false)){
         probe_stats.last_error=XHCI_PROBE_PORT_RESET;
         probe_stats.last_portsc=port[0];
+        xhci_log_port(port_number,port[0],"PR-timeout");
+        klogf(KLOG_ERROR,"xhci%u: port%u PR timeout (PORTSC=0x%08x)",controller_number,port_number,port[0]);
         return false;
     }
     delay_ms(20);
     status=port[0];
+    xhci_log_port(port_number,status,"after-PR");
     probe_stats.last_portsc=status;
     if(!(status&XHCI_PORT_CONNECTED) || !(status&XHCI_PORT_ENABLED)){
         probe_stats.last_error=XHCI_PROBE_PORT_RESET;
+        klogf(KLOG_ERROR,"xhci%u: port%u after reset no CCS/PED (CCS=%u PED=%u PORTSC=0x%08x)",
+              controller_number,port_number,status&1,(status>>1)&1,status);
         return false;
     }
     *speed=(uint8_t)((status>>XHCI_PORT_SPEED_SHIFT)&0x0F);
+    klogf(KLOG_INFO,"xhci%u: port%u reset OK speed=%u PED=%u PORTSC=0x%08x",controller_number,port_number,*speed,(status>>1)&1,status);
     port[0]=(status&~(XHCI_PORT_CHANGE_BITS|XHCI_PORT_ENABLED
                       |XHCI_PORT_RESET))|(status&XHCI_PORT_CHANGE_BITS);
+    uint32_t cleared=port[0];
+    xhci_log_port(port_number,cleared,"after-clear-PRC");
     return *speed!=0;
 }
 
@@ -618,7 +690,9 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     uint8_t index=device_count;
     memset(&devices[index],0,sizeof(devices[index]));
     probe_stats.last_stage=3;
+    klogf(KLOG_INFO,"xhci%u: enumerate port%u -> slot alloc index=%u speed=%u",controller_number,port,index,speed);
     if(!address_port(index,port,speed)){
+        klogf(KLOG_ERROR,"xhci%u: address_port failed port=%u speed=%u error=%u completion=%u",controller_number,port,speed,probe_stats.last_error,probe_stats.last_completion_code);
         if(probe_stats.last_error==XHCI_PROBE_OK
            || probe_stats.last_error==XHCI_PROBE_EVENT_TIMEOUT
            || probe_stats.last_error==XHCI_PROBE_COMPLETION){
@@ -626,31 +700,51 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
         }
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: slot %u addressed for port %u speed %u",controller_number,devices[index].slot_id,port,speed);
     probe_stats.last_stage=4;
     if(!get_descriptor(index,USB_DESCRIPTOR_DEVICE,0,18)){
         probe_stats.last_error=XHCI_PROBE_DEVICE_DESCRIPTOR;
+        klogf(KLOG_ERROR,"xhci%u: get DEVICE descriptor failed port %u slot %u",controller_number,port,devices[index].slot_id);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: DEVICE desc port%u: vid=0x%04x pid=0x%04x bcdDevice=0x%04x class=%u/%u proto=%u packet=%u",
+          controller_number,port,(unsigned)descriptor_buffer[8]|((unsigned)descriptor_buffer[9]<<8),(unsigned)descriptor_buffer[10]|((unsigned)descriptor_buffer[11]<<8),
+          (unsigned)descriptor_buffer[12]|((unsigned)descriptor_buffer[13]<<8),descriptor_buffer[4],descriptor_buffer[5],descriptor_buffer[6],descriptor_buffer[7]);
     uint16_t vendor=(uint16_t)descriptor_buffer[8]
         |((uint16_t)descriptor_buffer[9]<<8);
     uint16_t product=(uint16_t)descriptor_buffer[10]
         |((uint16_t)descriptor_buffer[11]<<8);
     uint16_t packet=descriptor_buffer[7];
     if(speed>=4) packet=(uint16_t)(1U<<packet);
+    klogf(KLOG_INFO,"xhci%u: ep0 packet raw=%u adjusted=%u initial=%u speed=%u",controller_number,descriptor_buffer[7],packet,initial_packet_size(speed),speed);
     if(packet && packet!=initial_packet_size(speed)
        && !update_control_packet_size(index,packet)){
+        klogf(KLOG_ERROR,"xhci%u: update_control_packet_size failed to %u",controller_number,packet);
         return false;
     }
     if(!get_descriptor(index,USB_DESCRIPTOR_CONFIGURATION,0,9)){
         probe_stats.last_error=XHCI_PROBE_CONFIG_DESCRIPTOR;
+        klogf(KLOG_ERROR,"xhci%u: get CONFIG header failed port %u",controller_number,port);
         return false;
     }
     uint16_t total=(uint16_t)descriptor_buffer[2]
         |((uint16_t)descriptor_buffer[3]<<8);
+    klogf(KLOG_INFO,"xhci%u: CONFIG header total=%u buf[2]=%u buf[3]=%u",controller_number,total,descriptor_buffer[2],descriptor_buffer[3]);
     if(total<9 || total>sizeof(descriptor_buffer)
        || !get_descriptor(index,USB_DESCRIPTOR_CONFIGURATION,0,total)){
         probe_stats.last_error=XHCI_PROBE_CONFIG_DESCRIPTOR;
+        klogf(KLOG_ERROR,"xhci%u: CONFIG full %u bytes failed (limit %u)",controller_number,total,(unsigned)sizeof(descriptor_buffer));
         return false;
+    }
+    // dump first 64 bytes of config descriptor for diagnosis
+    klogf(KLOG_DEBUG,"xhci%u: CONFIG dump port%u total=%u",controller_number,port,total);
+    for(uint16_t off=0; off<total && off<64; off+=16){
+        klogf(KLOG_DEBUG,"xhci%u: cfg+%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+              controller_number,off,
+              descriptor_buffer[off], off+1<total?descriptor_buffer[off+1]:0, off+2<total?descriptor_buffer[off+2]:0, off+3<total?descriptor_buffer[off+3]:0,
+              off+4<total?descriptor_buffer[off+4]:0, off+5<total?descriptor_buffer[off+5]:0, off+6<total?descriptor_buffer[off+6]:0, off+7<total?descriptor_buffer[off+7]:0,
+              off+8<total?descriptor_buffer[off+8]:0, off+9<total?descriptor_buffer[off+9]:0, off+10<total?descriptor_buffer[off+10]:0, off+11<total?descriptor_buffer[off+11]:0,
+              off+12<total?descriptor_buffer[off+12]:0, off+13<total?descriptor_buffer[off+13]:0, off+14<total?descriptor_buffer[off+14]:0, off+15<total?descriptor_buffer[off+15]:0);
     }
     uint8_t configuration=0,interface_number=0,bulk_in=0,bulk_out=0;
     uint16_t bulk_in_packet=0,bulk_out_packet=0;
@@ -658,121 +752,180 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
                                     &bulk_in,&bulk_in_packet,
                                     &bulk_out,&bulk_out_packet)){
         probe_stats.last_error=XHCI_PROBE_MASS_STORAGE_INTERFACE;
+        klogf(KLOG_ERROR,"xhci%u: no BOT mass-storage interface found port %u total=%u",controller_number,port,total);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: BOT interface cfg=%u if=%u bulkIn=0x%02x pkt=%u bulkOut=0x%02x pkt=%u",controller_number,configuration,interface_number,bulk_in,bulk_in_packet,bulk_out,bulk_out_packet);
     probe_stats.last_stage=5;
     (void)interface_number;
     if(!configure_mass_storage(index,configuration,bulk_in,bulk_in_packet,
                                bulk_out,bulk_out_packet)){
         probe_stats.last_error=XHCI_PROBE_CONFIGURE_ENDPOINT;
+        klogf(KLOG_ERROR,"xhci%u: configure endpoints failed port %u cfg %u",controller_number,port,configuration);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: endpoints configured port %u, probing SCSI",controller_number,port);
     if(!identify_mass_storage(index,name_index,port,vendor,product)){
         probe_stats.last_error=XHCI_PROBE_SCSI;
+        klogf(KLOG_ERROR,"xhci%u: SCSI probe failed port %u vid 0x%04x pid 0x%04x",controller_number,port,vendor,product);
         return false;
     }
     device_count++;
     probe_stats.mass_storage_devices++;
     probe_stats.last_stage=7;
     probe_stats.last_error=XHCI_PROBE_OK;
+    klogf(KLOG_OK,"xhci%u: USB MSC ready %s port%u vid 0x%04x pid 0x%04x sectors %llu",controller_number,devices[index].info.name,port,vendor,product,devices[index].info.sector_count);
     return true;
 }
 
 static bool take_ownership(volatile uint32_t *capability, uint32_t hccparams1){
     uint16_t offset=(uint16_t)(hccparams1>>16)*4;
+    klogf(KLOG_INFO,"xhci%u: HCCPARAMS1=0x%08x xECP offset=0x%x",controller_number,hccparams1,offset);
+    if(!offset){
+        klogf(KLOG_INFO,"xhci%u: no xECP, no BIOS handoff needed",controller_number);
+        return true;
+    }
     for(uint8_t visited=0;offset && visited<64;visited++){
         volatile uint32_t *extended=(volatile uint32_t*)((volatile uint8_t*)capability+offset);
         uint32_t header=extended[0];
-        if((header&0xFF)==1){
+        uint8_t cap_id=(uint8_t)(header&0xFF);
+        uint8_t next=(uint8_t)((header>>8)&0xFF);
+        uint32_t cap_header_raw=header;
+        klogf(KLOG_INFO,"xhci%u: xECP cap %u @0x%x id=0x%02x next=0x%02x header=0x%08x",controller_number,visited,offset,cap_id,next,cap_header_raw);
+        if(cap_id==1){
+            uint32_t before=extended[0];
+            uint32_t before1=extended[1];
+            klogf(KLOG_INFO,"xhci%u: USB Legacy BIOS handoff cap found LEGCTLSTS=0x%08x CTRL=0x%08x BIOS owned=%u OS owned=%u",
+                  controller_number,before,before1,(before>>16)&1,(before>>24)&1);
             extended[0]=header|(1U<<24);
+            klogf(KLOG_INFO,"xhci%u: set OS ownership (LEGSUP OS-owned)",controller_number);
             uint64_t deadline=rdtsc()+(uint64_t)tsc_mhz()*1000ULL*1000ULL;
             while((extended[0]&(1U<<16))
                   && (int64_t)(rdtsc()-deadline)<0){
                 __asm__ volatile("pause");
             }
-            if(extended[0]&(1U<<16)){
+            uint32_t after=extended[0];
+            if(after&(1U<<16)){
                 probe_stats.last_error=XHCI_PROBE_BIOS_HANDOFF;
-                klog(KLOG_WARN,"xhci: BIOS ownership timeout; forcing OS handoff");
+                klogf(KLOG_WARN,"xhci%u: BIOS ownership timeout BIOS still owns after 1s LEGSUP=0x%08x; forcing OS handoff",controller_number,after);
+            } else {
+                klogf(KLOG_OK,"xhci%u: BIOS handoff OK LEGSUP=0x%08x after",controller_number,after);
             }
             // Disable legacy SMI sources even when broken firmware keeps the
             // BIOS-owned semaphore asserted, matching the non-fatal Linux path.
             extended[1]=0;
+            uint32_t after1=extended[1];
+            klogf(KLOG_INFO,"xhci%u: LEGCTLSTS cleared 0x%08x -> 0x%08x",controller_number,before1,after1);
             return true;
         }
-        uint8_t next=(uint8_t)((header>>8)&0xFF);
         if(!next) break;
         offset=(uint16_t)(offset+next*4);
     }
+    klogf(KLOG_INFO,"xhci%u: no USB Legacy cap in xECP chain, continuing",controller_number);
     return true;
 }
 
 static bool initialize_controller(const struct storage_controller_info *controller,
                                   uint32_t linux_name_base){
-    if(!controller->register_base) return false;
+    if(!controller->register_base){
+        klogf(KLOG_ERROR,"xhci%u: PCI BAR is zero (pci %u:%u.%u)",controller_number,controller->bus,controller->slot,controller->function);
+        probe_stats.last_error=XHCI_PROBE_MMIO;
+        return false;
+    }
     uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
                                             controller->function,0x04);
+    klogf(KLOG_INFO,"xhci%u: PCI %u:%u.%u BAR=0x%llx CMD=0x%04x -> enable MEM/BUSMASTER",
+          controller_number,controller->bus,controller->slot,controller->function,controller->register_base,pci_command);
     pci_write_config32(controller->bus,controller->slot,controller->function,
                        0x04,pci_command|0x06);
+    uint32_t pci_command_after=pci_read_config32(controller->bus,controller->slot,controller->function,0x04);
+    klogf(KLOG_INFO,"xhci%u: PCI CMD after=0x%04x",controller_number,pci_command_after);
     mmio_base=(volatile uint8_t*)mmio_map(controller->register_base,
                                           XHCI_MMIO_MAP_SIZE);
     if(!mmio_base){
         probe_stats.last_error=XHCI_PROBE_MMIO;
-        klogf(KLOG_ERROR,"xhci%u: cannot map BAR 0x%llx",controller_number,
-              controller->register_base);
+        klogf(KLOG_ERROR,"xhci%u: cannot map BAR 0x%llx size 0x%x",controller_number,
+              controller->register_base,XHCI_MMIO_MAP_SIZE);
         return false;
     }
-    klogf(KLOG_INFO,"xhci%u: BAR phys=0x%llx mapped=%p",controller_number,
-          controller->register_base,(void*)mmio_base);
+    klogf(KLOG_INFO,"xhci%u: BAR phys=0x%llx mapped=%p size=0x%x",controller_number,
+          controller->register_base,(void*)mmio_base,XHCI_MMIO_MAP_SIZE);
     volatile uint32_t *capability=(volatile uint32_t*)(void*)mmio_base;
     uint8_t capability_length=mmio_base[0];
+    uint16_t hc_version= (uint16_t)mmio_base[2]|((uint16_t)mmio_base[3]<<8);
     uint32_t hcsparams1=capability[1];
     uint32_t hcsparams2=capability[2];
+    uint32_t hcsparams3=capability[3];
     uint32_t hccparams1=capability[4];
+    uint32_t dboff=capability[5];
+    uint32_t rtsoff=capability[6];
+    klogf(KLOG_INFO,"xhci%u: CAPLENGTH=0x%02x HCIVERSION=0x%04x HCS1=0x%08x HCS2=0x%08x HCS3=0x%08x HCC1=0x%08x DBOFF=0x%08x RTSOFF=0x%08x",
+          controller_number,capability_length,hc_version,hcsparams1,hcsparams2,hcsparams3,hccparams1,dboff,rtsoff);
     if(capability_length<0x20){
         probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        klogf(KLOG_ERROR,"xhci%u: CAPLENGTH 0x%02x <0x20 invalid",controller_number,capability_length);
         return false;
     }
     if(!take_ownership(capability,hccparams1)) return false;
     context_size=(hccparams1&(1U<<2)) ? 64 : 32;
     uint8_t max_slots=(uint8_t)hcsparams1;
+    uint8_t max_intrs=(uint8_t)(hcsparams1>>8);
     uint8_t max_ports=(uint8_t)(hcsparams1>>24);
     probe_stats.max_ports=max_ports;
+    klogf(KLOG_INFO,"xhci%u: decoded maxSlots=%u maxIntrs=%u maxPorts=%u ctxSize=%u 64bit=%u CSZ=%u",
+          controller_number,max_slots,max_intrs,max_ports,context_size,(hccparams1&1)!=0,(hccparams1>>2)&1);
     if(!max_slots || !max_ports){
         probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        klogf(KLOG_ERROR,"xhci%u: max_slots or max_ports zero",controller_number);
         return false;
     }
-    if(max_slots>32) max_slots=32;
+    if(max_slots>32){
+        klogf(KLOG_WARN,"xhci%u: max_slots %u exceeds 32, clamping",controller_number,max_slots);
+        max_slots=32;
+    }
 
     uint32_t doorbell_offset=capability[5]&~3U;
     uint32_t runtime_offset=capability[6]&~0x1FU;
+    klogf(KLOG_INFO,"xhci%u: DBOFF=0x%x RTSOFF=0x%x CAP+0x40=0x%x",controller_number,doorbell_offset,runtime_offset,capability_length+0x40U);
     if((uint32_t)capability_length+0x40U>XHCI_MMIO_MAP_SIZE
        || doorbell_offset>XHCI_MMIO_MAP_SIZE-4U
        || runtime_offset>XHCI_MMIO_MAP_SIZE-0x40U){
         probe_stats.last_error=XHCI_PROBE_CAPABILITY;
+        klogf(KLOG_ERROR,"xhci%u: offsets exceed MMIO mapping (caplen=%u db=0x%x rt=0x%x map=0x%x)",controller_number,capability_length,doorbell_offset,runtime_offset,XHCI_MMIO_MAP_SIZE);
         return false;
     }
     operational=(volatile uint32_t*)(void*)(mmio_base+capability_length);
     doorbells=(volatile uint32_t*)(void*)(mmio_base+doorbell_offset);
     runtime=(volatile uint32_t*)(void*)(mmio_base+runtime_offset);
+    klogf(KLOG_INFO,"xhci%u: operational=%p doorbells=%p runtime=%p USBCMD=0x%08x USBSTS=0x%08x PAGESIZE=0x%08x",
+          controller_number,(void*)operational,(void*)doorbells,(void*)runtime,operational[0],operational[1],operational[2]);
     operational[0]&=~XHCI_CMD_RUN;
+    klogf(KLOG_INFO,"xhci%u: clearing RUN, waiting HALTED",controller_number);
     if(!wait_register(&operational[1],XHCI_STS_HALTED,true)){
         probe_stats.last_error=XHCI_PROBE_HALT_TIMEOUT;
         probe_stats.usb_status=operational[1];
+        klogf(KLOG_ERROR,"xhci%u: halt timeout USBSTS=0x%08x USBCMD=0x%08x",controller_number,operational[1],operational[0]);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: HALTED, issuing RESET",controller_number);
     operational[0]|=XHCI_CMD_RESET;
     if(!wait_register(&operational[0],XHCI_CMD_RESET,false)){
         probe_stats.last_error=XHCI_PROBE_RESET_TIMEOUT;
         probe_stats.usb_status=operational[1];
+        klogf(KLOG_ERROR,"xhci%u: reset timeout USBCMD=0x%08x USBSTS=0x%08x",controller_number,operational[0],operational[1]);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: RESET complete, waiting CNR clear",controller_number);
     if(!wait_register(&operational[1],XHCI_STS_NOT_READY,false)){
         probe_stats.last_error=XHCI_PROBE_NOT_READY_TIMEOUT;
         probe_stats.usb_status=operational[1];
+        klogf(KLOG_ERROR,"xhci%u: CNR timeout USBSTS=0x%08x",controller_number,operational[1]);
         return false;
     }
+    klogf(KLOG_INFO,"xhci%u: CNR cleared USBSTS=0x%08x PAGESIZE=0x%08x",controller_number,operational[1],operational[2]);
     if(!(operational[2]&1)){
         probe_stats.last_error=XHCI_PROBE_PAGE_SIZE;
+        klogf(KLOG_ERROR,"xhci%u: 4K pages not supported PAGESIZE=0x%08x",controller_number,operational[2]);
         return false;
     }
 
@@ -784,8 +937,12 @@ static bool initialize_controller(const struct storage_controller_info *controll
         |physical_address(transfer_buffer)|physical_address(&command_block)
         |physical_address(&command_status)|physical_address(&event_segment)
         |physical_address(scratchpad_pointers)|physical_address(scratchpad_pages);
+    klogf(KLOG_INFO,"xhci%u: DMA addrs dcbaa=0x%llx cmd=0x%llx evt=0x%llx inCtx=0x%llx outCtx=0x%llx high32=0x%08x 64bitCap=%u",
+          controller_number,physical_address(device_context_base),physical_address(command_trbs),physical_address(event_trbs),
+          physical_address(input_contexts),physical_address(output_contexts),(uint32_t)(dma_high>>32),(hccparams1&1)!=0);
     if((dma_high>>32)!=0 && !(hccparams1&1)){
         probe_stats.last_error=XHCI_PROBE_DMA_ADDRESS;
+        klogf(KLOG_ERROR,"xhci%u: DMA above 4G but 64-bit not supported (high=0x%08x HCC1=0x%08x)",controller_number,(uint32_t)(dma_high>>32),hccparams1);
         return false;
     }
 
@@ -793,18 +950,28 @@ static bool initialize_controller(const struct storage_controller_info *controll
     uint16_t scratchpads=(uint16_t)((hcsparams2>>27)&0x1F)
         |(uint16_t)((hcsparams2>>16)&0x3E0);
     probe_stats.scratchpad_count=scratchpads;
+    klogf(KLOG_INFO,"xhci%u: scratchpads raw HCS2=0x%08x count=%u limit=%u",controller_number,hcsparams2,scratchpads,XHCI_SCRATCHPAD_LIMIT);
+    // Also show alternate decoding for sanity: Linux uses ((HCS2>>27)&0x1F) | ((HCS2>>21)&0x3E0?) but we keep current formula and warn if suspicious
+    uint16_t alt_scratch=(uint16_t)((hcsparams2>>27)&0x1F)|((uint16_t)((hcsparams2>>21)&0x1F)<<5);
+    if(scratchpads!=alt_scratch) klogf(KLOG_WARN,"xhci%u: scratch decode alt=%u (HCS2>>21) differs, using %u",controller_number,alt_scratch,scratchpads);
     if(scratchpads>XHCI_SCRATCHPAD_LIMIT){
         probe_stats.last_error=XHCI_PROBE_SCRATCHPADS;
+        klogf(KLOG_ERROR,"xhci%u: scratchpads %u > limit %u",controller_number,scratchpads,XHCI_SCRATCHPAD_LIMIT);
         return false;
     }
     if(scratchpads){
         for(uint16_t index=0;index<scratchpads;index++){
             scratchpad_pointers[index]=physical_address(scratchpad_pages[index]);
+            if((index&0x7)==0) klogf(KLOG_DEBUG,"xhci%u: scratchpad[%u] phys=0x%llx",controller_number,index,scratchpad_pointers[index]);
         }
         device_context_base[0]=physical_address(scratchpad_pointers);
+        klogf(KLOG_INFO,"xhci%u: DCBAA[0] scratch phys=0x%llx",controller_number,device_context_base[0]);
+    } else {
+        klogf(KLOG_INFO,"xhci%u: no scratchpads required",controller_number);
     }
     initialize_ring(&command_ring,command_trbs);
     uint64_t command_address=physical_address(command_trbs)|1;
+    klogf(KLOG_INFO,"xhci%u: CRCR=0x%llx DCBAAP=0x%llx maxSlots=%u",controller_number,command_address,physical_address(device_context_base),max_slots);
     operational[6]=(uint32_t)command_address;
     operational[7]=(uint32_t)(command_address>>32);
     uint64_t dcbaa_address=physical_address(device_context_base);
@@ -821,59 +988,145 @@ static bool initialize_controller(const struct storage_controller_info *controll
     event_segment.size=XHCI_EVENT_ENTRIES;
     event_segment.reserved=0;
     volatile uint32_t *interrupter=runtime+0x20/4;
-    interrupter[2]=1;
+    klogf(KLOG_INFO,"xhci%u: ERST phys=0x%llx ERSTBA=0x%llx ERDP=0x%llx IMAN before=0x%08x IMOD=0x%08x ERSTSZ before=0x%08x",
+          controller_number,event_address,physical_address(&event_segment),event_address,interrupter[0],interrupter[1],interrupter[2]);
+    interrupter[2]=1; // ERSTSZ = one segment (original correct)
     uint64_t erst_address=physical_address(&event_segment);
     interrupter[4]=(uint32_t)erst_address;
     interrupter[5]=(uint32_t)(erst_address>>32);
     interrupter[6]=(uint32_t)event_address;
     interrupter[7]=(uint32_t)(event_address>>32);
     __sync_synchronize();
+    klogf(KLOG_INFO,"xhci%u: ERST configured ERSTSZ=%u ERSTBA=0x%08x%08x ERDP=0x%08x%08x",
+          controller_number,interrupter[2],interrupter[5],interrupter[4],interrupter[7],interrupter[6]);
+    klogf(KLOG_INFO,"xhci%u: starting controller USBCMD=0x%08x -> RUN",controller_number,operational[0]);
     operational[0]|=XHCI_CMD_RUN;
     if(!wait_register(&operational[1],XHCI_STS_HALTED,false)){
         probe_stats.last_error=XHCI_PROBE_RUN_TIMEOUT;
         probe_stats.usb_status=operational[1];
+        klogf(KLOG_ERROR,"xhci%u: RUN timeout HALTED still 1 USBSTS=0x%08x USBCMD=0x%08x",controller_number,operational[1],operational[0]);
         return false;
     }
     probe_stats.usb_status=operational[1];
+    klogf(KLOG_OK,"xhci%u: RUN OK USBSTS=0x%08x USBCMD=0x%08x",controller_number,operational[1],operational[0]);
     probe_stats.last_stage=2;
+    klogf(KLOG_INFO,"xhci%u: controller RUN set, USBSTS=0x%08x, scanning %u ports",controller_number,probe_stats.usb_status,max_ports);
+    // Dump raw PORTSC for all ports BEFORE reset attempts – самый полезный диагностический блок
+    for(uint8_t p=1;p<=max_ports;p++){
+        volatile uint8_t *port_base=(volatile uint8_t*)(void*)operational+0x400;
+        volatile uint32_t *preg=(volatile uint32_t*)(void*)(port_base+(p-1)*0x10);
+        uint32_t raw=preg[0];
+        // extended xECP Protocol caps: we also decode speed id mapping later
+        xhci_log_port(p,raw,"scan-pre");
+    }
+    // Also dump extended capability for protocol ports if present – помогает понять почему root port пустой
+    {
+        uint32_t hcc=hccparams1;
+        uint16_t xecp=(uint16_t)(hcc>>16)*4;
+        if(xecp){
+            for(uint8_t v=0;xecp && v<16; v++){
+                volatile uint32_t *ext=(volatile uint32_t*)((volatile uint8_t*)capability+xecp);
+                uint32_t hdr=ext[0];
+                uint8_t id=hdr&0xFF;
+                uint8_t nxt=(hdr>>8)&0xFF;
+                klogf(KLOG_INFO,"xhci%u: xECP@0x%x id=%u hdr=0x%08x val1=0x%08x val2=0x%08x",controller_number,xecp,id,hdr,ext[1],ext[2]);
+                if(id==2){ // Supported Protocol Capability
+                    uint8_t rev_min=ext[1]&0xFF;
+                    uint8_t rev_maj=(ext[1]>>8)&0xFF;
+                    uint8_t proto=ext[1]>>16; // simplified
+                    uint8_t port_off=ext[2]&0xFF;
+                    uint8_t port_cnt=(ext[2]>>8)&0xFF;
+                    klogf(KLOG_INFO,"xhci%u: Supported Protocol proto=%u rev %u.%u ports off=%u cnt=%u",controller_number,proto,rev_maj,rev_min,port_off,port_cnt);
+                }
+                if(!nxt) break;
+                xecp+=nxt*4;
+            }
+        }
+    }
 
     for(uint8_t port=1;port<=max_ports && device_count<XHCI_DEVICE_LIMIT;port++){
         uint8_t speed;
-        if(!reset_port(port,&speed)) continue;
+        klogf(KLOG_INFO,"xhci%u: probing port %u (%u/%u)",controller_number,port,port,max_ports);
+        if(!reset_port(port,&speed)){
+            klogf(KLOG_DEBUG,"xhci%u: port %u reset_port returned false, skip enumerate",controller_number,port);
+            continue;
+        }
+        klogf(KLOG_INFO,"xhci%u: port %u reset OK speed=%u, calling enumerate",controller_number,port,speed);
         if(!enumerate_port(port,speed,linux_name_base+device_count)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"xhci%u: port %u enumerate failed error=%u (%u) last_stage=%u completion=%u portsc=0x%08x",
+                  controller_number,port,probe_stats.last_error,probe_stats.last_error,probe_stats.last_stage,probe_stats.last_completion_code,probe_stats.last_portsc);
+        } else {
+            klogf(KLOG_OK,"xhci%u: port %u enumerate SUCCESS disks now %u",controller_number,port,probe_stats.mass_storage_devices);
         }
     }
-    if(!probe_stats.connected_ports && !device_count)
+    if(!probe_stats.connected_ports && !device_count){
         probe_stats.last_error=XHCI_PROBE_NO_CONNECTED_PORT;
+        klogf(KLOG_WARN,"xhci%u: no connected ports after scan %u ports; checks:",controller_number,max_ports);
+        klogf(KLOG_WARN,"xhci%u:  1) QEMU: устройства должны быть на xhci bus: -device qemu-xhci -device usb-storage,bus=xhci.0,drive=... иначе они попадут на UHCI/EHCI и будут невидимы здесь",controller_number);
+        klogf(KLOG_WARN,"xhci%u:  2) BIOS handoff: проверь xECP логи выше (LEGSUP). QEMU должен отдать владельство OS.",controller_number);
+        klogf(KLOG_WARN,"xhci%u:  3) MMIO BAR: raw BAR=0x%llx mapped=%p CAPLENGTH=%u HCSPARAMS1=0x%08x",controller_number,controller->register_base,(void*)mmio_base,capability[0]&0xFF,capability[1]);
+        // Final dump of PORTSC after scan for пост-мортем
+        for(uint8_t p=1;p<=max_ports;p++){
+            volatile uint8_t *port_base=(volatile uint8_t*)(void*)operational+0x400;
+            volatile uint32_t *preg=(volatile uint32_t*)(void*)(port_base+(p-1)*0x10);
+            uint32_t raw=preg[0];
+            xhci_log_port(p,raw,"scan-post");
+        }
+    } else {
+        klogf(KLOG_OK,"xhci%u: scan done connected=%u addressed=%u disks=%u failures=%u",controller_number,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.mass_storage_devices,probe_stats.failures);
+    }
     return true;
 }
 
 bool xhci_init(uint32_t linux_name_base){
-    if(probe_complete) return device_count>0;
+    if(probe_complete){
+        klogf(KLOG_DEBUG,"xhci: init already probe_complete disks=%u",device_count);
+        return device_count>0;
+    }
     probe_complete=true;
-    if(!mapping_ready) return false;
+    if(!mapping_ready){
+        klog(KLOG_ERROR,"xhci: init mapping not ready (mmio_configure not called)");
+        return false;
+    }
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
+    klogf(KLOG_INFO,"xhci: init enumeration found %d controller(s) (linux_name_base=%u)",count,linux_name_base);
     if(count<0) return false;
+    for(int32_t i=0;i<count;i++){
+        klogf(KLOG_INFO,"xhci: PCI controller[%d] type=%u name=%s bus %u:%u.%u BAR=0x%llx vend=%04x dev=%04x",
+              i,controllers[i].type,controllers[i].name,controllers[i].bus,controllers[i].slot,controllers[i].function,
+              controllers[i].register_base,controllers[i].vendor_id,controllers[i].device_id);
+    }
     uint8_t xhci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_XHCI) continue;
         probe_stats.controllers++;
         probe_stats.last_stage=1;
         controller_number=xhci_index++;
+        klogf(KLOG_INFO,"xhci%u: initializing controller %d pci %u:%u.%u BAR 0x%llx",controller_number,index,controllers[index].bus,controllers[index].slot,controllers[index].function,controllers[index].register_base);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"xhci%u: initialize_controller failed error=%u stage=%u usbsts=0x%x",controller_number,probe_stats.last_error,probe_stats.last_stage,probe_stats.usb_status);
             continue;
         }
+        klogf(KLOG_OK,"xhci%u: controller init complete disks=%u connected=%u",controller_number,device_count,probe_stats.connected_ports);
         if(device_count) break;
     }
+    klogf(KLOG_INFO,"xhci: init done total disks=%u controllers=%u",device_count,probe_stats.controllers);
     return device_count>0;
 }
 
 bool xhci_rescan(uint32_t linux_name_base){
-    if(device_count) return true;
-    if(!mapping_ready) return false;
+    klogf(KLOG_INFO,"xhci: rescan requested linux_name_base=%u device_count=%u",linux_name_base,device_count);
+    if(device_count){
+        klogf(KLOG_INFO,"xhci: rescan skipped, already %u devices",device_count);
+        return true;
+    }
+    if(!mapping_ready){
+        klog(KLOG_ERROR,"xhci: rescan mapping not ready");
+        return false;
+    }
     selected_device=XHCI_NO_DEVICE;
     probe_stats.connected_ports=0;
     probe_stats.addressed_devices=0;
@@ -890,18 +1143,29 @@ bool xhci_rescan(uint32_t linux_name_base){
 
     struct storage_controller_info controllers[8];
     int32_t count=storage_controller_list(controllers,8);
-    if(count<0) return false;
+    klogf(KLOG_INFO,"xhci: rescan controllers found %d",count);
+    if(count<0){
+        klogf(KLOG_ERROR,"xhci: storage_controller_list failed %d",count);
+        return false;
+    }
+    for(int32_t i=0;i<count;i++){
+        klogf(KLOG_INFO,"xhci rescan: PCI[%d] type=%u name=%s BAR=0x%llx",i,controllers[i].type,controllers[i].name,controllers[i].register_base);
+    }
     uint8_t xhci_index=0;
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_XHCI) continue;
         probe_stats.last_stage=1;
         controller_number=xhci_index++;
+        klogf(KLOG_INFO,"xhci%u: rescan initializing controller %d",controller_number,index);
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;
+            klogf(KLOG_ERROR,"xhci%u: rescan init failed error=%u",controller_number,probe_stats.last_error);
             continue;
         }
+        klogf(KLOG_OK,"xhci%u: rescan controller ok disks=%u",controller_number,device_count);
         if(device_count) break;
     }
+    klogf(KLOG_INFO,"xhci: rescan done disks=%u connected=%u addressed=%u failures=%u error=%u stage=%u",device_count,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.failures,probe_stats.last_error,probe_stats.last_stage);
     return device_count>0;
 }
 
