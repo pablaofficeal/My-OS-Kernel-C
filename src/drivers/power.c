@@ -5,6 +5,12 @@
 #include <stddef.h>
 
 extern struct limine_rsdp_response *rsdp_response_ptr;
+extern uint64_t hhdm_offset_global;
+
+static void *acpi_map(uint64_t address){
+    if(address>=hhdm_offset_global) return (void*)(uintptr_t)address;
+    return (void*)(uintptr_t)(address+hhdm_offset_global);
+}
 
 static inline void outb(uint16_t port, uint8_t val){ __asm__ volatile("outb %0,%1"::"a"(val),"Nd"(port)); }
 static inline uint8_t inb(uint16_t port){ uint8_t v; __asm__ volatile("inb %1,%0":"=a"(v):"Nd"(port)); return v; }
@@ -67,11 +73,10 @@ static void *acpi_find_table(const char *sig){
     struct acpi_header *rsdt = NULL;
     if(r->revision>=2){
         struct rsdp_descriptor20 *r20=(struct rsdp_descriptor20*)rsdp;
-        if(r20->xsdt_address) xsdt=(struct acpi_header*)(uintptr_t)r20->xsdt_address;
-        extern uint64_t hhdm_offset_global; // not existent, use boot's fb_ptr trick? Use direct map offset from kernel's mmio_configure
+        if(r20->xsdt_address) xsdt=acpi_map(r20->xsdt_address);
     }
     if(!xsdt && r->rsdt_address){
-        rsdt=(struct acpi_header*)(uintptr_t)r->rsdt_address;
+        rsdt=acpi_map(r->rsdt_address);
     }
     struct acpi_header *tables[2]={xsdt, rsdt};
     for(int t=0;t<2;t++){
@@ -82,7 +87,7 @@ static void *acpi_find_table(const char *sig){
             struct acpi_header *cur = root;
             if(attempt==1){
                 // Try with HHDM offset
-                uint64_t hhdm = 0xffff800000000000ULL;
+                uint64_t hhdm = hhdm_offset_global;
                 // Check if root is below 4G, assume physical
                 if((uint64_t)root < 0x100000000ULL){
                     cur = (struct acpi_header*)((uint64_t)root + hhdm);
@@ -98,22 +103,13 @@ static void *acpi_find_table(const char *sig){
                     uint64_t *arr=(uint64_t*)((uint8_t*)cur + sizeof(struct acpi_header));
                     uint64_t addr=arr[i];
                     // Try HHDM if needed
-                    tbl=(struct acpi_header*)(uintptr_t)addr;
-                    if(!acpi_valid(tbl, tbl->length)){
-                        // Try HHDM
-                        if(addr < 0x100000000ULL) tbl=(struct acpi_header*)(addr + 0xffff800000000000ULL);
-                        else continue;
-                        if(!acpi_valid(tbl, tbl->length)) continue;
-                    }
+                    tbl=acpi_map(addr);
+                    if(!acpi_valid(tbl, tbl->length)) continue;
                 } else {
                     uint32_t *arr=(uint32_t*)((uint8_t*)cur + sizeof(struct acpi_header));
                     uint32_t addr=arr[i];
-                    tbl=(struct acpi_header*)(uintptr_t)addr;
-                    if(!acpi_valid(tbl, tbl->length)){
-                        if(addr < 0x100000000U) tbl=(struct acpi_header*)(addr + 0xffff800000000000ULL);
-                        else continue;
-                        if(!acpi_valid(tbl, tbl->length)) continue;
-                    }
+                    tbl=acpi_map(addr);
+                    if(!acpi_valid(tbl, tbl->length)) continue;
                 }
                 if(memcmp(tbl->signature, sig, 4)==0){
                     return tbl;

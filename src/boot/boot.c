@@ -89,6 +89,7 @@ struct limine_framebuffer *fb_ptr = 0;
 struct limine_memmap_response *memmap_response_ptr = 0;
 struct limine_rsdp_response *rsdp_response_ptr = 0;
 struct limine_smp_response *smp_response_ptr = 0;
+uint64_t hhdm_offset_global = 0;
 
 bool boot_get_kernel_image(const void **address, uint32_t *size){
     if(!address || !size || !kernel_file_request.response
@@ -148,7 +149,10 @@ void _start(void) {
     smp_response_ptr = smp_request.response;
 
     // HHDM для VGA 0xB8000 в higher half (иначе #PF и ребут)
-    if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
+    if(hhdm_request.response){
+        hhdm_offset_global=hhdm_request.response->offset;
+        vga_set_hhdm(hhdm_offset_global);
+    }
     else vga_set_hhdm(0);
     if(hhdm_request.response && kernel_address_request.response){
         mmio_configure(hhdm_request.response->offset,

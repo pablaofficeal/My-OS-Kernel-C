@@ -36,8 +36,16 @@ static uint32_t desktop_height;
 static uint32_t explorer_icon_x=348;
 static uint32_t htop_icon_x=420;
 static uint32_t terminal_icon_x=500;
+static uint32_t explorer_icon_y=ICON_Y;
+static uint32_t htop_icon_y=ICON_Y;
+static uint32_t terminal_icon_y=ICON_Y;
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
+static int8_t dragged_icon=-1;
+static int32_t icon_drag_offset_x;
+static int32_t icon_drag_offset_y;
+static bool icon_drag_moved;
+static bool icon_layout_ready;
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -46,28 +54,31 @@ static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
 }
 
 static void draw_htop_icon(void){
-    gop_draw_rect(htop_icon_x,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(htop_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_line(htop_icon_x+11,ICON_Y+31,htop_icon_x+19,ICON_Y+21,0x89B4FA);
-    gop_draw_line(htop_icon_x+19,ICON_Y+21,htop_icon_x+28,ICON_Y+27,0x89B4FA);
-    gop_draw_line(htop_icon_x+28,ICON_Y+27,htop_icon_x+39,ICON_Y+14,0xA6E3A1);
-    gop_draw_line(htop_icon_x+39,ICON_Y+14,htop_icon_x+47,ICON_Y+19,0xA6E3A1);
-    gop_draw_text_at(htop_icon_x+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
+    uint32_t y=htop_icon_y;
+    gop_draw_rect(htop_icon_x,y,ICON_W,50,0x313244);
+    gop_draw_rect(htop_icon_x+7,y+8,44,30,0x1E1E2E);
+    gop_draw_line(htop_icon_x+11,y+31,htop_icon_x+19,y+21,0x89B4FA);
+    gop_draw_line(htop_icon_x+19,y+21,htop_icon_x+28,y+27,0x89B4FA);
+    gop_draw_line(htop_icon_x+28,y+27,htop_icon_x+39,y+14,0xA6E3A1);
+    gop_draw_line(htop_icon_x+39,y+14,htop_icon_x+47,y+19,0xA6E3A1);
+    gop_draw_text_at(htop_icon_x+9,y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_explorer_icon(void){
-    gop_draw_rect(explorer_icon_x,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(explorer_icon_x+7,ICON_Y+13,44,27,0xF9E2AF);
-    gop_draw_rect(explorer_icon_x+10,ICON_Y+9,20,8,0xF9E2AF);
-    gop_draw_rect(explorer_icon_x+10,ICON_Y+18,38,4,0xFAB387);
-    gop_draw_text_at(explorer_icon_x+7,ICON_Y+55,"Files",TOPBAR_FG,DESKTOP_BG);
+    uint32_t y=explorer_icon_y;
+    gop_draw_rect(explorer_icon_x,y,ICON_W,50,0x313244);
+    gop_draw_rect(explorer_icon_x+7,y+13,44,27,0xF9E2AF);
+    gop_draw_rect(explorer_icon_x+10,y+9,20,8,0xF9E2AF);
+    gop_draw_rect(explorer_icon_x+10,y+18,38,4,0xFAB387);
+    gop_draw_text_at(explorer_icon_x+7,y+55,"Files",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_terminal_icon(void){
-    gop_draw_rect(terminal_icon_x,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(terminal_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_text_at(terminal_icon_x+13,ICON_Y+18,">_",0xA6E3A1,0x1E1E2E);
-    gop_draw_text_at(terminal_icon_x,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
+    uint32_t y=terminal_icon_y;
+    gop_draw_rect(terminal_icon_x,y,ICON_W,50,0x313244);
+    gop_draw_rect(terminal_icon_x+7,y+8,44,30,0x1E1E2E);
+    gop_draw_text_at(terminal_icon_x+13,y+18,">_",0xA6E3A1,0x1E1E2E);
+    gop_draw_text_at(terminal_icon_x,y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_power_button(void){
@@ -91,9 +102,12 @@ static void draw_desktop(void){
     desktop_height=gop_get_height();
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
-    explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
-    htop_icon_x=explorer_icon_x+72;
-    terminal_icon_x=htop_icon_x+72;
+    if(!icon_layout_ready){
+        explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
+        htop_icon_x=explorer_icon_x+72;
+        terminal_icon_x=htop_icon_x+72;
+        icon_layout_ready=true;
+    }
 
     gop_clear(DESKTOP_BG);
     gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
@@ -158,18 +172,41 @@ static void handle_desktop_mouse(void){
                                       pressed,released,
                                       desktop_width,desktop_height) || redraw;
     }
-    if(pressed && !consumed
-       && point_inside(mouse.x,mouse.y,explorer_icon_x,ICON_Y,ICON_W,ICON_H)){
-        explorer_open(desktop_width,desktop_height);
-        redraw=true;
-    } else if(pressed && !consumed
-       && point_inside(mouse.x,mouse.y,htop_icon_x,ICON_Y,ICON_W,ICON_H)){
-        monitor_run();
-        redraw=true;
-    } else if(pressed && !consumed
-              && point_inside(mouse.x,mouse.y,terminal_icon_x,ICON_Y,
-                              ICON_W,ICON_H)){
-        terminal_set_visible(true);
+    uint32_t *icon_positions[3]={&explorer_icon_x,&htop_icon_x,&terminal_icon_x};
+    uint32_t *icon_y_positions[3]={&explorer_icon_y,&htop_icon_y,&terminal_icon_y};
+    if(pressed && !consumed){
+        for(int8_t index=0;index<3;index++){
+            if(point_inside(mouse.x,mouse.y,*icon_positions[index],*icon_y_positions[index],ICON_W,ICON_H)){
+                dragged_icon=index;
+                icon_drag_offset_x=mouse.x-(int32_t)*icon_positions[index];
+                icon_drag_offset_y=mouse.y-(int32_t)*icon_y_positions[index];
+                icon_drag_moved=false;
+                consumed=true;
+                break;
+            }
+        }
+    }
+    if(dragged_icon>=0 && (mouse.buttons&1)){
+        int32_t next_x=mouse.x-icon_drag_offset_x;
+        int32_t next_y=mouse.y-icon_drag_offset_y;
+        if(next_x<0) next_x=0;
+        if(next_x>(int32_t)desktop_width-ICON_W) next_x=(int32_t)desktop_width-ICON_W;
+        if(next_y<TOPBAR_HEIGHT) next_y=TOPBAR_HEIGHT;
+        if(next_y>(int32_t)desktop_height-ICON_H) next_y=(int32_t)desktop_height-ICON_H;
+        if((uint32_t)next_x!=*icon_positions[dragged_icon]
+           || (uint32_t)next_y!=*icon_y_positions[dragged_icon]) icon_drag_moved=true;
+        *icon_positions[dragged_icon]=(uint32_t)next_x;
+        *icon_y_positions[dragged_icon]=(uint32_t)next_y;
+        redraw=icon_drag_moved;
+    }
+    if(released && dragged_icon>=0){
+        int8_t icon=dragged_icon;
+        dragged_icon=-1;
+        if(!icon_drag_moved){
+            if(icon==0) explorer_open(desktop_width,desktop_height);
+            else if(icon==1) monitor_run();
+            else terminal_set_visible(true);
+        }
         redraw=true;
     }
     previous_mouse_buttons=mouse.buttons;
