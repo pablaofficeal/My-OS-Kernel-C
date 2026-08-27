@@ -2,12 +2,15 @@
 
 #include "storage_probe.h"
 #include "../pci/pci.h"
+#include "../../arch/x86_64/mmio.h"
+#include "../../kernel/klog.h"
 #include "../../lib/string.h"
 
 #define AHCI_DEVICE_LIMIT       8
 #define AHCI_PORT_LIMIT        32
 #define AHCI_COMMAND_SLOT_LIMIT 32
 #define AHCI_TIMEOUT            10000000U
+#define AHCI_MMIO_MAP_SIZE      0x2000U
 
 #define AHCI_GHC_AE             (1U<<31)
 #define AHCI_CAP_64_BIT         (1U<<31)
@@ -87,7 +90,6 @@ static uint8_t received_fis[256] __attribute__((aligned(256)));
 static struct ahci_command_table command_table __attribute__((aligned(128)));
 static uint16_t identify_words[256] __attribute__((aligned(512)));
 static uint8_t dma_buffer[512] __attribute__((aligned(512)));
-static uint64_t hhdm_offset;
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
 static struct ahci_probe_stats probe_stats;
@@ -98,7 +100,7 @@ static bool probe_complete;
 
 void ahci_set_address_mapping(uint64_t direct_map_offset, uint64_t physical_base,
                               uint64_t virtual_base){
-    hhdm_offset=direct_map_offset;
+    (void)direct_map_offset;
     kernel_physical_base=physical_base;
     kernel_virtual_base=virtual_base;
     mapping_ready=true;
@@ -279,14 +281,22 @@ bool ahci_init(uint32_t linux_name_base){
         if(controllers[index].type!=STORAGE_CONTROLLER_AHCI) continue;
         probe_stats.controllers++;
         uint64_t abar=controllers[index].register_base;
-        if(abar==0 || abar>0xFFFFFFFFULL){ ahci_index++; continue; }
+        if(abar==0){ ahci_index++; continue; }
 
         uint32_t pci_command=pci_read_config32(controllers[index].bus,
                                                controllers[index].slot,
                                                controllers[index].function,0x04);
         pci_write_config32(controllers[index].bus,controllers[index].slot,
                            controllers[index].function,0x04,pci_command|0x06);
-        volatile uint32_t *hba=(volatile uint32_t*)(uintptr_t)(hhdm_offset+abar);
+        volatile uint32_t *hba=(volatile uint32_t*)mmio_map(abar,AHCI_MMIO_MAP_SIZE);
+        if(!hba){
+            klogf(KLOG_ERROR,"ahci%u: cannot map BAR 0x%llx",ahci_index,abar);
+            probe_stats.identify_failures++;
+            ahci_index++;
+            continue;
+        }
+        klogf(KLOG_INFO,"ahci%u: BAR phys=0x%llx mapped=%p",ahci_index,abar,
+              (void*)hba);
         uint64_t dma_addresses=kernel_pointer_physical(command_list)
             |kernel_pointer_physical(received_fis)
             |kernel_pointer_physical(&command_table)

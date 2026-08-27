@@ -44,6 +44,7 @@ uint64_t pci_read_bar(uint8_t bus, uint8_t slot, uint8_t function,
     uint64_t address=low&~0xFU;
     if((low&0x06)==PCI_BAR_MEMORY_64 && bar_index<5){
         uint32_t high=pci_read_config32(bus,slot,function,(uint8_t)(offset+4));
+        if(high==0xFFFFFFFF) return 0;
         address|=(uint64_t)high<<32;
     }
     return address;

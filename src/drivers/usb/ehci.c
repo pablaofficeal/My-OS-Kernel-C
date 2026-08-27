@@ -2,10 +2,13 @@
 
 #include "../pci/pci.h"
 #include "../storage/storage_probe.h"
+#include "../../arch/x86_64/mmio.h"
+#include "../../kernel/klog.h"
 #include "../../lib/string.h"
 
 #define EHCI_DEVICE_LIMIT 4
 #define EHCI_TIMEOUT      10000000U
+#define EHCI_MMIO_MAP_SIZE 0x1000U
 #define EHCI_NO_DEVICE    0xFF
 
 #define EHCI_CMD_RUN      (1U<<0)
@@ -102,7 +105,6 @@ static struct ehci_device devices[EHCI_DEVICE_LIMIT];
 
 static volatile uint8_t *capability_base;
 static volatile uint32_t *operational;
-static uint64_t hhdm_offset;
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
 static uint32_t dma_segment;
@@ -116,7 +118,7 @@ static struct ehci_probe_stats probe_stats;
 
 void ehci_set_address_mapping(uint64_t direct_map_offset, uint64_t physical_base,
                               uint64_t virtual_base){
-    hhdm_offset=direct_map_offset;
+    (void)direct_map_offset;
     kernel_physical_base=physical_base;
     kernel_virtual_base=virtual_base;
     mapping_ready=true;
@@ -492,8 +494,19 @@ static bool take_ownership(const struct storage_controller_info *controller,
 static bool initialize_controller(const struct storage_controller_info *controller,
                                   uint32_t linux_name_base){
     if(!controller->register_base) return false;
-    capability_base=(volatile uint8_t*)(uintptr_t)(hhdm_offset
-                                                    +controller->register_base);
+    uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
+                                            controller->function,0x04);
+    pci_write_config32(controller->bus,controller->slot,controller->function,
+                       0x04,pci_command|0x06);
+    capability_base=(volatile uint8_t*)mmio_map(controller->register_base,
+                                                EHCI_MMIO_MAP_SIZE);
+    if(!capability_base){
+        klogf(KLOG_ERROR,"ehci%u: cannot map BAR 0x%llx",controller_number,
+              controller->register_base);
+        return false;
+    }
+    klogf(KLOG_INFO,"ehci%u: BAR phys=0x%llx mapped=%p",controller_number,
+          controller->register_base,(void*)capability_base);
     uint8_t capability_length=capability_base[0];
     volatile uint32_t *capability=(volatile uint32_t*)(void*)capability_base;
     uint32_t structural=capability[1];
@@ -504,10 +517,6 @@ static bool initialize_controller(const struct storage_controller_info *controll
     uint8_t ports=(uint8_t)(structural&0x0F);
     if(!ports) return false;
     operational=(volatile uint32_t*)(void*)(capability_base+capability_length);
-    uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
-                                            controller->function,0x04);
-    pci_write_config32(controller->bus,controller->slot,controller->function,
-                       0x04,pci_command|0x06);
     operational[0]&=~EHCI_CMD_RUN;
     if(!wait_register(&operational[1],EHCI_STS_HALTED,true)) return false;
     operational[0]|=EHCI_CMD_RESET;

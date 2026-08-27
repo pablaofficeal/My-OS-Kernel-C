@@ -2,12 +2,15 @@
 
 #include "../pci/pci.h"
 #include "../storage/storage_probe.h"
+#include "../../arch/x86_64/mmio.h"
+#include "../../kernel/klog.h"
 #include "../../lib/string.h"
 
 #define XHCI_DEVICE_LIMIT       4
 #define XHCI_RING_ENTRIES       64
 #define XHCI_EVENT_ENTRIES      128
 #define XHCI_TIMEOUT            10000000U
+#define XHCI_MMIO_MAP_SIZE      0x100000U
 #define XHCI_SCRATCHPAD_LIMIT   32
 #define XHCI_NO_DEVICE          0xFF
 
@@ -130,7 +133,6 @@ static volatile uint8_t *mmio_base;
 static volatile uint32_t *operational;
 static volatile uint32_t *doorbells;
 static volatile uint32_t *runtime;
-static uint64_t hhdm_offset;
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
 static uint16_t event_index;
@@ -146,7 +148,7 @@ static struct xhci_probe_stats probe_stats;
 
 void xhci_set_address_mapping(uint64_t direct_map_offset, uint64_t physical_base,
                               uint64_t virtual_base){
-    hhdm_offset=direct_map_offset;
+    (void)direct_map_offset;
     kernel_physical_base=physical_base;
     kernel_virtual_base=virtual_base;
     mapping_ready=true;
@@ -634,7 +636,19 @@ static bool take_ownership(volatile uint32_t *capability, uint32_t hccparams1){
 static bool initialize_controller(const struct storage_controller_info *controller,
                                   uint32_t linux_name_base){
     if(!controller->register_base) return false;
-    mmio_base=(volatile uint8_t*)(uintptr_t)(hhdm_offset+controller->register_base);
+    uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
+                                            controller->function,0x04);
+    pci_write_config32(controller->bus,controller->slot,controller->function,
+                       0x04,pci_command|0x06);
+    mmio_base=(volatile uint8_t*)mmio_map(controller->register_base,
+                                          XHCI_MMIO_MAP_SIZE);
+    if(!mmio_base){
+        klogf(KLOG_ERROR,"xhci%u: cannot map BAR 0x%llx",controller_number,
+              controller->register_base);
+        return false;
+    }
+    klogf(KLOG_INFO,"xhci%u: BAR phys=0x%llx mapped=%p",controller_number,
+          controller->register_base,(void*)mmio_base);
     volatile uint32_t *capability=(volatile uint32_t*)(void*)mmio_base;
     uint8_t capability_length=mmio_base[0];
     uint32_t hcsparams1=capability[1];
@@ -647,13 +661,14 @@ static bool initialize_controller(const struct storage_controller_info *controll
     if(!max_slots || !max_ports) return false;
     if(max_slots>32) max_slots=32;
 
-    uint32_t pci_command=pci_read_config32(controller->bus,controller->slot,
-                                            controller->function,0x04);
-    pci_write_config32(controller->bus,controller->slot,controller->function,
-                       0x04,pci_command|0x06);
+    uint32_t doorbell_offset=capability[5]&~3U;
+    uint32_t runtime_offset=capability[6]&~0x1FU;
+    if((uint32_t)capability_length+0x40U>XHCI_MMIO_MAP_SIZE
+       || doorbell_offset>XHCI_MMIO_MAP_SIZE-4U
+       || runtime_offset>XHCI_MMIO_MAP_SIZE-0x40U) return false;
     operational=(volatile uint32_t*)(void*)(mmio_base+capability_length);
-    doorbells=(volatile uint32_t*)(void*)(mmio_base+(capability[5]&~3U));
-    runtime=(volatile uint32_t*)(void*)(mmio_base+(capability[6]&~0x1FU));
+    doorbells=(volatile uint32_t*)(void*)(mmio_base+doorbell_offset);
+    runtime=(volatile uint32_t*)(void*)(mmio_base+runtime_offset);
     operational[0]&=~XHCI_CMD_RUN;
     if(!wait_register(&operational[1],XHCI_STS_HALTED,true)) return false;
     operational[0]|=XHCI_CMD_RESET;
