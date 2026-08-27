@@ -7,6 +7,7 @@
 #include "../drivers/storage/block_device.h"
 #include "../drivers/storage/ahci.h"
 #include "../drivers/storage/storage_probe.h"
+#include "../drivers/usb/xhci.h"
 #include "../fs/fat32.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -119,14 +120,19 @@ void syscall_init(void){
         storage_probe_init();
         (void)block_device_init();
         struct ahci_probe_stats ahci_stats;
+        struct xhci_probe_stats xhci_stats;
         ahci_get_probe_stats(&ahci_stats);
-        klogf(KLOG_INFO,"pci-storage: %u AHCI/NVMe controller(s) detected",
+        xhci_get_probe_stats(&xhci_stats);
+        klogf(KLOG_INFO,"pci: %u storage/USB controller(s) detected",
               storage_controller_count());
         klogf(KLOG_INFO,"storage: %u operational disk(s) detected",block_device_count());
         klogf(KLOG_INFO,"ahci: %u SATA disk(s) identified",ahci_device_count());
         klogf(KLOG_DEBUG,"ahci: controllers=%u ports=%u sata=%u identify_failures=%u",
               ahci_stats.controllers,ahci_stats.implemented_ports,
               ahci_stats.sata_ports,ahci_stats.identify_failures);
+        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u usb-storage=%u failures=%u",
+              xhci_stats.controllers,xhci_stats.connected_ports,
+              xhci_stats.mass_storage_devices,xhci_stats.failures);
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
         } else {

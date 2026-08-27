@@ -218,9 +218,9 @@ static void open_editor(const char *path){
 }
 
 static void show_disks(void){
-    struct storage_device_info devices[12];
+    struct storage_device_info devices[20];
     struct storage_controller_info controllers[8];
-    int64_t disk_count=userspace_syscall(SYS_DISK_LIST,(uint64_t)devices,12,0);
+    int64_t disk_count=userspace_syscall(SYS_DISK_LIST,(uint64_t)devices,20,0);
     int64_t controller_count=userspace_syscall(SYS_STORAGE_CONTROLLERS,
                                                (uint64_t)controllers,8,0);
     if(disk_count<0 || controller_count<0){
@@ -245,10 +245,14 @@ static void show_disks(void){
                 terminal_printf("  bus: AHCI controller %u port %u\n",
                                 (unsigned int)devices[index].controller,
                                 (unsigned int)devices[index].port);
-            } else {
+            } else if(devices[index].transport==STORAGE_TRANSPORT_ATA_PIO){
                 const char *channel=devices[index].channel ? "secondary" : "primary";
                 const char *drive=devices[index].drive ? "slave" : "master";
                 terminal_printf("  bus: ATA %s %s\n",channel,drive);
+            } else {
+                terminal_printf("  bus: USB xHCI controller %u port %u\n",
+                                (unsigned int)devices[index].controller,
+                                (unsigned int)devices[index].port);
             }
             terminal_printf("  model: %s\n",
                             devices[index].model[0]
@@ -260,10 +264,11 @@ static void show_disks(void){
     }
 
     if(controller_count>0){
-        terminal_write("PCI storage controllers:\n");
+        terminal_write("Storage and USB controllers:\n");
         for(int64_t index=0;index<controller_count;index++){
             const char *type=controllers[index].type==STORAGE_CONTROLLER_AHCI
-                ? "AHCI" : "NVMe";
+                ? "AHCI" : (controllers[index].type==STORAGE_CONTROLLER_NVME
+                    ? "NVMe" : "xHCI");
             terminal_printf("%s  %s  pci %u:%u.%u  id %x:%x\n",
                             controllers[index].name,type,
                             (unsigned int)controllers[index].bus,
@@ -279,9 +284,13 @@ static void show_disks(void){
                                 (unsigned int)(controllers[index].register_base>>32),
                                 (unsigned int)controllers[index].register_base);
             }
-            terminal_write(controllers[index].type==STORAGE_CONTROLLER_AHCI
-                ? "  block I/O: DMA read/write\n"
-                : "  block I/O: driver not initialized\n");
+            if(controllers[index].type==STORAGE_CONTROLLER_AHCI){
+                terminal_write("  block I/O: DMA read/write\n");
+            } else if(controllers[index].type==STORAGE_CONTROLLER_XHCI){
+                terminal_write("  block I/O: USB Mass Storage polling\n");
+            } else {
+                terminal_write("  block I/O: driver not initialized\n");
+            }
         }
     }
 }

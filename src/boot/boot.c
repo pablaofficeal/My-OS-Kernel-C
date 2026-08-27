@@ -8,6 +8,7 @@
 #include "../drivers/pic.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/storage/ahci.h"
+#include "../drivers/usb/xhci.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../kernel/syscall.h"
@@ -78,6 +79,9 @@ void _start(void) {
     else vga_set_hhdm(0);
     if(hhdm_request.response && kernel_address_request.response){
         ahci_set_address_mapping(hhdm_request.response->offset,
+                                 kernel_address_request.response->physical_base,
+                                 kernel_address_request.response->virtual_base);
+        xhci_set_address_mapping(hhdm_request.response->offset,
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);
     }

@@ -10,11 +10,15 @@
 #define PCI_INTERFACE_AHCI       0x01
 #define PCI_INTERFACE_NVME_IO    0x02
 #define PCI_INTERFACE_NVME_ADMIN 0x03
+#define PCI_CLASS_SERIAL_BUS     0x0C
+#define PCI_SUBCLASS_USB         0x03
+#define PCI_INTERFACE_XHCI       0x30
 
 static struct storage_controller_info controllers[STORAGE_CONTROLLER_LIMIT];
 static uint8_t controller_count;
 static uint8_t ahci_count;
 static uint8_t nvme_count;
+static uint8_t xhci_count;
 static bool probe_complete;
 
 static void set_controller_name(struct storage_controller_info *controller,
@@ -31,21 +35,26 @@ static void set_controller_name(struct storage_controller_info *controller,
 
 static void inspect_pci_device(const struct pci_device_info *device, void *context){
     (void)context;
-    if(controller_count>=STORAGE_CONTROLLER_LIMIT
-       || device->class_code!=PCI_CLASS_MASS_STORAGE){
+    if(controller_count>=STORAGE_CONTROLLER_LIMIT){
         return;
     }
 
     uint8_t type=0;
     uint8_t bar_index=0;
-    if(device->subclass==PCI_SUBCLASS_SATA
+    if(device->class_code==PCI_CLASS_MASS_STORAGE
+       && device->subclass==PCI_SUBCLASS_SATA
        && device->programming_interface==PCI_INTERFACE_AHCI){
         type=STORAGE_CONTROLLER_AHCI;
         bar_index=5;
-    } else if(device->subclass==PCI_SUBCLASS_NVM
+    } else if(device->class_code==PCI_CLASS_MASS_STORAGE
+              && device->subclass==PCI_SUBCLASS_NVM
               && (device->programming_interface==PCI_INTERFACE_NVME_IO
                   || device->programming_interface==PCI_INTERFACE_NVME_ADMIN)){
         type=STORAGE_CONTROLLER_NVME;
+    } else if(device->class_code==PCI_CLASS_SERIAL_BUS
+              && device->subclass==PCI_SUBCLASS_USB
+              && device->programming_interface==PCI_INTERFACE_XHCI){
+        type=STORAGE_CONTROLLER_XHCI;
     } else {
         return;
     }
@@ -63,8 +72,10 @@ static void inspect_pci_device(const struct pci_device_info *device, void *conte
     controller->programming_interface=device->programming_interface;
     if(type==STORAGE_CONTROLLER_AHCI){
         set_controller_name(controller,"ahci",ahci_count++);
-    } else {
+    } else if(type==STORAGE_CONTROLLER_NVME){
         set_controller_name(controller,"nvme",nvme_count++);
+    } else {
+        set_controller_name(controller,"xhci",xhci_count++);
     }
     controller_count++;
 }
