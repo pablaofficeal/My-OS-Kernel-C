@@ -97,6 +97,3 @@ chmod +x "$LIMINE_BIN" 2>/dev/null || true
 
 ls -lh purec_limine.iso kernel-limine.elf
 echo "✅ purec_limine.iso готов (higher half, no Lower half PHDR panic)"
-echo "🚀 BIOS QEMU:  qemu-system-x86_64 -cdrom purec_limine.iso -m 512M -nographic"
-echo "🚀 UEFI QEMU:  qemu-system-x86_64 -bios /usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd -drive if=pflash,format=raw,file=/tmp/ovmf_vars.fd -cdrom purec_limine.iso -m 512M -nographic -serial file:serial.log"
-echo "   GOP активен только в UEFI Limine (framebuffer), в BIOS fallback на VGA"

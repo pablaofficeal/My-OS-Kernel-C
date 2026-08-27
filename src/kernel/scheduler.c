@@ -157,7 +157,7 @@ void scheduler_yield(void){
     current=next;
     prev->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     next->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
-    klogf(KLOG_DEBUG, "sched: yield %u (%s) -> %u (%s)", prev->id, prev->name, next->id, next->name);
+    // klogf(KLOG_DEBUG, "sched: yield %u (%s) -> %u (%s)", prev->id, prev->name, next->id, next->name);
     scheduler_asm_switch(&prev->rsp, &next->rsp);
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
