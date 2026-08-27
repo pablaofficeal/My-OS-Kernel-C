@@ -103,6 +103,11 @@ bool block_device_get_info(uint32_t index, struct storage_device_info *info){
         transport=STORAGE_TRANSPORT_USB_EHCI;
     }
     if(status){
+        if(info->sector_size==0){
+            klogf(KLOG_WARN,"storage: device %s reported zero sector size, using %u",
+                  info->name,BLOCK_SECTOR_SIZE);
+            info->sector_size=BLOCK_SECTOR_SIZE;
+        }
         info->selected=active_transport==transport && active_index==transport_index;
     }
     return status;

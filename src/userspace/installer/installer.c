@@ -180,7 +180,7 @@ void installer_run(const char *args){
     if(fmt<0){
         terminal_printf("Format failed (%d) see dmesg\n",(int)fmt);
         if(fmt==FS_ERROR_BUSY) terminal_write("  Hint: disk is mounted, reboot and try again or use another disk\n");
-        if(fmt==FS_ERROR_UNSUPPORTED) terminal_write("  Hint: sector_size must be 512, disk <128GB\n");
+        if(fmt==FS_ERROR_UNSUPPORTED) terminal_write("  Hint: sector_size must be 512, disk must fit 32-bit LBA\n");
         return;
     }
     terminal_write("  Format OK. Verifying sectors...\n");

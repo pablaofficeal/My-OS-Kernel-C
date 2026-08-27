@@ -420,7 +420,7 @@ static void print_mkfs_error(int64_t status, const char *device){
     } else if(status==FS_ERROR_TOO_SMALL){
         terminal_write("mkfs.fat32: disk too small (<32MB) or too large for FAT32 layout\n");
     } else if(status==FS_ERROR_UNSUPPORTED){
-        terminal_write("mkfs.fat32: unsupported sector size or disk >128GB\n");
+        terminal_write("mkfs.fat32: sector size must be 512 and disk must fit 32-bit LBA\n");
         terminal_write("  Check 'disks' for sector_size=512, dmesg for details\n");
         if(device){
             char s[STORAGE_SERIAL_CAPACITY]={0};

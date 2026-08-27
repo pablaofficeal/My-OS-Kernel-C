@@ -21,7 +21,7 @@
 #define FAT32_FORMAT_RESERVED_SECTORS 32
 #define FAT32_FORMAT_FAT_COUNT         2
 #define FAT32_FORMAT_BLANK_SCAN        2048
-#define FAT32_FORMAT_MAX_SECTORS       0x10000000U
+#define FAT32_FORMAT_MAX_SECTORS       UINT32_MAX
 #define FAT32_ESP_START_LBA 2048
 #define FAT32_ESP_RESERVED FAT32_FORMAT_RESERVED_SECTORS
 
@@ -469,7 +469,7 @@ static bool mount_boot_sector(uint32_t partition_lba){
         klogf(KLOG_DEBUG,"mount: LBA %u fat too small %u clusters %u",partition_lba,fat_size,cluster_count);
         return false;
     }
-    if((uint64_t)partition_lba+total_sectors>0x10000000ULL){
+    if((uint64_t)partition_lba+total_sectors>FAT32_FORMAT_MAX_SECTORS){
         klogf(KLOG_DEBUG,"mount: LBA %u tot %u exceeds limit",partition_lba,total_sectors);
         return false;
     }
@@ -1193,12 +1193,12 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
     struct storage_device_info info;
     if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
     if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
-    if(info.sector_count>FAT32_FORMAT_MAX_SECTORS){
-        klogf(KLOG_ERROR,"fat32_uefi: UNSUPPORTED sectors %llu > %u",info.sector_count,FAT32_FORMAT_MAX_SECTORS);
+    if(info.sector_size!=BLOCK_SECTOR_SIZE
+       || info.sector_count>FAT32_FORMAT_MAX_SECTORS){
+        klogf(KLOG_ERROR,"fat32_uefi: UNSUPPORTED ss=%u expected %u sectors=%llu max=%u",
+              info.sector_size,BLOCK_SECTOR_SIZE,info.sector_count,
+              FAT32_FORMAT_MAX_SECTORS);
         return FS_ERROR_UNSUPPORTED;
-    }
-    if(info.sector_size!=BLOCK_SECTOR_SIZE){
-        klogf(KLOG_WARN,"fat32_uefi: dev %s ss=%u !=512, forcing 512",device_name,info.sector_size);
     }
     if(info.sector_count <= FAT32_ESP_START_LBA+65535) return FS_ERROR_TOO_SMALL; // нужен минимум ~32MB ESP
     uint32_t part_sectors = (uint32_t)info.sector_count - FAT32_ESP_START_LBA;
