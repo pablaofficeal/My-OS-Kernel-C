@@ -96,6 +96,23 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_FILE_WRITE:
             return fat32_write_file((const char*)(uintptr_t)a1,
                                     (const void*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_USB_RESCAN: {
+            uint32_t count=block_device_rescan_usb();
+            struct xhci_probe_stats xhci_stats;
+            struct ehci_probe_stats ehci_stats;
+            xhci_get_probe_stats(&xhci_stats);
+            ehci_get_probe_stats(&ehci_stats);
+            klogf(KLOG_INFO,"usb-rescan: xhci connected=%u addressed=%u disks=%u failures=%u stage=%u",
+                  xhci_stats.connected_ports,xhci_stats.addressed_devices,
+                  xhci_stats.mass_storage_devices,xhci_stats.failures,
+                  xhci_stats.last_stage);
+            klogf(KLOG_INFO,"usb-rescan: ehci connected=%u high-speed=%u disks=%u failures=%u stage=%u",
+                  ehci_stats.connected_ports,ehci_stats.high_speed_ports,
+                  ehci_stats.mass_storage_devices,ehci_stats.failures,
+                  ehci_stats.last_stage);
+            if(count && !fat32_is_mounted()) (void)fat32_init();
+            return count;
+        }
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");
             gop_write("[SYSCALL] exit\n");

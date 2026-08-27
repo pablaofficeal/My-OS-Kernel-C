@@ -23,6 +23,7 @@
 #define SYS_STORAGE_CONTROLLERS 209
 #define SYS_FAT32_FORMAT 210
 #define SYS_FILE_WRITE   211
+#define SYS_USB_RESCAN   212
 
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;

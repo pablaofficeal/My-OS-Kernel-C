@@ -16,6 +16,7 @@ struct ehci_probe_stats {
 void ehci_set_address_mapping(uint64_t hhdm_offset, uint64_t kernel_physical_base,
                               uint64_t kernel_virtual_base);
 bool ehci_init(uint32_t linux_name_base);
+bool ehci_rescan(uint32_t linux_name_base);
 uint32_t ehci_device_count(void);
 bool ehci_get_device_info(uint32_t index, struct storage_device_info *info);
 bool ehci_select_device(uint32_t index);

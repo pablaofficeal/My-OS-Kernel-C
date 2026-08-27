@@ -744,6 +744,33 @@ bool xhci_init(uint32_t linux_name_base){
     return device_count>0;
 }
 
+bool xhci_rescan(uint32_t linux_name_base){
+    if(device_count) return true;
+    if(!mapping_ready) return false;
+    selected_device=XHCI_NO_DEVICE;
+    probe_stats.connected_ports=0;
+    probe_stats.addressed_devices=0;
+    probe_stats.mass_storage_devices=0;
+    probe_stats.failures=0;
+    probe_stats.last_stage=0;
+
+    struct storage_controller_info controllers[8];
+    int32_t count=storage_controller_list(controllers,8);
+    if(count<0) return false;
+    uint8_t xhci_index=0;
+    for(int32_t index=0;index<count;index++){
+        if(controllers[index].type!=STORAGE_CONTROLLER_XHCI) continue;
+        probe_stats.last_stage=1;
+        controller_number=xhci_index++;
+        if(!initialize_controller(&controllers[index],linux_name_base)){
+            probe_stats.failures++;
+            continue;
+        }
+        if(device_count) break;
+    }
+    return device_count>0;
+}
+
 uint32_t xhci_device_count(void){ return device_count; }
 
 bool xhci_get_device_info(uint32_t index, struct storage_device_info *info){

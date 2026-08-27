@@ -38,6 +38,24 @@ bool block_device_init(void){
     return ata_available || ahci_available || usb_available || ehci_available;
 }
 
+uint32_t block_device_rescan_usb(void){
+    uint32_t fixed_count=ata_pio_device_count()+ahci_device_count();
+    (void)xhci_rescan(fixed_count);
+    (void)ehci_rescan(fixed_count+xhci_device_count());
+    if(active_transport==BLOCK_TRANSPORT_NONE){
+        if(xhci_device_count()){
+            active_transport=STORAGE_TRANSPORT_USB_MSC;
+            active_index=0;
+            (void)xhci_select_device(0);
+        } else if(ehci_device_count()){
+            active_transport=STORAGE_TRANSPORT_USB_EHCI;
+            active_index=0;
+            (void)ehci_select_device(0);
+        }
+    }
+    return xhci_device_count()+ehci_device_count();
+}
+
 uint32_t block_device_count(void){
     (void)block_device_init();
     return ata_pio_device_count()+ahci_device_count()+xhci_device_count()

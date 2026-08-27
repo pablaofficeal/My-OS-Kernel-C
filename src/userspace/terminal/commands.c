@@ -218,6 +218,7 @@ static void open_editor(const char *path){
 }
 
 static void show_disks(void){
+    (void)userspace_syscall(SYS_USB_RESCAN,0,0,0);
     struct storage_device_info devices[20];
     struct storage_controller_info controllers[8];
     int64_t disk_count=userspace_syscall(SYS_DISK_LIST,(uint64_t)devices,20,0);
@@ -299,6 +300,19 @@ static void show_disks(void){
     }
 }
 
+static void rescan_usb(void){
+    terminal_write("usbscan: rescanning xHCI/EHCI root ports...\n");
+    int64_t count=userspace_syscall(SYS_USB_RESCAN,0,0,0);
+    if(count<0){
+        terminal_write("usbscan: controller scan failed\n");
+        return;
+    }
+    terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
+    if(count==0){
+        terminal_write("usbscan: use dmesg to see the failed USB stage\n");
+    }
+}
+
 static void format_fat32(const char *arguments){
     char device[STORAGE_DEVICE_NAME_CAPACITY];
     char serial[STORAGE_SERIAL_CAPACITY];
@@ -347,6 +361,7 @@ static void show_help(void){
     terminal_write("  mkdir <directory> create a FAT32 directory\n");
     terminal_write("  nano <file>       open the small text editor\n");
     terminal_write("  disks             list disks and storage controllers\n");
+    terminal_write("  usbscan           rescan USB ports after VM capture\n");
     terminal_write("  mkfs.fat32 DEV SERIAL ERASE  format a blank disk\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
@@ -411,6 +426,8 @@ void commands_execute(const char *line){
         open_editor(arguments);
     } else if(strcmp(command,"disks")==0){
         show_disks();
+    } else if(strcmp(command,"usbscan")==0){
+        rescan_usb();
     } else if(strcmp(command,"mkfs.fat32")==0){
         format_fat32(arguments);
     } else if(strcmp(command,"dmesg")==0){
