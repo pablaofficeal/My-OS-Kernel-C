@@ -3,6 +3,7 @@
 #include "../../drivers/fb.h"
 #include "../../kernel/syscall.h"
 #include "../../kernel/panic.h"
+#include "../../drivers/timer.h"
 #include <stdint.h>
 
 struct idt_entry {
@@ -64,6 +65,7 @@ void isr_handler(uint64_t vector, uint64_t err, uint64_t rip, uint64_t cs, uint6
         return;
     }
     if (vector == 32) { // IRQ0 timer
+        timer_tick();
         pic_eoi(0);
         return;
     }

@@ -777,7 +777,7 @@ static void show_help(void){
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
     terminal_write("  systeminfo        show detailed CPU and RAM info\n");
-    terminal_write("  monitor           compact CPU/RAM/disk monitor\n");
+    terminal_write("  monitor | htop    live CPU/RAM/disk monitor (q exits)\n");
     terminal_write("  font [SIZE|FACE]  change session font\n");
     terminal_write("  snake             start the Snake game\n");
     terminal_write("  mouse             show PS/2 and USB mouse state\n");

@@ -4,6 +4,7 @@
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/mouse/usb_mouse.h"
+#include "../drivers/timer.h"
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
@@ -86,7 +87,6 @@ void userspace_run(void){
         char c;
         while(keyboard_try_getc(&c)) terminal_handle_key(c);
 
-        __asm__ volatile("pause");
-        for(volatile uint32_t i=0;i<10000;i++) __asm__ volatile("nop");
+        timer_sleep(1);
     }
 }

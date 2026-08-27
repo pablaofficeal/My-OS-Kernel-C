@@ -6,6 +6,7 @@
 #include "../drivers/fb.h"
 #include "../drivers/serial.h"
 #include "../drivers/pic.h"
+#include "../drivers/timer.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/storage/ahci.h"
 #include "../drivers/usb/xhci.h"
@@ -189,6 +190,8 @@ void _start(void) {
     klog(KLOG_INFO, "Initializing PS/2 mouse...");
     ps2_mouse_init();
     klog(KLOG_OK, "PS/2 mouse ready (IRQ12)");
+
+    timer_init(1000);
 
     klog(KLOG_INFO, "Enabling interrupts...");
     __asm__ volatile("cli");

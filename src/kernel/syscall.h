@@ -35,13 +35,14 @@
 struct cpu_monitor_info {
     char name[CPU_MONITOR_NAME_CAPACITY];
     uint32_t logical_processors;
-    uint32_t reserved;
+    uint32_t usage_percent;
     uint64_t frequency_hz;
     uint64_t uptime_ms;
 };
 
 struct memory_monitor_info {
     uint64_t total_bytes;
+    uint64_t used_bytes;
     uint64_t available_bytes;
     uint64_t framebuffer_bytes;
 };

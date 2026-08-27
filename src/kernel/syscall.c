@@ -10,6 +10,7 @@
 #include "../drivers/storage/storage_probe.h"
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
+#include "../drivers/timer.h"
 #include "../fs/fat32.h"
 #include "system_info.h"
 #include "../lib/string.h"
@@ -154,6 +155,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             memset(info,0,sizeof(*info));
             strncpy(info->name,system_info_cpu_name(),sizeof(info->name)-1);
             info->logical_processors=system_info_logical_processors();
+            info->usage_percent=system_info_cpu_usage_percent();
             info->frequency_hz=system_info_tsc_frequency_hz();
             info->uptime_ms=system_info_uptime_ms();
             return 0;
@@ -161,8 +163,10 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_MEMORY_INFO: {
             struct memory_monitor_info *info=(struct memory_monitor_info*)(uintptr_t)a1;
             if(!info) return -1;
-            info->total_bytes=system_info_usable_ram_bytes();
+            info->total_bytes=system_info_total_ram_bytes();
             info->available_bytes=system_info_usable_ram_bytes();
+            info->used_bytes=info->total_bytes>info->available_bytes
+                ? info->total_bytes-info->available_bytes : 0;
             info->framebuffer_bytes=gop_get_framebuffer_size_bytes();
             return 0;
         }
@@ -184,7 +188,8 @@ int64_t syscall_handler(struct syscall_regs *r){
             gop_write("[SYSCALL] exit\n");
             for(;;) __asm__ volatile("cli; hlt");
         case SYS_SLEEP:
-            for(volatile uint64_t i=0;i<a1*1000000ULL;i++) __asm__ volatile("nop");
+            if(a1>UINT32_MAX) return -1;
+            timer_sleep((uint32_t)a1);
             return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
