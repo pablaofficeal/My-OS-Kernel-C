@@ -587,7 +587,7 @@ static bool installer_create_dir(const char *path){
 
 static void run_installer(const char *args){
     terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
-    struct storage_device_info devs[20];
+    static struct storage_device_info devs[20];
     int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
     if(cnt<=0){
         terminal_write("No disks found. Run 'disks' to diagnose.\n");
@@ -681,7 +681,7 @@ static void run_installer(const char *args){
     installer_create_dir("/etc");
     installer_create_dir("/home");
     installer_create_dir("/purec");
-    char cfg[1024];
+    static char cfg[1024];
     // /purec/install.cfg
     memset(cfg,0,sizeof(cfg));
     strcpy(cfg,"# PureC OS Install Config\n");
