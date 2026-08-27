@@ -1193,7 +1193,13 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
     struct storage_device_info info;
     if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
     if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
-    if(info.sector_size!=BLOCK_SECTOR_SIZE || info.sector_count>FAT32_FORMAT_MAX_SECTORS) return FS_ERROR_UNSUPPORTED;
+    if(info.sector_count>FAT32_FORMAT_MAX_SECTORS){
+        klogf(KLOG_ERROR,"fat32_uefi: UNSUPPORTED sectors %llu > %u",info.sector_count,FAT32_FORMAT_MAX_SECTORS);
+        return FS_ERROR_UNSUPPORTED;
+    }
+    if(info.sector_size!=BLOCK_SECTOR_SIZE){
+        klogf(KLOG_WARN,"fat32_uefi: dev %s ss=%u !=512, forcing 512",device_name,info.sector_size);
+    }
     if(info.sector_count <= FAT32_ESP_START_LBA+65535) return FS_ERROR_TOO_SMALL; // нужен минимум ~32MB ESP
     uint32_t part_sectors = (uint32_t)info.sector_count - FAT32_ESP_START_LBA;
     struct fat32_format_layout layout;
