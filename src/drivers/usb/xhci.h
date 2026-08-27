@@ -34,6 +34,7 @@ struct xhci_probe_stats {
     uint32_t connected_ports;
     uint32_t addressed_devices;
     uint32_t mass_storage_devices;
+    uint32_t hid_mice;
     uint32_t failures;
     uint32_t last_stage;
     uint32_t last_error;
@@ -56,3 +57,4 @@ bool xhci_read_sector(uint32_t lba, void *buffer);
 bool xhci_write_sector(uint32_t lba, const void *buffer);
 const char *xhci_device_name(void);
 void xhci_get_probe_stats(struct xhci_probe_stats *stats);
+void xhci_poll_mouse(void);

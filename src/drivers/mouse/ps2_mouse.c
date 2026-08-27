@@ -181,16 +181,7 @@ static bool process_mouse_byte(uint8_t data){
         uint8_t b0 = packet[0];
         int8_t dx = (int8_t)packet[1];
         int8_t dy = (int8_t)packet[2];
-        state.dx = dx;
-        state.dy = -dy;
-        state.x += dx;
-        state.y += -dy;
-        if(state.x<0) state.x=0;
-        if(state.y<0) state.y=0;
-        if(state.x >= bound_w - CURS_W) state.x = bound_w - CURS_W -1;
-        if(state.y >= bound_h - CURS_H) state.y = bound_h - CURS_H -1;
-        state.buttons = b0 & 0x07;
-        state.has_data = true;
+        mouse_handle_relative(b0&0x07,dx,(int8_t)-dy);
         debug_state.packet_count++;
 
         if(!packet_seen){
@@ -202,6 +193,23 @@ static bool process_mouse_byte(uint8_t data){
         return true;
     }
     return false;
+}
+
+void mouse_handle_relative(uint8_t buttons, int8_t dx, int8_t dy){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
+    state.dx=dx;
+    state.dy=dy;
+    state.x+=dx;
+    state.y+=dy;
+    if(state.x<0) state.x=0;
+    if(state.y<0) state.y=0;
+    if(state.x>=bound_w-CURS_W) state.x=bound_w-CURS_W-1;
+    if(state.y>=bound_h-CURS_H) state.y=bound_h-CURS_H-1;
+    state.buttons=buttons&0x07;
+    state.has_data=true;
+    refresh_mouse_ui();
+    if(flags&(1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
 
 static void refresh_mouse_ui(void){
@@ -219,7 +227,7 @@ void ps2_mouse_handler(void){
     // A keyboard byte must remain available for keyboard_poll().
     if((status & (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA))
         == (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA)){
-        if(process_mouse_byte(inb(PS2_DATA))) refresh_mouse_ui();
+        (void)process_mouse_byte(inb(PS2_DATA));
     }
 }
 
@@ -233,7 +241,7 @@ void ps2_mouse_poll(void){
     if((status & (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA))
         == (PS2_STATUS_OUTPUT_FULL | PS2_STATUS_AUX_DATA)){
         debug_state.poll_count++;
-        if(process_mouse_byte(inb(PS2_DATA))) refresh_mouse_ui();
+        (void)process_mouse_byte(inb(PS2_DATA));
     }
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
 }

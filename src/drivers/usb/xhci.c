@@ -5,6 +5,7 @@
 #include "../../arch/x86_64/mmio.h"
 #include "../../kernel/klog.h"
 #include "../../lib/string.h"
+#include "../mouse/usb_mouse.h"
 
 #define XHCI_DEVICE_LIMIT       4
 #define XHCI_RING_ENTRIES       64
@@ -45,6 +46,13 @@
 #define USB_DESCRIPTOR_ENDPOINT     5
 #define USB_CLASS_MASS_STORAGE      8
 #define USB_PROTOCOL_BULK_ONLY      0x50
+#define USB_CLASS_HID               3
+#define USB_HID_SUBCLASS_BOOT       1
+#define USB_HID_PROTOCOL_MOUSE      2
+
+#define XHCI_DEVICE_DISABLED        0
+#define XHCI_DEVICE_STORAGE         1
+#define XHCI_DEVICE_MOUSE           2
 
 #define SCSI_TEST_UNIT_READY 0x00
 #define SCSI_INQUIRY         0x12
@@ -98,6 +106,10 @@ struct xhci_device {
     uint8_t bulk_out_dci;
     uint16_t bulk_in_packet;
     uint16_t bulk_out_packet;
+    uint8_t kind;
+    uint8_t interrupt_in_dci;
+    uint16_t interrupt_packet;
+    bool interrupt_pending;
     bool sync_cache_supported;
 };
 
@@ -123,6 +135,7 @@ static struct xhci_trb bulk_out_trbs[XHCI_DEVICE_LIMIT][XHCI_RING_ENTRIES]
     __attribute__((aligned(64)));
 static uint8_t descriptor_buffer[512] __attribute__((aligned(64)));
 static uint8_t transfer_buffer[512] __attribute__((aligned(64)));
+static uint8_t mouse_reports[XHCI_DEVICE_LIMIT][8] __attribute__((aligned(64)));
 static struct usb_cbw command_block __attribute__((aligned(64)));
 static struct usb_csw command_status __attribute__((aligned(64)));
 
@@ -142,6 +155,7 @@ static uint8_t event_cycle;
 static uint8_t context_size;
 static uint8_t controller_number;
 static uint8_t device_count;
+static uint8_t slot_count;
 static uint8_t selected_device=XHCI_NO_DEVICE;
 static uint32_t bot_tag=1;
 static bool mapping_ready;
@@ -232,6 +246,30 @@ static bool wait_register(volatile uint32_t *reg, uint32_t mask, bool set){
     return false;
 }
 
+static bool dispatch_mouse_event(const struct xhci_trb *event){
+    uint8_t slot=(uint8_t)(event->control>>24);
+    uint8_t endpoint=(uint8_t)((event->control>>16)&0x1F);
+    for(uint8_t index=0;index<slot_count;index++){
+        struct xhci_device *device=&devices[index];
+        if(device->kind!=XHCI_DEVICE_MOUSE || device->slot_id!=slot
+           || device->interrupt_in_dci!=endpoint) continue;
+        device->interrupt_pending=false;
+        uint8_t code=(uint8_t)(event->status>>24);
+        uint32_t requested=device->interrupt_packet;
+        if(requested>sizeof(mouse_reports[index])) requested=sizeof(mouse_reports[index]);
+        uint32_t remaining=event->status&0xFFFFFF;
+        uint32_t received=remaining<requested ? requested-remaining : requested;
+        if(code==XHCI_COMPLETION_SUCCESS || code==XHCI_COMPLETION_SHORT){
+            if(received>=3) usb_mouse_report(mouse_reports[index],received);
+        } else {
+            device->kind=XHCI_DEVICE_DISABLED;
+            usb_mouse_detach();
+        }
+        return true;
+    }
+    return false;
+}
+
 static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
                        struct xhci_trb *result){
     volatile uint32_t *interrupter=runtime+0x20/4;
@@ -254,6 +292,12 @@ static bool next_event(uint8_t wanted_type, uint8_t slot, uint8_t endpoint,
             uint64_t dequeue=physical_address(&event_trbs[event_index]);
             interrupter[6]=(uint32_t)dequeue|8;
             interrupter[7]=(uint32_t)(dequeue>>32);
+            if(type==XHCI_EVENT_TRANSFER
+               && dispatch_mouse_event(&copy)
+               && (type!=wanted_type || (slot && event_slot!=slot)
+                   || (endpoint && event_endpoint!=endpoint))){
+                continue;
+            }
             // raw event скрыт от экрана загрузки, виден в dmesg, но не флудит на GOP
             if(type==wanted_type && (!slot || event_slot==slot)
                && (!endpoint || event_endpoint==endpoint)){
@@ -525,6 +569,37 @@ static bool find_mass_storage_interface(uint16_t total_length,
     return *configuration && *bulk_in && *bulk_out;
 }
 
+static bool find_boot_mouse_interface(uint16_t total_length,
+                                      uint8_t *configuration,
+                                      uint8_t *interface_number,
+                                      uint8_t *interrupt_in,
+                                      uint16_t *packet_size,
+                                      uint8_t *interval){
+    bool mouse_interface=false;
+    for(uint16_t offset=0;offset+2<=total_length;){
+        uint8_t length=descriptor_buffer[offset];
+        uint8_t type=descriptor_buffer[offset+1];
+        if(length<2 || offset+length>total_length) return false;
+        if(type==USB_DESCRIPTOR_CONFIGURATION && length>=9){
+            *configuration=descriptor_buffer[offset+5];
+        } else if(type==USB_DESCRIPTOR_INTERFACE && length>=9){
+            mouse_interface=descriptor_buffer[offset+5]==USB_CLASS_HID
+                && descriptor_buffer[offset+6]==USB_HID_SUBCLASS_BOOT
+                && descriptor_buffer[offset+7]==USB_HID_PROTOCOL_MOUSE;
+            if(mouse_interface) *interface_number=descriptor_buffer[offset+2];
+        } else if(type==USB_DESCRIPTOR_ENDPOINT && length>=7
+                  && mouse_interface && (descriptor_buffer[offset+3]&3)==3
+                  && (descriptor_buffer[offset+2]&0x80)){
+            *interrupt_in=descriptor_buffer[offset+2];
+            *packet_size=(uint16_t)descriptor_buffer[offset+4]
+                |((uint16_t)descriptor_buffer[offset+5]<<8);
+            *interval=descriptor_buffer[offset+6];
+        }
+        offset+=length;
+    }
+    return *configuration && *interrupt_in && *packet_size;
+}
+
 static void configure_endpoint_context(uint32_t *endpoint, uint8_t type,
                                        uint16_t max_packet,
                                        struct xhci_ring_state *ring){
@@ -565,6 +640,54 @@ static bool configure_mass_storage(uint8_t index, uint8_t configuration,
     devices[index].bulk_out_dci=out_dci;
     devices[index].bulk_in_packet=bulk_in_packet;
     devices[index].bulk_out_packet=bulk_out_packet;
+    return true;
+}
+
+static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
+                                 uint8_t interface_number,
+                                 uint8_t interrupt_in, uint16_t packet_size,
+                                 uint8_t interval, uint8_t speed){
+    uint8_t dci=(uint8_t)((interrupt_in&0x0F)*2+1);
+    packet_size&=0x7FF;
+    if(dci<3 || dci>=32 || packet_size==0) return false;
+
+    initialize_ring(&bulk_in_rings[index],bulk_in_trbs[index]);
+    uint8_t *input=input_contexts[index];
+    uint8_t *output=output_contexts[index];
+    memset(input,0,4096);
+    context_at(input,0)[1]=(1U<<0)|(1U<<dci);
+    memcpy(context_at(input,1),context_at(output,0),context_size);
+    uint32_t *slot=context_at(input,1);
+    slot[0]=(slot[0]&~(0x1FU<<27))|((uint32_t)dci<<27);
+    uint32_t *endpoint=context_at(input,(uint8_t)(dci+1));
+    configure_endpoint_context(endpoint,7,packet_size,&bulk_in_rings[index]);
+    uint8_t xhci_interval;
+    if(speed<=2){
+        uint16_t frames=interval ? interval : 1;
+        xhci_interval=3;
+        while(frames>1 && xhci_interval<10){
+            frames=(uint16_t)((frames+1)/2);
+            xhci_interval++;
+        }
+    } else {
+        if(interval<1) interval=1;
+        if(interval>16) interval=16;
+        xhci_interval=(uint8_t)(interval-1);
+    }
+    endpoint[0]=(uint32_t)xhci_interval<<16;
+    uint16_t report_length=packet_size<8 ? packet_size : 8;
+    endpoint[4]=(uint32_t)report_length|((uint32_t)packet_size<<16);
+    if(!submit_command(physical_address(input),XHCI_TRB_CONFIGURE_EP,
+                       devices[index].slot_id,0)) return false;
+    if(!control_transfer(index,0,9,configuration,0,0,0,false)) return false;
+    if(!control_transfer(index,0x21,11,0,interface_number,0,0,false)){
+        klogf(KLOG_WARN,"xhci%u: HID mouse rejected SET_PROTOCOL boot",controller_number);
+    }
+    (void)control_transfer(index,0x21,10,0,interface_number,0,0,false);
+    devices[index].kind=XHCI_DEVICE_MOUSE;
+    devices[index].interrupt_in_dci=dci;
+    devices[index].interrupt_packet=packet_size;
+    devices[index].interrupt_pending=false;
     return true;
 }
 
@@ -678,7 +801,7 @@ static bool identify_mass_storage(uint8_t index, uint32_t name_index,
 }
 
 static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
-    uint8_t index=device_count;
+    uint8_t index=slot_count;
     memset(&devices[index],0,sizeof(devices[index]));
     probe_stats.last_stage=3;
     klogf(KLOG_INFO,"xhci%u: enumerate port%u -> slot alloc index=%u speed=%u",controller_number,port,index,speed);
@@ -739,33 +862,54 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     }
     uint8_t configuration=0,interface_number=0,bulk_in=0,bulk_out=0;
     uint16_t bulk_in_packet=0,bulk_out_packet=0;
-    if(!find_mass_storage_interface(total,&configuration,&interface_number,
-                                    &bulk_in,&bulk_in_packet,
-                                    &bulk_out,&bulk_out_packet)){
-        probe_stats.last_error=XHCI_PROBE_MASS_STORAGE_INTERFACE;
-        klogf(KLOG_ERROR,"xhci%u: no BOT mass-storage interface found port %u total=%u",controller_number,port,total);
-        return false;
+    if(find_mass_storage_interface(total,&configuration,&interface_number,
+                                   &bulk_in,&bulk_in_packet,
+                                   &bulk_out,&bulk_out_packet)){
+        klogf(KLOG_INFO,"xhci%u: BOT interface cfg=%u if=%u bulkIn=0x%02x pkt=%u bulkOut=0x%02x pkt=%u",controller_number,configuration,interface_number,bulk_in,bulk_in_packet,bulk_out,bulk_out_packet);
+        probe_stats.last_stage=5;
+        if(!configure_mass_storage(index,configuration,bulk_in,bulk_in_packet,
+                                   bulk_out,bulk_out_packet)){
+            probe_stats.last_error=XHCI_PROBE_CONFIGURE_ENDPOINT;
+            return false;
+        }
+        devices[index].kind=XHCI_DEVICE_STORAGE;
+        if(!identify_mass_storage(index,name_index,port,vendor,product)){
+            probe_stats.last_error=XHCI_PROBE_SCSI;
+            return false;
+        }
+        slot_count++;
+        device_count++;
+        probe_stats.mass_storage_devices++;
+        probe_stats.last_stage=7;
+        probe_stats.last_error=XHCI_PROBE_OK;
+        klogf(KLOG_OK,"xhci%u: USB MSC ready %s port%u",controller_number,
+              devices[index].info.name,port);
+        return true;
     }
-    klogf(KLOG_INFO,"xhci%u: BOT interface cfg=%u if=%u bulkIn=0x%02x pkt=%u bulkOut=0x%02x pkt=%u",controller_number,configuration,interface_number,bulk_in,bulk_in_packet,bulk_out,bulk_out_packet);
-    probe_stats.last_stage=5;
-    (void)interface_number;
-    if(!configure_mass_storage(index,configuration,bulk_in,bulk_in_packet,
-                               bulk_out,bulk_out_packet)){
-        probe_stats.last_error=XHCI_PROBE_CONFIGURE_ENDPOINT;
-        klogf(KLOG_ERROR,"xhci%u: configure endpoints failed port %u cfg %u",controller_number,port,configuration);
-        return false;
+
+    uint8_t interrupt_in=0,interval=0;
+    uint16_t interrupt_packet=0;
+    configuration=0;
+    interface_number=0;
+    if(find_boot_mouse_interface(total,&configuration,&interface_number,
+                                 &interrupt_in,&interrupt_packet,&interval)){
+        if(!configure_boot_mouse(index,configuration,interface_number,
+                                 interrupt_in,interrupt_packet,interval,speed)){
+            probe_stats.last_error=XHCI_PROBE_CONFIGURE_ENDPOINT;
+            return false;
+        }
+        slot_count++;
+        probe_stats.hid_mice++;
+        probe_stats.last_stage=7;
+        probe_stats.last_error=XHCI_PROBE_OK;
+        usb_mouse_attach(vendor,product,port);
+        return true;
     }
-    klogf(KLOG_INFO,"xhci%u: endpoints configured port %u, probing SCSI",controller_number,port);
-    if(!identify_mass_storage(index,name_index,port,vendor,product)){
-        probe_stats.last_error=XHCI_PROBE_SCSI;
-        klogf(KLOG_ERROR,"xhci%u: SCSI probe failed port %u vid 0x%04x pid 0x%04x",controller_number,port,vendor,product);
-        return false;
-    }
-    device_count++;
-    probe_stats.mass_storage_devices++;
-    probe_stats.last_stage=7;
+
+    slot_count++;
     probe_stats.last_error=XHCI_PROBE_OK;
-    klogf(KLOG_OK,"xhci%u: USB MSC ready %s port%u vid 0x%04x pid 0x%04x sectors %llu",controller_number,devices[index].info.name,port,vendor,product,devices[index].info.sector_count);
+    klogf(KLOG_INFO,"xhci%u: port%u device class is not MSC or HID boot mouse",
+          controller_number,port);
     return true;
 }
 
@@ -925,7 +1069,8 @@ static bool initialize_controller(const struct storage_controller_info *controll
         |physical_address(input_contexts)|physical_address(output_contexts)
         |physical_address(control_trbs)|physical_address(bulk_in_trbs)
         |physical_address(bulk_out_trbs)|physical_address(descriptor_buffer)
-        |physical_address(transfer_buffer)|physical_address(&command_block)
+        |physical_address(transfer_buffer)|physical_address(mouse_reports)
+        |physical_address(&command_block)
         |physical_address(&command_status)|physical_address(&event_segment)
         |physical_address(scratchpad_pointers)|physical_address(scratchpad_pages);
     klogf(KLOG_INFO,"xhci%u: DMA addrs dcbaa=0x%llx cmd=0x%llx evt=0x%llx inCtx=0x%llx outCtx=0x%llx high32=0x%08x 64bitCap=%u",
@@ -1035,7 +1180,7 @@ static bool initialize_controller(const struct storage_controller_info *controll
         }
     }
 
-    for(uint8_t port=1;port<=max_ports && device_count<XHCI_DEVICE_LIMIT;port++){
+    for(uint8_t port=1;port<=max_ports && slot_count<XHCI_DEVICE_LIMIT;port++){
         uint8_t speed;
         klogf(KLOG_INFO,"xhci%u: probing port %u (%u/%u)",controller_number,port,port,max_ports);
         if(!reset_port(port,&speed)){
@@ -1065,7 +1210,7 @@ static bool initialize_controller(const struct storage_controller_info *controll
             xhci_log_port(p,raw,"scan-post");
         }
     } else {
-        klogf(KLOG_OK,"xhci%u: scan done connected=%u addressed=%u disks=%u failures=%u",controller_number,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.mass_storage_devices,probe_stats.failures);
+        klogf(KLOG_OK,"xhci%u: scan done connected=%u addressed=%u disks=%u mice=%u failures=%u",controller_number,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.mass_storage_devices,probe_stats.hid_mice,probe_stats.failures);
     }
     return true;
 }
@@ -1100,7 +1245,7 @@ bool xhci_init(uint32_t linux_name_base){
             probe_stats.failures++;
             continue;
         }
-        if(device_count) break;
+        break;
     }
     klog_set_screen_enabled(was_screen);
     // Краткий итог - одна строка на экране загрузки, детали - в dmesg/usbscan
@@ -1109,7 +1254,7 @@ bool xhci_init(uint32_t linux_name_base){
     } else if(device_count==0 && probe_stats.connected_ports==0){
         klogf(KLOG_WARN,"xhci: controllers=%u ports=%u connected=0 disks=0 (детали в dmesg)",probe_stats.controllers,probe_stats.max_ports);
     } else {
-        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u disks=%u",probe_stats.controllers,probe_stats.connected_ports,device_count);
+        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u disks=%u mice=%u",probe_stats.controllers,probe_stats.connected_ports,device_count,probe_stats.hid_mice);
     }
     return device_count>0;
 }
@@ -1123,9 +1268,12 @@ bool xhci_rescan(uint32_t linux_name_base){
         return false;
     }
     selected_device=XHCI_NO_DEVICE;
+    slot_count=0;
+    device_count=0;
     probe_stats.connected_ports=0;
     probe_stats.addressed_devices=0;
     probe_stats.mass_storage_devices=0;
+    probe_stats.hid_mice=0;
     probe_stats.failures=0;
     probe_stats.last_stage=0;
     probe_stats.last_error=XHCI_PROBE_OK;
@@ -1155,7 +1303,7 @@ bool xhci_rescan(uint32_t linux_name_base){
             probe_stats.failures++;
             continue;
         }
-        if(device_count) break;
+        break;
     }
     klog_set_screen_enabled(was_screen);
     // краткий итог остаётся на экране userspace через syscall klog, но usbscan сам выводит детали
@@ -1163,23 +1311,78 @@ bool xhci_rescan(uint32_t linux_name_base){
     return device_count>0;
 }
 
+static void queue_mouse_report(uint8_t index){
+    struct xhci_device *device=&devices[index];
+    struct xhci_ring_state *ring=&bulk_in_rings[index];
+    uint32_t length=device->interrupt_packet;
+    if(length>sizeof(mouse_reports[index])) length=sizeof(mouse_reports[index]);
+    memset(mouse_reports[index],0,sizeof(mouse_reports[index]));
+    struct xhci_trb *trb=ring_next(ring);
+    uint64_t address=physical_address(mouse_reports[index]);
+    trb->parameter_low=(uint32_t)address;
+    trb->parameter_high=(uint32_t)(address>>32);
+    trb->status=length;
+    trb->control=(XHCI_TRB_NORMAL<<10)|(1U<<5)|ring->cycle;
+    __sync_synchronize();
+    device->interrupt_pending=true;
+    doorbells[device->slot_id]=device->interrupt_in_dci;
+}
+
+static bool poll_async_event(void){
+    volatile struct xhci_trb *event=&event_trbs[event_index];
+    if((event->control&1)!=event_cycle) return false;
+    __sync_synchronize();
+    struct xhci_trb copy=*event;
+    uint8_t type=(uint8_t)((copy.control>>10)&0x3F);
+    event_index++;
+    if(event_index==XHCI_EVENT_ENTRIES){ event_index=0; event_cycle^=1; }
+    uint64_t dequeue=physical_address(&event_trbs[event_index]);
+    volatile uint32_t *interrupter=runtime+0x20/4;
+    interrupter[6]=(uint32_t)dequeue|8;
+    interrupter[7]=(uint32_t)(dequeue>>32);
+    if(type==XHCI_EVENT_TRANSFER) (void)dispatch_mouse_event(&copy);
+    return true;
+}
+
+void xhci_poll_mouse(void){
+    if(!operational || !doorbells || !runtime) return;
+    for(uint16_t count=0;count<XHCI_EVENT_ENTRIES && poll_async_event();count++){}
+    for(uint8_t index=0;index<slot_count;index++){
+        if(devices[index].kind!=XHCI_DEVICE_MOUSE) continue;
+        if(!devices[index].interrupt_pending) queue_mouse_report(index);
+    }
+}
+
 uint32_t xhci_device_count(void){ return device_count; }
+
+static uint8_t storage_device_index(uint32_t storage_index){
+    uint32_t current=0;
+    for(uint8_t index=0;index<slot_count;index++){
+        if(devices[index].kind!=XHCI_DEVICE_STORAGE) continue;
+        if(current==storage_index) return index;
+        current++;
+    }
+    return XHCI_NO_DEVICE;
+}
 
 bool xhci_get_device_info(uint32_t index, struct storage_device_info *info){
     if(!info || index>=device_count) return false;
-    *info=devices[index].info;
+    uint8_t raw_index=storage_device_index(index);
+    if(raw_index==XHCI_NO_DEVICE) return false;
+    *info=devices[raw_index].info;
     return true;
 }
 
 bool xhci_select_device(uint32_t index){
     if(index>=device_count) return false;
-    selected_device=(uint8_t)index;
-    return true;
+    selected_device=storage_device_index(index);
+    return selected_device!=XHCI_NO_DEVICE;
 }
 
 static bool scsi_sector_command(uint8_t operation, uint32_t lba, void *buffer,
                                 bool data_in){
-    if(selected_device>=device_count || !buffer) return false;
+    if(selected_device>=slot_count
+       || devices[selected_device].kind!=XHCI_DEVICE_STORAGE || !buffer) return false;
     struct xhci_device *device=&devices[selected_device];
     if(lba>=device->info.sector_count) return false;
     uint8_t command[16];
@@ -1195,7 +1398,9 @@ bool xhci_read_sector(uint32_t lba, void *buffer){
 }
 
 bool xhci_write_sector(uint32_t lba, const void *buffer){
-    if(selected_device>=device_count || !devices[selected_device].info.writable){
+    if(selected_device>=slot_count
+       || devices[selected_device].kind!=XHCI_DEVICE_STORAGE
+       || !devices[selected_device].info.writable){
         return false;
     }
     if(!scsi_sector_command(SCSI_WRITE10,lba,(void*)buffer,false)) return false;
@@ -1212,7 +1417,9 @@ bool xhci_write_sector(uint32_t lba, const void *buffer){
 }
 
 const char *xhci_device_name(void){
-    return selected_device<device_count ? devices[selected_device].info.name : "none";
+    return selected_device<slot_count
+        && devices[selected_device].kind==XHCI_DEVICE_STORAGE
+        ? devices[selected_device].info.name : "none";
 }
 
 void xhci_get_probe_stats(struct xhci_probe_stats *stats){

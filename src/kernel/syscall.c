@@ -11,6 +11,8 @@
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
 #include "../fs/fat32.h"
+#include "system_info.h"
+#include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -115,6 +117,7 @@ int64_t syscall_handler(struct syscall_regs *r){
                 status->xhci_connected_ports=xhci_stats.connected_ports;
                 status->xhci_addressed_devices=xhci_stats.addressed_devices;
                 status->xhci_disks=xhci_stats.mass_storage_devices;
+                status->xhci_hid_mice=xhci_stats.hid_mice;
                 status->xhci_failures=xhci_stats.failures;
                 status->xhci_stage=xhci_stats.last_stage;
                 status->xhci_error=xhci_stats.last_error;
@@ -144,6 +147,37 @@ int64_t syscall_handler(struct syscall_regs *r){
                   ehci_stats.last_stage);
             if(count && !fat32_is_mounted()) (void)fat32_init();
             return count;
+        }
+        case SYS_CPU_INFO: {
+            struct cpu_monitor_info *info=(struct cpu_monitor_info*)(uintptr_t)a1;
+            if(!info) return -1;
+            memset(info,0,sizeof(*info));
+            strncpy(info->name,system_info_cpu_name(),sizeof(info->name)-1);
+            info->logical_processors=system_info_logical_processors();
+            info->frequency_hz=system_info_tsc_frequency_hz();
+            info->uptime_ms=system_info_uptime_ms();
+            return 0;
+        }
+        case SYS_MEMORY_INFO: {
+            struct memory_monitor_info *info=(struct memory_monitor_info*)(uintptr_t)a1;
+            if(!info) return -1;
+            info->total_bytes=system_info_usable_ram_bytes();
+            info->available_bytes=system_info_usable_ram_bytes();
+            info->framebuffer_bytes=gop_get_framebuffer_size_bytes();
+            return 0;
+        }
+        case SYS_DISK_STATS: {
+            struct disk_monitor_info *info=(struct disk_monitor_info*)(uintptr_t)a1;
+            if(!info) return -1;
+            memset(info,0,sizeof(*info));
+            info->device_count=block_device_count();
+            for(uint32_t index=0;index<info->device_count;index++){
+                struct storage_device_info device;
+                if(!block_device_get_info(index,&device)) continue;
+                if(device.operational) info->operational_count++;
+                info->total_bytes+=device.sector_count*device.sector_size;
+            }
+            return 0;
         }
         case SYS_EXIT:
             serial_write_string("[SYSCALL] exit\n");

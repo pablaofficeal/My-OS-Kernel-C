@@ -3,6 +3,7 @@
 #include "../drivers/gop.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/mouse/usb_mouse.h"
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
@@ -79,6 +80,7 @@ void userspace_init(void){
 void userspace_run(void){
     for(;;){
         ps2_mouse_poll();
+        usb_mouse_poll();
         keyboard_poll();
 
         char c;

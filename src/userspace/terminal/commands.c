@@ -6,6 +6,7 @@
 #include "../userspace.h"
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
+#include "../../drivers/mouse/usb_mouse.h"
 #include "../../drivers/storage/storage_types.h"
 #include "../../drivers/usb/xhci.h"
 #include "../../drivers/keyboard.h"
@@ -17,6 +18,7 @@
 #include "../../lib/string.h"
 #include "../games/snake.h"
 #include "../installer/installer.h"
+#include "../monitor/monitor.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -348,11 +350,11 @@ static void rescan_usb(void){
         return;
     }
     terminal_printf("usbscan: %d USB storage device(s) ready\n",(int)count);
-    terminal_printf("xhci: controllers=%u ports=%u scratchpads=%u connected=%u addressed=%u disks=%u stage=%u\n",
+    terminal_printf("xhci: controllers=%u ports=%u scratchpads=%u connected=%u addressed=%u disks=%u mice=%u stage=%u\n",
                     status.xhci_controllers,status.xhci_max_ports,
                     status.xhci_scratchpad_count,
                     status.xhci_connected_ports,status.xhci_addressed_devices,
-                    status.xhci_disks,status.xhci_stage);
+                    status.xhci_disks,status.xhci_hid_mice,status.xhci_stage);
     terminal_printf("xhci: error=%u (%s) usbsts=0x%x\n",
                     status.xhci_error,xhci_error_name(status.xhci_error),
                     status.xhci_usb_status);
@@ -775,9 +777,10 @@ static void show_help(void){
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
     terminal_write("  systeminfo        show detailed CPU and RAM info\n");
+    terminal_write("  monitor           compact CPU/RAM/disk monitor\n");
     terminal_write("  font [SIZE|FACE]  change session font\n");
     terminal_write("  snake             start the Snake game\n");
-    terminal_write("  mouse             show PS/2 mouse state\n");
+    terminal_write("  mouse             show PS/2 and USB mouse state\n");
     terminal_write("  debug [on|off]    control mouse debug panel\n");
     terminal_write("  reboot            reboot through the 8042\n");
     terminal_write("  halt              stop the CPU\n");
@@ -786,11 +789,16 @@ static void show_help(void){
 static void show_mouse(void){
     struct mouse_state state=mouse_get_state();
     struct mouse_debug_state debug=mouse_get_debug_state();
+    struct usb_mouse_info usb=usb_mouse_get_info();
     terminal_printf("mouse: x=%d y=%d dx=%d dy=%d buttons=0x%x\n",
                     state.x,state.y,state.dx,state.dy,(unsigned int)state.buttons);
     terminal_printf("driver: initialized=%u enabled=%u irq=%u poll=%u packets=%u\n",
                     (unsigned int)debug.initialized,(unsigned int)debug.enabled,debug.irq_count,
                     debug.poll_count,debug.packet_count);
+    terminal_printf("usb-hid: connected=%u port=%u id=%x:%x reports=%u\n",
+                    (unsigned int)usb.connected,(unsigned int)usb.port,
+                    (unsigned int)usb.vendor_id,(unsigned int)usb.product_id,
+                    usb.reports);
 }
 
 static void reboot_system(void){
@@ -864,6 +872,8 @@ void commands_execute(const char *line){
                         terminal_get_font_size(),terminal_get_font_size());
     } else if(strcmp(command,"systeminfo")==0){
         show_systeminfo();
+    } else if(strcmp(command,"monitor")==0 || strcmp(command,"htop")==0){
+        monitor_run();
     } else if(strcmp(command,"font")==0){
         configure_font(arguments);
     } else if(strcmp(command,"snake")==0){
