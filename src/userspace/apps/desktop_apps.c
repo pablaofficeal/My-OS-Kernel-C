@@ -6,17 +6,38 @@
 #include "../../drivers/gop.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 
+#define APP_COUNT 3
 #define WINDOW_WIDTH 360
 #define WINDOW_HEIGHT 270
 #define TITLE_BAR_HEIGHT 30
 
-static enum desktop_app active_app;
-static bool visible;
-static bool dragging;
-static uint32_t window_x = 180;
-static uint32_t window_y = 90;
+struct app_window {
+    uint32_t x;
+    uint32_t y;
+    bool visible;
+};
+
+static struct app_window windows[APP_COUNT] = {
+    {160, 70, false},
+    {200, 100, false},
+    {240, 130, false}
+};
+static uint8_t z_order[APP_COUNT] = {
+    DESKTOP_APP_CLOCK,
+    DESKTOP_APP_CALCULATOR,
+    DESKTOP_APP_CALENDAR
+};
+static int8_t focused_app = -1;
+static int8_t dragged_app = -1;
 static int32_t drag_offset_x;
 static int32_t drag_offset_y;
+static uint16_t last_calendar_year;
+static uint8_t last_calendar_month;
+static uint8_t last_calendar_day;
+
+static bool valid_app(int32_t app) {
+    return app >= 0 && app < APP_COUNT;
+}
 
 static bool point_inside(
     int32_t point_x,
@@ -32,8 +53,8 @@ static bool point_inside(
         && point_y < (int32_t)(top + height);
 }
 
-static const char *active_app_title(void) {
-    switch (active_app) {
+static const char *app_title(enum desktop_app app) {
+    switch (app) {
         case DESKTOP_APP_CLOCK:
             return "Clock";
         case DESKTOP_APP_CALCULATOR:
@@ -45,74 +66,153 @@ static const char *active_app_title(void) {
     return "Application";
 }
 
-static void draw_window_frame(void) {
+static void draw_window_frame(enum desktop_app app) {
+    const struct app_window *window = &windows[app];
+    uint32_t title_color = focused_app == (int8_t)app
+        ? 0x89B4FA
+        : 0x585B70;
+
     gop_draw_rect(
-        window_x + 5,
-        window_y + 5,
+        window->x + 5,
+        window->y + 5,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0x11111B
     );
     gop_draw_rect(
-        window_x,
-        window_y,
+        window->x,
+        window->y,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0x45475A
     );
     gop_draw_rect(
-        window_x + 1,
-        window_y + 1,
+        window->x + 1,
+        window->y + 1,
         WINDOW_WIDTH - 2,
         WINDOW_HEIGHT - 2,
         0x1E1E2E
     );
     gop_draw_rect(
-        window_x + 1,
-        window_y + 1,
+        window->x + 1,
+        window->y + 1,
         WINDOW_WIDTH - 2,
         TITLE_BAR_HEIGHT,
-        0x89B4FA
+        title_color
     );
     gop_draw_text_at(
-        window_x + 12,
-        window_y + 10,
-        active_app_title(),
+        window->x + 12,
+        window->y + 10,
+        app_title(app),
         0x1E1E2E,
-        0x89B4FA
+        title_color
     );
     gop_draw_rect(
-        window_x + WINDOW_WIDTH - 27,
-        window_y + 6,
+        window->x + WINDOW_WIDTH - 27,
+        window->y + 6,
         18,
         18,
         0xF38BA8
     );
     gop_draw_text_at(
-        window_x + WINDOW_WIDTH - 23,
-        window_y + 10,
+        window->x + WINDOW_WIDTH - 23,
+        window->y + 10,
         "x",
         0x1E1E2E,
         0xF38BA8
     );
 }
 
-static void draw_active_app(void) {
-    switch (active_app) {
+static void draw_app_content(enum desktop_app app) {
+    const struct app_window *window = &windows[app];
+
+    switch (app) {
         case DESKTOP_APP_CLOCK:
-            clock_app_draw(window_x, window_y);
+            clock_app_draw(window->x, window->y);
             break;
         case DESKTOP_APP_CALCULATOR:
-            calculator_app_draw(window_x, window_y);
+            calculator_app_draw(window->x, window->y);
             break;
         case DESKTOP_APP_CALENDAR:
-            calendar_app_draw(window_x, window_y);
+            calendar_app_draw(window->x, window->y);
             break;
     }
 }
 
-static void open_active_app(void) {
-    switch (active_app) {
+static void draw_window(enum desktop_app app) {
+    draw_window_frame(app);
+    draw_app_content(app);
+}
+
+static int8_t z_index_of(enum desktop_app app) {
+    for (int8_t index = 0; index < APP_COUNT; index++) {
+        if (z_order[index] == (uint8_t)app) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static bool bring_to_front(enum desktop_app app) {
+    int8_t current_index = z_index_of(app);
+
+    if (current_index < 0 || current_index == APP_COUNT - 1) {
+        return false;
+    }
+
+    for (int8_t index = current_index; index < APP_COUNT - 1; index++) {
+        z_order[index] = z_order[index + 1];
+    }
+    z_order[APP_COUNT - 1] = (uint8_t)app;
+    return true;
+}
+
+static int8_t top_window_at(int32_t point_x, int32_t point_y) {
+    for (int8_t index = APP_COUNT - 1; index >= 0; index--) {
+        enum desktop_app app = (enum desktop_app)z_order[index];
+        const struct app_window *window = &windows[app];
+
+        if (window->visible && point_inside(
+                point_x,
+                point_y,
+                window->x,
+                window->y,
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT)) {
+            return (int8_t)app;
+        }
+    }
+
+    return -1;
+}
+
+static int8_t top_visible_window(void) {
+    for (int8_t index = APP_COUNT - 1; index >= 0; index--) {
+        int8_t app = (int8_t)z_order[index];
+        if (windows[app].visible) {
+            return app;
+        }
+    }
+    return -1;
+}
+
+static void redraw_from_z_index(int8_t first_index) {
+    if (first_index < 0) {
+        return;
+    }
+
+    mouse_begin_framebuffer_update();
+    for (int8_t index = first_index; index < APP_COUNT; index++) {
+        enum desktop_app app = (enum desktop_app)z_order[index];
+        if (windows[app].visible) {
+            draw_window(app);
+        }
+    }
+    mouse_end_framebuffer_update();
+}
+
+static void open_app_state(enum desktop_app app) {
+    switch (app) {
         case DESKTOP_APP_CLOCK:
             clock_app_open();
             break;
@@ -125,8 +225,8 @@ static void open_active_app(void) {
     }
 }
 
-static bool handle_active_app_key(char key) {
-    switch (active_app) {
+static bool handle_app_key(enum desktop_app app, char key) {
+    switch (app) {
         case DESKTOP_APP_CLOCK:
             return clock_app_handle_key(key);
         case DESKTOP_APP_CALCULATOR:
@@ -138,8 +238,17 @@ static bool handle_active_app_key(char key) {
     return false;
 }
 
+static void remember_calendar_date(void) {
+    const struct desktop_datetime *datetime = datetime_service_get();
+
+    last_calendar_year = datetime->year;
+    last_calendar_month = datetime->month;
+    last_calendar_day = datetime->day;
+}
+
 void desktop_apps_init(void) {
     datetime_service_init();
+    remember_calendar_date();
 }
 
 void desktop_apps_save_time(void) {
@@ -147,13 +256,13 @@ void desktop_apps_save_time(void) {
 }
 
 void desktop_apps_draw(void) {
-    if (!visible) {
-        return;
-    }
-
     mouse_begin_framebuffer_update();
-    draw_window_frame();
-    draw_active_app();
+    for (int8_t index = 0; index < APP_COUNT; index++) {
+        enum desktop_app app = (enum desktop_app)z_order[index];
+        if (windows[app].visible) {
+            draw_window(app);
+        }
+    }
     mouse_end_framebuffer_update();
 }
 
@@ -162,34 +271,38 @@ void desktop_apps_open(
     uint32_t screen_width,
     uint32_t screen_height
 ) {
-    active_app = app;
-    visible = true;
-    dragging = false;
+    struct app_window *window;
+    bool was_visible;
 
-    if (window_x + WINDOW_WIDTH > screen_width) {
-        window_x = 10;
-    }
-    if (window_y + WINDOW_HEIGHT > screen_height) {
-        window_y = 34;
+    if (!valid_app(app)) {
+        return;
     }
 
-    open_active_app();
-    desktop_apps_draw();
+    window = &windows[app];
+    was_visible = window->visible;
+    window->visible = true;
+
+    if (window->x + WINDOW_WIDTH > screen_width) {
+        window->x = 10 + (uint32_t)app * 24;
+    }
+    if (window->y + WINDOW_HEIGHT > screen_height) {
+        window->y = 34 + (uint32_t)app * 24;
+    }
+
+    focused_app = (int8_t)app;
+    bring_to_front(app);
+    if (!was_visible) {
+        open_app_state(app);
+    }
+    redraw_from_z_index(z_index_of(app));
 }
 
 bool desktop_apps_is_visible(void) {
-    return visible;
+    return top_visible_window() >= 0;
 }
 
 bool desktop_apps_contains_point(int32_t point_x, int32_t point_y) {
-    return visible && point_inside(
-        point_x,
-        point_y,
-        window_x,
-        window_y,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT
-    );
+    return top_window_at(point_x, point_y) >= 0;
 }
 
 bool desktop_apps_handle_mouse(
@@ -202,45 +315,53 @@ bool desktop_apps_handle_mouse(
     uint32_t screen_height,
     bool *redraw_required
 ) {
-    bool captured;
+    int8_t target_app = top_window_at(point_x, point_y);
+    bool captured = dragged_app >= 0 || target_app >= 0;
 
     if (redraw_required != 0) {
         *redraw_required = false;
     }
-    if (!visible) {
-        return false;
-    }
 
-    captured = dragging || desktop_apps_contains_point(point_x, point_y);
+    if (pressed && target_app >= 0) {
+        enum desktop_app app = (enum desktop_app)target_app;
+        struct app_window *window = &windows[app];
 
-    if (pressed && point_inside(
-            point_x,
-            point_y,
-            window_x + WINDOW_WIDTH - 27,
-            window_y + 6,
-            18,
-            18)) {
-        visible = false;
-        dragging = false;
-        if (redraw_required != 0) {
+        focused_app = target_app;
+        if (bring_to_front(app) && redraw_required != 0) {
             *redraw_required = true;
         }
-        return true;
+
+        if (point_inside(
+                point_x,
+                point_y,
+                window->x + WINDOW_WIDTH - 27,
+                window->y + 6,
+                18,
+                18)) {
+            window->visible = false;
+            focused_app = top_visible_window();
+            dragged_app = -1;
+            if (redraw_required != 0) {
+                *redraw_required = true;
+            }
+            return true;
+        }
+
+        if (point_inside(
+                point_x,
+                point_y,
+                window->x,
+                window->y,
+                WINDOW_WIDTH,
+                TITLE_BAR_HEIGHT)) {
+            dragged_app = target_app;
+            drag_offset_x = point_x - (int32_t)window->x;
+            drag_offset_y = point_y - (int32_t)window->y;
+        }
     }
 
-    if (pressed && point_inside(
-            point_x,
-            point_y,
-            window_x,
-            window_y,
-            WINDOW_WIDTH,
-            TITLE_BAR_HEIGHT)) {
-        dragging = true;
-        drag_offset_x = point_x - (int32_t)window_x;
-        drag_offset_y = point_y - (int32_t)window_y;
-    }
-
-    if (dragging && (buttons & 1) != 0) {
+    if (dragged_app >= 0 && (buttons & 1) != 0) {
+        struct app_window *window = &windows[dragged_app];
         int32_t next_x = point_x - drag_offset_x;
         int32_t next_y = point_y - drag_offset_y;
         int32_t maximum_x = screen_width > WINDOW_WIDTH
@@ -266,42 +387,101 @@ bool desktop_apps_handle_mouse(
             next_y = maximum_y;
         }
 
-        if ((uint32_t)next_x == window_x && (uint32_t)next_y == window_y) {
-            return true;
-        }
-
-        window_x = (uint32_t)next_x;
-        window_y = (uint32_t)next_y;
-        if (redraw_required != 0) {
-            *redraw_required = true;
+        if ((uint32_t)next_x != window->x
+            || (uint32_t)next_y != window->y) {
+            window->x = (uint32_t)next_x;
+            window->y = (uint32_t)next_y;
+            if (redraw_required != 0) {
+                *redraw_required = true;
+            }
         }
         return true;
     }
 
-    if (released && dragging) {
-        dragging = false;
+    if (released && dragged_app >= 0) {
+        dragged_app = -1;
+        return true;
     }
 
     return captured;
 }
 
 bool desktop_apps_handle_key(char key) {
-    if (!visible || !handle_active_app_key(key)) {
+    const struct desktop_datetime *datetime;
+    enum desktop_app app;
+    int8_t first_redraw_index;
+    uint16_t previous_year;
+    uint8_t previous_month;
+    uint8_t previous_day;
+    bool date_changed;
+
+    if (!valid_app(focused_app) || !windows[focused_app].visible) {
+        focused_app = top_visible_window();
+    }
+    if (!valid_app(focused_app)) {
         return false;
     }
 
-    desktop_apps_draw();
+    app = (enum desktop_app)focused_app;
+    datetime = datetime_service_get();
+    previous_year = datetime->year;
+    previous_month = datetime->month;
+    previous_day = datetime->day;
+
+    if (!handle_app_key(app, key)) {
+        return false;
+    }
+
+    datetime = datetime_service_get();
+    date_changed = datetime->year != previous_year
+        || datetime->month != previous_month
+        || datetime->day != previous_day;
+    first_redraw_index = z_index_of(app);
+
+    if (date_changed && windows[DESKTOP_APP_CALENDAR].visible) {
+        int8_t calendar_index = z_index_of(DESKTOP_APP_CALENDAR);
+        if (calendar_index < first_redraw_index) {
+            first_redraw_index = calendar_index;
+        }
+    }
+
+    remember_calendar_date();
+    redraw_from_z_index(first_redraw_index);
     return true;
 }
 
 void desktop_apps_update(void) {
+    const struct desktop_datetime *datetime;
     bool time_changed = datetime_service_update();
+    bool date_changed;
+    int8_t first_redraw_index = APP_COUNT;
+    int8_t clock_index;
+    int8_t calendar_index;
 
-    if (!time_changed || !visible) {
+    if (!time_changed) {
         return;
     }
-    if (active_app == DESKTOP_APP_CLOCK
-        || active_app == DESKTOP_APP_CALENDAR) {
-        desktop_apps_draw();
+
+    datetime = datetime_service_get();
+    date_changed = datetime->year != last_calendar_year
+        || datetime->month != last_calendar_month
+        || datetime->day != last_calendar_day;
+    remember_calendar_date();
+
+    clock_index = z_index_of(DESKTOP_APP_CLOCK);
+    if (windows[DESKTOP_APP_CLOCK].visible
+        && clock_index < first_redraw_index) {
+        first_redraw_index = clock_index;
+    }
+
+    calendar_index = z_index_of(DESKTOP_APP_CALENDAR);
+    if (date_changed
+        && windows[DESKTOP_APP_CALENDAR].visible
+        && calendar_index < first_redraw_index) {
+        first_redraw_index = calendar_index;
+    }
+
+    if (first_redraw_index < APP_COUNT) {
+        redraw_from_z_index(first_redraw_index);
     }
 }

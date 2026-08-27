@@ -31,6 +31,8 @@
 #define ICON_Y           48
 #define ICON_W           58
 #define ICON_H           72
+#define ICON_DIRTY_W     72
+#define ICON_DIRTY_H     72
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
@@ -84,11 +86,26 @@ static void draw_terminal_icon(void){
     gop_draw_text_at(terminal_icon_x,y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
 }
 
-static void draw_app_icon(uint32_t ix,uint32_t iy,const char *symbol,const char *label,uint32_t color){
+static void draw_app_icon(
+    uint32_t ix,
+    uint32_t iy,
+    const char *symbol,
+    const char *label,
+    uint32_t color
+){
     gop_draw_rect(ix,iy,ICON_W,50,0x313244);
     gop_draw_rect(ix+8,iy+7,42,34,color);
     gop_draw_text_sized_at(ix+17,iy+17,symbol,0x1E1E2E,color,12);
     gop_draw_text_at(ix+4,iy+55,label,TOPBAR_FG,DESKTOP_BG);
+}
+
+static void draw_desktop_icons(void){
+    draw_explorer_icon();
+    draw_htop_icon();
+    draw_terminal_icon();
+    draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
+    draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
+    draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
 }
 
 static void draw_power_button(void){
@@ -127,18 +144,31 @@ static void draw_desktop(void){
     gop_clear(DESKTOP_BG);
     gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
     gop_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
-    draw_explorer_icon();
-    draw_htop_icon();
-    draw_terminal_icon();
-    draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
-    draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
-    draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
+    draw_desktop_icons();
     draw_power_button();
 }
 
 static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
+    if(terminal_is_visible()) terminal_redraw();
+    if(monitor_window_is_visible()) monitor_window_draw();
+    if(explorer_window_is_visible()) explorer_window_draw();
+    if(desktop_apps_is_visible()) desktop_apps_draw();
+    draw_power_menu();
+    mouse_end_framebuffer_update();
+}
+
+static void redraw_icon_move(
+    uint32_t old_x,
+    uint32_t old_y,
+    uint32_t new_x,
+    uint32_t new_y
+){
+    mouse_begin_framebuffer_update();
+    gop_draw_rect(old_x,old_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
+    gop_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
+    draw_desktop_icons();
     if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
@@ -201,11 +231,29 @@ static void handle_desktop_mouse(void){
                                       pressed,released,
                                       desktop_width,desktop_height) || redraw;
     }
-    uint32_t *icon_positions[6]={&explorer_icon_x,&htop_icon_x,&terminal_icon_x,&clock_icon_x,&calculator_icon_x,&calendar_icon_x};
-    uint32_t *icon_y_positions[6]={&explorer_icon_y,&htop_icon_y,&terminal_icon_y,&clock_icon_y,&calculator_icon_y,&calendar_icon_y};
+    uint32_t *icon_positions[6]={
+        &explorer_icon_x,
+        &htop_icon_x,
+        &terminal_icon_x,
+        &clock_icon_x,
+        &calculator_icon_x,
+        &calendar_icon_x
+    };
+    uint32_t *icon_y_positions[6]={
+        &explorer_icon_y,
+        &htop_icon_y,
+        &terminal_icon_y,
+        &clock_icon_y,
+        &calculator_icon_y,
+        &calendar_icon_y
+    };
     if(pressed && !consumed){
         for(int8_t index=0;index<6;index++){
-            if(point_inside(mouse.x,mouse.y,*icon_positions[index],*icon_y_positions[index],ICON_W,ICON_H)){
+            if(point_inside(
+                    mouse.x,mouse.y,
+                    *icon_positions[index],*icon_y_positions[index],
+                    ICON_W,ICON_H
+                )){
                 dragged_icon=index;
                 icon_drag_offset_x=mouse.x-(int32_t)*icon_positions[index];
                 icon_drag_offset_y=mouse.y-(int32_t)*icon_y_positions[index];
@@ -216,6 +264,8 @@ static void handle_desktop_mouse(void){
         }
     }
     if(dragged_icon>=0 && (mouse.buttons&1)){
+        uint32_t old_x=*icon_positions[dragged_icon];
+        uint32_t old_y=*icon_y_positions[dragged_icon];
         int32_t next_x=mouse.x-icon_drag_offset_x;
         int32_t next_y=mouse.y-icon_drag_offset_y;
         if(next_x<0) next_x=0;
@@ -226,7 +276,14 @@ static void handle_desktop_mouse(void){
            || (uint32_t)next_y!=*icon_y_positions[dragged_icon]) icon_drag_moved=true;
         *icon_positions[dragged_icon]=(uint32_t)next_x;
         *icon_y_positions[dragged_icon]=(uint32_t)next_y;
-        redraw=icon_drag_moved;
+        if(old_x!=*icon_positions[dragged_icon]
+           || old_y!=*icon_y_positions[dragged_icon]){
+            redraw_icon_move(
+                old_x,old_y,
+                *icon_positions[dragged_icon],
+                *icon_y_positions[dragged_icon]
+            );
+        }
     }
     if(released && dragged_icon>=0){
         int8_t icon=dragged_icon;
@@ -237,7 +294,7 @@ static void handle_desktop_mouse(void){
             else if(icon==2) terminal_set_visible(true);
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
-        redraw=true;
+        if(!icon_drag_moved) redraw=true;
     }
     previous_mouse_buttons=mouse.buttons;
     if(redraw) redraw_scene();
