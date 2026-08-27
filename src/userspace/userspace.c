@@ -1,4 +1,5 @@
 #include "userspace.h"
+#include "apps/desktop_apps.h"
 #include "explorer/explorer.h"
 #include "terminal/terminal.h"
 #include "monitor/monitor.h"
@@ -39,6 +40,8 @@ static uint32_t terminal_icon_x=500;
 static uint32_t explorer_icon_y=ICON_Y;
 static uint32_t htop_icon_y=ICON_Y;
 static uint32_t terminal_icon_y=ICON_Y;
+static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
+static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
 static int8_t dragged_icon=-1;
@@ -81,6 +84,13 @@ static void draw_terminal_icon(void){
     gop_draw_text_at(terminal_icon_x,y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
 }
 
+static void draw_app_icon(uint32_t ix,uint32_t iy,const char *symbol,const char *label,uint32_t color){
+    gop_draw_rect(ix,iy,ICON_W,50,0x313244);
+    gop_draw_rect(ix+8,iy+7,42,34,color);
+    gop_draw_text_sized_at(ix+17,iy+17,symbol,0x1E1E2E,color,12);
+    gop_draw_text_at(ix+4,iy+55,label,TOPBAR_FG,DESKTOP_BG);
+}
+
 static void draw_power_button(void){
     uint32_t x=desktop_width-38;
     gop_draw_rect(x,3,30,22,0x45475A);
@@ -106,6 +116,11 @@ static void draw_desktop(void){
         explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
         htop_icon_x=explorer_icon_x+72;
         terminal_icon_x=htop_icon_x+72;
+        if(desktop_width<=560){
+            clock_icon_y=130;
+            calculator_icon_y=130;
+            calendar_icon_y=130;
+        }
         icon_layout_ready=true;
     }
 
@@ -115,6 +130,9 @@ static void draw_desktop(void){
     draw_explorer_icon();
     draw_htop_icon();
     draw_terminal_icon();
+    draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
+    draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
+    draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
     draw_power_button();
 }
 
@@ -124,6 +142,7 @@ static void redraw_scene(void){
     if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
+    if(desktop_apps_is_visible()) desktop_apps_draw();
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
@@ -142,9 +161,11 @@ static void handle_desktop_mouse(void){
     } else if(pressed && power_menu_visible){
         uint32_t menu_x=desktop_width-158;
         if(point_inside(mouse.x,mouse.y,menu_x,28,150,30)){
+            desktop_apps_save_time();
             (void)userspace_syscall(SYS_REBOOT,0,0,0);
             consumed=true;
         } else if(point_inside(mouse.x,mouse.y,menu_x,58,150,32)){
+            desktop_apps_save_time();
             (void)userspace_syscall(SYS_SHUTDOWN,0,0,0);
             consumed=true;
         } else {
@@ -153,6 +174,10 @@ static void handle_desktop_mouse(void){
         }
     }
 
+    if(!consumed && desktop_apps_is_visible()){
+        consumed=desktop_apps_contains_point(mouse.x,mouse.y);
+        redraw=desktop_apps_handle_mouse(mouse.x,mouse.y,mouse.buttons,pressed,released,desktop_width,desktop_height);
+    }
     if(!consumed && explorer_window_is_visible()){
         consumed=explorer_window_contains_point(mouse.x,mouse.y);
         redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
@@ -172,10 +197,10 @@ static void handle_desktop_mouse(void){
                                       pressed,released,
                                       desktop_width,desktop_height) || redraw;
     }
-    uint32_t *icon_positions[3]={&explorer_icon_x,&htop_icon_x,&terminal_icon_x};
-    uint32_t *icon_y_positions[3]={&explorer_icon_y,&htop_icon_y,&terminal_icon_y};
+    uint32_t *icon_positions[6]={&explorer_icon_x,&htop_icon_x,&terminal_icon_x,&clock_icon_x,&calculator_icon_x,&calendar_icon_x};
+    uint32_t *icon_y_positions[6]={&explorer_icon_y,&htop_icon_y,&terminal_icon_y,&clock_icon_y,&calculator_icon_y,&calendar_icon_y};
     if(pressed && !consumed){
-        for(int8_t index=0;index<3;index++){
+        for(int8_t index=0;index<6;index++){
             if(point_inside(mouse.x,mouse.y,*icon_positions[index],*icon_y_positions[index],ICON_W,ICON_H)){
                 dragged_icon=index;
                 icon_drag_offset_x=mouse.x-(int32_t)*icon_positions[index];
@@ -205,7 +230,8 @@ static void handle_desktop_mouse(void){
         if(!icon_drag_moved){
             if(icon==0) explorer_open(desktop_width,desktop_height);
             else if(icon==1) monitor_run();
-            else terminal_set_visible(true);
+            else if(icon==2) terminal_set_visible(true);
+            else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         redraw=true;
     }
@@ -244,6 +270,7 @@ void userspace_init(void){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
     userspace_set_mouse_debug(true);
+    desktop_apps_init();
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
@@ -257,6 +284,7 @@ void userspace_input_thread(void *arg){
         keyboard_poll();
         handle_desktop_mouse();
         monitor_window_update();
+        desktop_apps_update();
         scheduler_yield();
         // Small pause to avoid 100% busy
         __asm__ volatile("pause");
@@ -269,7 +297,8 @@ void userspace_terminal_thread(void *arg){
     for(;;){
         char c;
         while(keyboard_try_getc(&c)){
-            if(!explorer_window_handle_key(c) && terminal_is_visible())
+            if(!desktop_apps_handle_key(c)
+               && !explorer_window_handle_key(c) && terminal_is_visible())
                 terminal_handle_key(c);
         }
         // Yield so input thread can run even while terminal is idle
@@ -288,10 +317,12 @@ void userspace_run(void){
 
         char c;
         while(keyboard_try_getc(&c)){
-            if(!explorer_window_handle_key(c) && terminal_is_visible())
+            if(!desktop_apps_handle_key(c)
+               && !explorer_window_handle_key(c) && terminal_is_visible())
                 terminal_handle_key(c);
         }
         monitor_window_update();
+        desktop_apps_update();
 
         __asm__ volatile("pause");
         for(volatile uint32_t wait=0;wait<10000;wait++){
