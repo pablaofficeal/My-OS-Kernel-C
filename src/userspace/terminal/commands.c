@@ -806,7 +806,7 @@ void commands_execute(const char *line){
         terminal_putc('\n');
     } else if(strcmp(command,"cat")==0){
         show_file(arguments);
-    } else if(strcmp(command,"ls")==0){
+    } else if(strcmp(command,"ls")==0 || strcmp(command,"LS")==0 || strcmp(command,"Ls")==0){
         list_directory(arguments);
     } else if(strcmp(command,"cd")==0){
         change_directory(arguments);
