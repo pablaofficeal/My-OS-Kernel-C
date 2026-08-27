@@ -97,6 +97,9 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_FAT32_FORMAT_FORCE:
             return fat32_format_device_force((const char*)(uintptr_t)a1,
                                              (const char*)(uintptr_t)a2);
+        case SYS_FAT32_FORMAT_UEFI:
+            return fat32_format_uefi_device((const char*)(uintptr_t)a1,
+                                            (const char*)(uintptr_t)a2);
         case SYS_FILE_WRITE:
             return fat32_write_file((const char*)(uintptr_t)a1,
                                     (const void*)(uintptr_t)a2,(uint32_t)a3);

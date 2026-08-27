@@ -650,6 +650,10 @@ static void run_installer(const char *args){
         break;
     }
     terminal_printf("Target: %s  %s  %u MB  serial=%s\n",devname,model,(uint32_t)(sectors/2048),serial);
+    char is_uefi_ans[8]={0};
+    prompt_read_line("UEFI system? [Y/n]: ",is_uefi_ans,sizeof(is_uefi_ans));
+    bool is_uefi = !(is_uefi_ans[0]=='n' || is_uefi_ans[0]=='N');
+    terminal_printf("Mode: %s\n",is_uefi?"UEFI (GPT+ESP)":"BIOS (MBR)");
     char hostname[32]={0};
     prompt_read_line("Hostname [purec-os]: ",hostname,sizeof(hostname));
     if(!hostname[0]) strcpy(hostname,"purec-os");
@@ -657,7 +661,7 @@ static void run_installer(const char *args){
     prompt_read_line("Username [purec]: ",username,sizeof(username));
     if(!username[0]) strcpy(username,"purec");
     terminal_write("\nSummary:\n");
-    terminal_printf("  Device   : %s\n  Hostname : %s\n  User     : %s\n",devname,hostname,username);
+    terminal_printf("  Device   : %s\n  Hostname : %s\n  User     : %s\n  Mode     : %s\n",devname,hostname,username,is_uefi?"UEFI":"BIOS");
     terminal_write("This will ERASE all data on the target disk!\n");
     char confirm[16]={0};
     prompt_read_line("Type YES to continue: ",confirm,sizeof(confirm));
@@ -666,15 +670,16 @@ static void run_installer(const char *args){
         terminal_write("Aborted (need YES/yes).\n");
         return;
     }
-    terminal_printf("Formatting %s as PURECOS FAT32...\n",devname);
-    int64_t fmt=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)devname,(uint64_t)serial,(uint64_t)"ERASE");
-    if(fmt==FS_ERROR_NOT_BLANK || fmt==FS_ERROR_BUSY){
-        if(fmt==FS_ERROR_BUSY) terminal_write("Volume busy (mounted), forcing unmount+format...\n");
-        else terminal_write("Disk not blank, retrying with --force...\n");
-        fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
-        if(fmt==FS_ERROR_BUSY){
-            // еще раз через force с принудительным размонтированием - пробуем прямой force
-            terminal_write("Retrying force again...\n");
+    int64_t fmt;
+    if(is_uefi){
+        terminal_printf("Formatting %s as UEFI ESP (FAT32 + EFI)...\n",devname);
+        fmt=userspace_syscall(214,(uint64_t)devname,(uint64_t)serial,0);
+    } else {
+        terminal_printf("Formatting %s as PURECOS FAT32...\n",devname);
+        fmt=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)devname,(uint64_t)serial,(uint64_t)"ERASE");
+        if(fmt==FS_ERROR_NOT_BLANK || fmt==FS_ERROR_BUSY){
+            if(fmt==FS_ERROR_BUSY) terminal_write("Volume busy (mounted), forcing...\n");
+            else terminal_write("Disk not blank, retrying with --force...\n");
             fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
         }
     }

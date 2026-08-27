@@ -4,6 +4,8 @@
 #include "../kernel/klog.h"
 #include "../lib/string.h"
 #include <stddef.h>
+#include "../drivers/storage/limine_uefi.h"
+#include "../kernel_blob.h"
 
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08
@@ -19,6 +21,8 @@
 #define FAT32_FORMAT_FAT_COUNT         2
 #define FAT32_FORMAT_BLANK_SCAN        2048
 #define FAT32_FORMAT_MAX_SECTORS       0x10000000U
+#define FAT32_ESP_START_LBA 2048
+#define FAT32_ESP_RESERVED FAT32_FORMAT_RESERVED_SECTORS
 
 static const uint8_t required_volume_label[11]={
     'P','U','R','E','C','O','S',' ',' ',' ',' '
@@ -1054,4 +1058,118 @@ int32_t fat32_format_device_force(const char *device_name, const char *serial_co
     memset(&volume,0,sizeof(volume));
     memset(handles,0,sizeof(handles));
     return fat32_init()?0:FS_ERROR_IO;
+}
+
+static bool write_mbr_esp(uint32_t total_sectors){
+    // Создаём MBR с одной ESP партицией type 0xEF, start 2048
+    if(total_sectors <= FAT32_ESP_START_LBA) return false;
+    uint32_t part_sectors = total_sectors - FAT32_ESP_START_LBA;
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    // partition entry at 446: boot flag 0x00, CHS start 0, type 0xEF, CHS end FF FF FF, LBA start 2048, size
+    uint8_t *p = &sector_buffer[446];
+    p[0]=0x00; // not bootable (UEFI doesn't need boot flag, but can set 0)
+    p[1]=0x00; p[2]=0x02; p[3]=0x00;
+    p[4]=0xEF; // EFI System Partition
+    p[5]=0xFF; p[6]=0xFF; p[7]=0xFF;
+    write_u32(&p[8], FAT32_ESP_START_LBA);
+    write_u32(&p[12], part_sectors);
+    sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
+    // MBR boot code оставляем нулями (UEFI не исполняет MBR)
+    return block_device_write(0, sector_buffer);
+}
+
+static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_format_layout *layout){
+    // Аналог write_format_metadata но с оффсетом part_lba (для ESP)
+    uint32_t fat_start = part_lba + FAT32_ESP_RESERVED;
+    uint32_t data_start = fat_start + FAT32_FORMAT_FAT_COUNT * layout->fat_size;
+    // zero reserved
+    if(!write_zero_range(part_lba, FAT32_ESP_RESERVED)) return false;
+    if(!write_zero_range(fat_start, FAT32_FORMAT_FAT_COUNT * layout->fat_size)) return false;
+    if(!write_zero_range(data_start, layout->sectors_per_cluster)) return false;
+
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    write_u32(&sector_buffer[0],0x0FFFFFF8);
+    write_u32(&sector_buffer[4],0xFFFFFFFF);
+    write_u32(&sector_buffer[8],0x0FFFFFFF);
+    for(uint8_t fat=0;fat<FAT32_FORMAT_FAT_COUNT;fat++){
+        uint32_t lba = fat_start + (uint32_t)fat * layout->fat_size;
+        if(!block_device_write(lba, sector_buffer)) return false;
+    }
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    write_u32(&sector_buffer[0],0x41615252);
+    write_u32(&sector_buffer[484],0x61417272);
+    write_u32(&sector_buffer[488],layout->cluster_count-1);
+    write_u32(&sector_buffer[492],3);
+    write_u32(&sector_buffer[508],0xAA550000);
+    if(!block_device_write(part_lba+1, sector_buffer) || !block_device_write(part_lba+7, sector_buffer)) return false;
+
+    // Boot sector at part_lba
+    build_format_boot_sector(layout);
+    // build_format_boot_sector пишет total_sectors = layout->total_sectors, но для ESP нужно чтобы total_sectors был part_sectors
+    // Перезапишем поля если нужно: уже корректно, т.к. layout->total_sectors = part_sectors
+    if(!block_device_write(part_lba+6, sector_buffer)) return false;
+    return block_device_write(part_lba, sector_buffer);
+}
+
+// UEFI install: MBR ESP + FAT32 + файлы загрузчика/ядра
+int32_t fat32_format_uefi_device(const char *device_name, const char *serial_confirmation){
+    if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
+    int32_t idx=block_device_find(device_name);
+    if(idx<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(info.sector_size!=BLOCK_SECTOR_SIZE || info.sector_count>FAT32_FORMAT_MAX_SECTORS) return FS_ERROR_UNSUPPORTED;
+    if(info.sector_count <= FAT32_ESP_START_LBA+65535) return FS_ERROR_TOO_SMALL; // нужен минимум ~32MB ESP
+    uint32_t part_sectors = (uint32_t)info.sector_count - FAT32_ESP_START_LBA;
+    struct fat32_format_layout layout;
+    if(!calculate_format_layout(part_sectors,&layout)) return FS_ERROR_TOO_SMALL;
+    if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
+    klogf(KLOG_INFO,"fat32_uefi: formatting %s total %u part %u fat %u clusters %u spc %u",
+          device_name,(uint32_t)info.sector_count,part_sectors,layout.fat_size,layout.cluster_count,layout.sectors_per_cluster);
+    // Создаём MBR ESP
+    if(!write_mbr_esp((uint32_t)info.sector_count)){
+        klogf(KLOG_ERROR,"fat32_uefi: MBR write failed");
+        return FS_ERROR_IO;
+    }
+    // Форматируем партицию
+    if(!write_format_metadata_at(FAT32_ESP_START_LBA,&layout)){
+        klogf(KLOG_ERROR,"fat32_uefi: FAT write failed");
+        return FS_ERROR_IO;
+    }
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    if(!fat32_init()){
+        klogf(KLOG_ERROR,"fat32_uefi: mount after format failed");
+        return FS_ERROR_IO;
+    }
+    klogf(KLOG_OK,"fat32_uefi: formatted ESP %s part_lba %u",device_name,FAT32_ESP_START_LBA);
+    // Создаём структуру для UEFI: /EFI/BOOT/BOOTX64.EFI + /boot/kernel.elf + limine.conf
+    // Директории
+    (void)fat32_create_directory("/EFI");
+    (void)fat32_create_directory("/EFI/BOOT");
+    (void)fat32_create_directory("/boot");
+    (void)fat32_create_directory("/boot/limine");
+    // Пишем BOOTX64.EFI
+    {
+        int32_t st = fat32_write_file("/EFI/BOOT/BOOTX64.EFI", limine_uefi, limine_uefi_len);
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: BOOTX64.EFI write failed %d",st);
+        else klogf(KLOG_OK,"fat32_uefi: BOOTX64.EFI %u bytes written",limine_uefi_len);
+    }
+    // Пишем kernel
+    {
+        int32_t st = fat32_write_file("/boot/kernel.elf", kernel_blob, kernel_blob_len);
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: kernel write failed %d",st);
+        else klogf(KLOG_OK,"fat32_uefi: kernel %u bytes written",kernel_blob_len);
+    }
+    // limine.conf
+    {
+        const char *conf="timeout: 3\nverbose: yes\n/PureC OS (UEFI)\n    protocol: limine\n    kernel_path: boot():/boot/kernel.elf\n";
+        int32_t st = fat32_write_file("/boot/limine/limine.conf", conf, strlen(conf));
+        if(st<0) klogf(KLOG_WARN,"fat32_uefi: limine.conf write failed %d",st);
+        else klogf(KLOG_OK,"fat32_uefi: limine.conf written");
+        // копия в корень ESP для надёжности
+        (void)fat32_write_file("/limine.conf", conf, strlen(conf));
+    }
+    return 0;
 }
