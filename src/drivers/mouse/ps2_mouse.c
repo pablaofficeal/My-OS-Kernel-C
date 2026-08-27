@@ -52,6 +52,7 @@ static bool has_mouse=false;
 static int32_t old_x=400, old_y=300;
 static bool first_draw=true;
 static bool packet_seen=false;
+static volatile uint32_t framebuffer_update_depth;
 static volatile struct mouse_debug_state debug_state;
 
 #define CURS_W 12
@@ -119,12 +120,31 @@ void mouse_set_debug_overlay(bool enabled){
 bool mouse_get_debug_overlay(void){ return debug_overlay_enabled; }
 
 void mouse_redraw(void){
-    uint64_t flags;
-    __asm__ volatile("pushfq; pop %0":"=r"(flags));
-    debug_state.interrupts_enabled=(flags & (1ULL<<9)) != 0;
-    first_draw=true;
+    mouse_begin_framebuffer_update();
     if(debug_overlay_enabled) draw_debug_overlay();
-    draw_cursor(state.x, state.y);
+    mouse_end_framebuffer_update();
+}
+
+void mouse_begin_framebuffer_update(void){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
+    debug_state.interrupts_enabled=(flags&(1ULL<<9))!=0;
+    if(framebuffer_update_depth==0){
+        if(gop_is_available() && !first_draw) restore_bg(old_x,old_y);
+        first_draw=true;
+    }
+    framebuffer_update_depth++;
+    if(flags&(1ULL<<9)) __asm__ volatile("sti":::"memory");
+}
+
+void mouse_end_framebuffer_update(void){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
+    if(framebuffer_update_depth){
+        framebuffer_update_depth--;
+        if(framebuffer_update_depth==0) draw_cursor(state.x,state.y);
+    }
+    if(flags&(1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
 
 // Рисует курсор как в Linux: стрелка 12x12
@@ -213,6 +233,7 @@ void mouse_handle_relative(uint8_t buttons, int8_t dx, int8_t dy){
 }
 
 static void refresh_mouse_ui(void){
+    if(framebuffer_update_depth) return;
     if(gop_is_available() && !first_draw) restore_bg(old_x, old_y);
     first_draw=true;
     if(debug_overlay_enabled) draw_debug_overlay();

@@ -26,6 +26,8 @@ void ps2_mouse_init(void);
 void ps2_mouse_handler(void); // вызывается из IRQ12
 void ps2_mouse_poll(void);
 void mouse_redraw(void);
+void mouse_begin_framebuffer_update(void);
+void mouse_end_framebuffer_update(void);
 void mouse_set_debug_overlay(bool enabled);
 bool mouse_get_debug_overlay(void);
 struct mouse_state mouse_get_state(void);

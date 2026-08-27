@@ -53,12 +53,13 @@ static void draw_monitor(void){
                                          (uint64_t)disk_devices,
                                          MONITOR_DISK_LIMIT,0);
 
+    mouse_begin_framebuffer_update();
     terminal_clear();
     terminal_write_colored("PureC Monitor",0x89B4FA);
     terminal_write("   refresh 500 ms   q/esc: exit\n\n");
     if(!available){
         terminal_write("Kernel statistics unavailable\n");
-        mouse_redraw();
+        mouse_end_framebuffer_update();
         return;
     }
 
@@ -95,7 +96,7 @@ static void draw_monitor(void){
                             disk_devices[index].operational ? "online" : "offline");
         }
     }
-    mouse_redraw();
+    mouse_end_framebuffer_update();
 }
 
 void monitor_run(void){

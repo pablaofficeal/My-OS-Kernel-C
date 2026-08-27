@@ -73,7 +73,7 @@ void userspace_init(void){
 
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
-    userspace_set_mouse_debug(true);
+    userspace_set_mouse_debug(false);
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
