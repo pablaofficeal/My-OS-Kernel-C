@@ -35,7 +35,6 @@ void scheduler_yield(void);
 void scheduler_block(void);
 void scheduler_unblock(int tid);
 void scheduler_exit(void);
-void scheduler_tick(void);
 void scheduler_start(void);
 struct thread *scheduler_current_thread(void);
 int scheduler_current_tid(void);
@@ -43,5 +42,5 @@ uint32_t scheduler_thread_count(void);
 void scheduler_set_affinity(int tid, int16_t core);
 int scheduler_get_core_count(void);
 
-void scheduler_schedule(void);
+void scheduler_on_timer_interrupt(void);
 void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp);

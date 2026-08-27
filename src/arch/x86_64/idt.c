@@ -67,8 +67,9 @@ void isr_handler(uint64_t vector, uint64_t err, uint64_t rip, uint64_t cs, uint6
     }
     if (vector == 32) { // IRQ0 timer
         timer_tick();
-        scheduler_tick();
+        // Acknowledge the PIC before a context switch can suspend this frame.
         pic_eoi(0);
+        scheduler_on_timer_interrupt();
         return;
     }
     if (vector >= 32 && vector < 48) { // другие IRQ

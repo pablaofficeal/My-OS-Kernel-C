@@ -68,26 +68,22 @@ void kernel_main(struct limine_framebuffer *fb) {
     userspace_init();
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN, "userspace_init complete, starting scheduler");
 
-    // Scheduler: планировщик потоков с распределением по ядрам
+    // Scheduler: preemptive kernel threads on the active bootstrap CPU.
     scheduler_init();
-    // Определяем количество ядер через SMP (если Limine дал)
     int core_count = scheduler_get_core_count();
-    if(smp_response_ptr && smp_response_ptr->cpu_count>0){
-        core_count = (int)smp_response_ptr->cpu_count;
-        klogf(KLOG_INFO, "sched: SMP detected %u cores via Limine", smp_response_ptr->cpu_count);
-        // Future: boot APs via smp_response_ptr->cpus[].goto_address
-        // For now use BSP only, but API supports affinity
+    if(smp_response_ptr && smp_response_ptr->cpu_count>1){
+        klogf(KLOG_WARN, "sched: Limine detected %u CPUs; 1 CPU active until AP scheduler support is installed",
+              smp_response_ptr->cpu_count);
     }
-    klogf(KLOG_INFO, "sched: cores=%d, creating threads", core_count);
+    klogf(KLOG_INFO, "sched: active cores=%d, creating threads", core_count);
 
     // Создаём потоки: input (высший приоритет, affinity 0), terminal, monitor/idle
     extern void userspace_input_thread(void *arg);
     extern void userspace_terminal_thread(void *arg);
     // Input thread - высокий приоритет, чтобы мышь не фризила при чтении файла
     scheduler_create_thread(userspace_input_thread, NULL, "input", 0, 0);
-    // Terminal thread - средний приоритет, может быть на ядре 1 если есть
-    int term_core = core_count>1 ? 1 : 0;
-    scheduler_create_thread(userspace_terminal_thread, NULL, "terminal", 1, term_core);
+    // Terminal thread - medium priority on the currently active CPU.
+    scheduler_create_thread(userspace_terminal_thread, NULL, "terminal", 1, 0);
     // Дополнительный поток для фоновых задач (monitor) - низкий приоритет
     // Используем существующий userspace_run как fallback если scheduler не запущен
     klog(KLOG_OK, "sched: threads created, starting scheduler (preemptive tick 10ms)");

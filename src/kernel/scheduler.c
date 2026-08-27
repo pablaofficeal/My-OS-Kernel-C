@@ -3,10 +3,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/panic.h"
 #include "../arch/x86_64/gdt.h"
-#include "../boot/limine.h"
 #include "../lib/string.h"
-
-extern struct limine_smp_response *smp_response_ptr;
 
 static struct thread threads[SCHEDULER_MAX_THREADS];
 static struct thread *current = NULL;
@@ -16,6 +13,7 @@ static volatile bool need_resched = false;
 static uint32_t core_count = 1;
 static void thread_trampoline(void);
 static struct thread *pick_next(void);
+static uint64_t create_initial_stack(struct thread *thread);
 
 extern void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp);
 
@@ -35,13 +33,11 @@ static void thread_trampoline(void){
 void scheduler_init(void){
     if(initialized) return;
     memset(threads, 0, sizeof(threads));
-    if(smp_response_ptr && smp_response_ptr->cpu_count>0){
-        core_count = (uint32_t)smp_response_ptr->cpu_count;
-        if(core_count>8) core_count=8;
-        if(core_count==0) core_count=1;
-    } else {
-        core_count = 1;
-    }
+    /* The Limine response describes detected CPUs, not CPUs currently running
+       this scheduler. AP startup and per-CPU scheduler state are not installed
+       yet, so advertising those CPUs makes affinity silently target cores that
+       never execute kernel threads. */
+    core_count = 1;
     struct thread *idle = &threads[0];
     idle->id = 0;
     idle->state = THREAD_RUNNING;
@@ -64,6 +60,20 @@ static struct thread *alloc_thread(void){
     return NULL;
 }
 
+static uint64_t create_initial_stack(struct thread *thread){
+    uint64_t stack_top=(uint64_t)(thread->stack+SCHEDULER_STACK_SIZE);
+    stack_top&=~0xFULL;
+    uint64_t *stack_ptr=(uint64_t*)stack_top;
+
+    /* scheduler_asm_switch restores six callee-saved registers and returns.
+       Keep a dummy return slot above the trampoline so its entry RSP is 8
+       modulo 16, exactly as required by the x86_64 System V ABI. */
+    *--stack_ptr=0;
+    *--stack_ptr=(uint64_t)thread_trampoline;
+    for(int register_index=0;register_index<6;register_index++) *--stack_ptr=0;
+    return (uint64_t)stack_ptr;
+}
+
 int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *name, uint8_t priority, int16_t affinity){
     if(!initialized) return -1;
     if(!entry) return -1;
@@ -81,17 +91,7 @@ int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *nam
     if(name) strncpy(t->name, name, sizeof(t->name)-1);
     else strncpy(t->name, "thread", sizeof(t->name)-1);
 
-    uint64_t stack_top = (uint64_t)(t->stack + SCHEDULER_STACK_SIZE);
-    stack_top &= ~0xFULL;
-    uint64_t *stack_ptr = (uint64_t*)stack_top;
-    *--stack_ptr = (uint64_t)thread_trampoline;
-    *--stack_ptr = 0;
-    *--stack_ptr = 0;
-    *--stack_ptr = 0;
-    *--stack_ptr = 0;
-    *--stack_ptr = 0;
-    *--stack_ptr = 0;
-    t->rsp = (uint64_t)stack_ptr;
+    t->rsp=create_initial_stack(t);
 
     if(affinity>=0 && (uint32_t)affinity>=core_count){
         klogf(KLOG_WARN, "sched: thread %u affinity %d exceeds core count %u, using any", t->id, affinity, core_count);
@@ -212,7 +212,7 @@ void scheduler_exit(void){
     for(;;) __asm__ volatile("hlt");
 }
 
-void scheduler_tick(void){
+static void scheduler_tick(void){
     if(!initialized || !current) return;
     if(current->ticks_remaining>0) current->ticks_remaining--;
     if(current->ticks_remaining==0){
@@ -227,10 +227,15 @@ void scheduler_tick(void){
     }
 }
 
-void scheduler_schedule(void){
+static void scheduler_schedule(void){
     if(!need_resched) return;
     need_resched=false;
     scheduler_yield();
+}
+
+void scheduler_on_timer_interrupt(void){
+    scheduler_tick();
+    scheduler_schedule();
 }
 
 void scheduler_start(void){
