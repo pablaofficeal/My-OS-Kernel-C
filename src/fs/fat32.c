@@ -1061,31 +1061,49 @@ int32_t fat32_format_device_force(const char *device_name, const char *serial_co
 }
 
 static bool write_mbr_esp(uint32_t total_sectors){
-    // Создаём MBR с одной ESP партицией type 0xEF, start 2048
-    if(total_sectors <= FAT32_ESP_START_LBA) return false;
+    if(total_sectors <= FAT32_ESP_START_LBA){
+        klogf(KLOG_ERROR,"write_mbr_esp: total %u too small",total_sectors);
+        return false;
+    }
     uint32_t part_sectors = total_sectors - FAT32_ESP_START_LBA;
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
-    // partition entry at 446: boot flag 0x00, CHS start 0, type 0xEF, CHS end FF FF FF, LBA start 2048, size
     uint8_t *p = &sector_buffer[446];
-    p[0]=0x00; // not bootable (UEFI doesn't need boot flag, but can set 0)
+    p[0]=0x00;
     p[1]=0x00; p[2]=0x02; p[3]=0x00;
-    p[4]=0xEF; // EFI System Partition
+    p[4]=0xEF;
     p[5]=0xFF; p[6]=0xFF; p[7]=0xFF;
     write_u32(&p[8], FAT32_ESP_START_LBA);
     write_u32(&p[12], part_sectors);
     sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
-    // MBR boot code оставляем нулями (UEFI не исполняет MBR)
-    return block_device_write(0, sector_buffer);
+    klogf(KLOG_INFO,"write_mbr_esp: writing MBR LBA0 part %u sectors %u",FAT32_ESP_START_LBA,part_sectors);
+    if(!block_device_write(0, sector_buffer)){
+        klogf(KLOG_ERROR,"write_mbr_esp: block_device_write LBA0 failed (dev %s)",block_device_name());
+        return false;
+    }
+    // Verify readback
+    uint8_t verify[BLOCK_SECTOR_SIZE];
+    if(!block_device_read(0, verify) || verify[510]!=0x55 || verify[511]!=0xAA){
+        klogf(KLOG_WARN,"write_mbr_esp: verify failed");
+    }
+    return true;
 }
 
 static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_format_layout *layout){
-    // Аналог write_format_metadata но с оффсетом part_lba (для ESP)
     uint32_t fat_start = part_lba + FAT32_ESP_RESERVED;
     uint32_t data_start = fat_start + FAT32_FORMAT_FAT_COUNT * layout->fat_size;
-    // zero reserved
-    if(!write_zero_range(part_lba, FAT32_ESP_RESERVED)) return false;
-    if(!write_zero_range(fat_start, FAT32_FORMAT_FAT_COUNT * layout->fat_size)) return false;
-    if(!write_zero_range(data_start, layout->sectors_per_cluster)) return false;
+    klogf(KLOG_INFO,"write_format_at: part %u fat %u data %u fat_size %u spc %u",part_lba,fat_start,data_start,layout->fat_size,layout->sectors_per_cluster);
+    if(!write_zero_range(part_lba, FAT32_ESP_RESERVED)){
+        klogf(KLOG_ERROR,"write_format_at: zero reserved %u count %u failed",part_lba,FAT32_ESP_RESERVED);
+        return false;
+    }
+    if(!write_zero_range(fat_start, FAT32_FORMAT_FAT_COUNT * layout->fat_size)){
+        klogf(KLOG_ERROR,"write_format_at: zero FAT %u count %u failed",fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size);
+        return false;
+    }
+    if(!write_zero_range(data_start, layout->sectors_per_cluster)){
+        klogf(KLOG_ERROR,"write_format_at: zero data %u failed",data_start);
+        return false;
+    }
 
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
     write_u32(&sector_buffer[0],0x0FFFFFF8);
@@ -1093,7 +1111,10 @@ static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_forma
     write_u32(&sector_buffer[8],0x0FFFFFFF);
     for(uint8_t fat=0;fat<FAT32_FORMAT_FAT_COUNT;fat++){
         uint32_t lba = fat_start + (uint32_t)fat * layout->fat_size;
-        if(!block_device_write(lba, sector_buffer)) return false;
+        if(!block_device_write(lba, sector_buffer)){
+            klogf(KLOG_ERROR,"write_format_at: FAT%u LBA %u failed",fat,lba);
+            return false;
+        }
     }
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
     write_u32(&sector_buffer[0],0x41615252);
@@ -1101,14 +1122,27 @@ static bool write_format_metadata_at(uint32_t part_lba, const struct fat32_forma
     write_u32(&sector_buffer[488],layout->cluster_count-1);
     write_u32(&sector_buffer[492],3);
     write_u32(&sector_buffer[508],0xAA550000);
-    if(!block_device_write(part_lba+1, sector_buffer) || !block_device_write(part_lba+7, sector_buffer)) return false;
+    if(!block_device_write(part_lba+1, sector_buffer)){
+        klogf(KLOG_ERROR,"write_format_at: FSInfo LBA %u failed",part_lba+1);
+        return false;
+    }
+    if(!block_device_write(part_lba+7, sector_buffer)){
+        klogf(KLOG_ERROR,"write_format_at: FSInfo backup LBA %u failed",part_lba+7);
+        return false;
+    }
 
     // Boot sector at part_lba
     build_format_boot_sector(layout);
-    // build_format_boot_sector пишет total_sectors = layout->total_sectors, но для ESP нужно чтобы total_sectors был part_sectors
-    // Перезапишем поля если нужно: уже корректно, т.к. layout->total_sectors = part_sectors
-    if(!block_device_write(part_lba+6, sector_buffer)) return false;
-    return block_device_write(part_lba, sector_buffer);
+    if(!block_device_write(part_lba+6, sector_buffer)){
+        klogf(KLOG_ERROR,"write_format_at: backup boot LBA %u failed",part_lba+6);
+        return false;
+    }
+    if(!block_device_write(part_lba, sector_buffer)){
+        klogf(KLOG_ERROR,"write_format_at: boot LBA %u failed",part_lba);
+        return false;
+    }
+    klogf(KLOG_OK,"write_format_at: OK part %u",part_lba);
+    return true;
 }
 
 // UEFI install: MBR ESP + FAT32 + файлы загрузчика/ядра
