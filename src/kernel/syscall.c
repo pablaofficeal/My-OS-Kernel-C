@@ -133,14 +133,15 @@ void syscall_init(void){
         klogf(KLOG_DEBUG,"ahci: controllers=%u ports=%u sata=%u identify_failures=%u",
               ahci_stats.controllers,ahci_stats.implemented_ports,
               ahci_stats.sata_ports,ahci_stats.identify_failures);
-        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u addressed=%u usb-storage=%u failures=%u",
+        klogf(KLOG_INFO,"xhci: controllers=%u connected=%u addressed=%u usb-storage=%u failures=%u stage=%u",
               xhci_stats.controllers,xhci_stats.connected_ports,
               xhci_stats.addressed_devices,xhci_stats.mass_storage_devices,
-              xhci_stats.failures);
+              xhci_stats.failures,xhci_stats.last_stage);
         klogf(KLOG_INFO,"ehci: controllers=%u connected=%u high-speed=%u usb-storage=%u failures=%u stage=%u",
               ehci_stats.controllers,ehci_stats.connected_ports,
               ehci_stats.high_speed_ports,ehci_stats.mass_storage_devices,
               ehci_stats.failures,ehci_stats.last_stage);
+        klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
         if(fat32_init()){
             klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
         } else {

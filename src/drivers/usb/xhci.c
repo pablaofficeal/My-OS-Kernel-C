@@ -305,7 +305,8 @@ static uint16_t initial_packet_size(uint8_t speed){
 }
 
 static bool reset_port(uint8_t port_number, uint8_t *speed){
-    volatile uint32_t *port=(volatile uint32_t*)(mmio_base+0x400
+    volatile uint8_t *port_base=(volatile uint8_t*)(void*)operational+0x400;
+    volatile uint32_t *port=(volatile uint32_t*)(void*)(port_base
                                                 +(port_number-1)*0x10);
     uint32_t status=port[0];
     if(!(status&XHCI_PORT_CONNECTED)) return false;
@@ -571,7 +572,9 @@ static bool identify_mass_storage(uint8_t index, uint32_t name_index,
 static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     uint8_t index=device_count;
     memset(&devices[index],0,sizeof(devices[index]));
+    probe_stats.last_stage=3;
     if(!address_port(index,port,speed)) return false;
+    probe_stats.last_stage=4;
     if(!get_descriptor(index,USB_DESCRIPTOR_DEVICE,0,18)) return false;
     uint16_t vendor=(uint16_t)descriptor_buffer[8]
         |((uint16_t)descriptor_buffer[9]<<8);
@@ -597,6 +600,7 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
                                     &bulk_out,&bulk_out_packet)){
         return false;
     }
+    probe_stats.last_stage=5;
     (void)interface_number;
     if(!configure_mass_storage(index,configuration,bulk_in,bulk_in_packet,
                                bulk_out,bulk_out_packet)){
@@ -605,6 +609,7 @@ static bool enumerate_port(uint8_t port, uint8_t speed, uint32_t name_index){
     if(!identify_mass_storage(index,name_index,port,vendor,product)) return false;
     device_count++;
     probe_stats.mass_storage_devices++;
+    probe_stats.last_stage=7;
     return true;
 }
 
@@ -705,6 +710,7 @@ static bool initialize_controller(const struct storage_controller_info *controll
     __sync_synchronize();
     operational[0]|=XHCI_CMD_RUN;
     if(!wait_register(&operational[1],XHCI_STS_HALTED,false)) return false;
+    probe_stats.last_stage=2;
 
     for(uint8_t port=1;port<=max_ports && device_count<XHCI_DEVICE_LIMIT;port++){
         uint8_t speed;
@@ -727,6 +733,7 @@ bool xhci_init(uint32_t linux_name_base){
     for(int32_t index=0;index<count;index++){
         if(controllers[index].type!=STORAGE_CONTROLLER_XHCI) continue;
         probe_stats.controllers++;
+        probe_stats.last_stage=1;
         controller_number=xhci_index++;
         if(!initialize_controller(&controllers[index],linux_name_base)){
             probe_stats.failures++;

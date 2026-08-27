@@ -10,6 +10,7 @@ struct xhci_probe_stats {
     uint32_t addressed_devices;
     uint32_t mass_storage_devices;
     uint32_t failures;
+    uint32_t last_stage;
 };
 
 void xhci_set_address_mapping(uint64_t hhdm_offset, uint64_t kernel_physical_base,

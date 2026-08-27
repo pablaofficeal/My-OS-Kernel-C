@@ -47,7 +47,8 @@ struct ehci_qtd {
     volatile uint32_t token;
     volatile uint32_t buffer[5];
     volatile uint32_t extended_buffer[5];
-} __attribute__((aligned(32)));
+    uint32_t reserved[3];
+};
 
 struct ehci_qh {
     volatile uint32_t horizontal;
@@ -55,7 +56,7 @@ struct ehci_qh {
     volatile uint32_t endpoint_capabilities;
     volatile uint32_t current_qtd;
     volatile struct ehci_qtd overlay;
-} __attribute__((aligned(32)));
+};
 
 struct usb_cbw {
     uint32_t signature;
@@ -81,10 +82,14 @@ struct ehci_device {
     uint8_t bulk_out;
     uint16_t bulk_in_packet;
     uint16_t bulk_out_packet;
+    bool bulk_in_toggle;
+    bool bulk_out_toggle;
 };
 
 _Static_assert(sizeof(struct usb_cbw)==31,"USB BOT CBW size");
 _Static_assert(sizeof(struct usb_csw)==13,"USB BOT CSW size");
+_Static_assert(sizeof(struct ehci_qtd)==64,"EHCI qTD stride");
+_Static_assert(__builtin_offsetof(struct ehci_qh,overlay)==16,"EHCI QH overlay offset");
 
 static struct ehci_qh queue_head __attribute__((aligned(32)));
 static struct ehci_qtd descriptors[3] __attribute__((aligned(32)));
@@ -176,7 +181,7 @@ static void prepare_queue_head(uint8_t address, uint8_t endpoint,
                                uint16_t max_packet){
     memset(&queue_head,0,sizeof(queue_head));
     uint32_t qh_address=(uint32_t)physical_address(&queue_head);
-    queue_head.horizontal=qh_address|(2U<<1);
+    queue_head.horizontal=qh_address|(1U<<1);
     queue_head.endpoint_characteristics=(uint32_t)address
         |((uint32_t)endpoint<<8)|(2U<<12)|(1U<<14)|(1U<<15)
         |((uint32_t)max_packet<<16)|(4U<<28);
@@ -244,11 +249,14 @@ static bool control_transfer(uint8_t address, uint16_t max_packet,
 
 static bool bulk_transfer(uint8_t address, uint8_t endpoint,
                           uint16_t max_packet, void *buffer, uint32_t length,
-                          bool input){
+                          bool input, bool *toggle){
     prepare_queue_head(address,endpoint,max_packet);
     prepare_qtd(&descriptors[0],input ? EHCI_PID_IN : EHCI_PID_OUT,
-                buffer,length,false,true);
-    return execute_schedule(&descriptors[0],&descriptors[0]);
+                buffer,length,*toggle,true);
+    if(!execute_schedule(&descriptors[0],&descriptors[0])) return false;
+    uint32_t packets=(length+max_packet-1)/max_packet;
+    if(packets&1) *toggle=!*toggle;
+    return true;
 }
 
 static bool get_descriptor(uint8_t address, uint16_t packet_size, uint8_t type,
@@ -321,17 +329,21 @@ static bool bulk_only_command(uint8_t index, const uint8_t *command,
     command_block.command_length=command_length;
     memcpy(command_block.command,command,command_length);
     if(!bulk_transfer(device->address,device->bulk_out,device->bulk_out_packet,
-                      &command_block,sizeof(command_block),false)) return false;
+                      &command_block,sizeof(command_block),false,
+                      &device->bulk_out_toggle)) return false;
     if(data_length){
         uint8_t endpoint=data_in ? device->bulk_in : device->bulk_out;
         uint16_t packet=data_in ? device->bulk_in_packet : device->bulk_out_packet;
-        if(!bulk_transfer(device->address,endpoint,packet,data,data_length,data_in)){
+        bool *toggle=data_in ? &device->bulk_in_toggle : &device->bulk_out_toggle;
+        if(!bulk_transfer(device->address,endpoint,packet,data,data_length,data_in,
+                          toggle)){
             return false;
         }
     }
     memset(&command_status,0,sizeof(command_status));
     if(!bulk_transfer(device->address,device->bulk_in,device->bulk_in_packet,
-                      &command_status,sizeof(command_status),true)) return false;
+                      &command_status,sizeof(command_status),true,
+                      &device->bulk_in_toggle)) return false;
     return command_status.signature==0x53425355
         && command_status.tag==tag && command_status.status==0;
 }
@@ -453,17 +465,28 @@ static bool enumerate_port(uint8_t port, uint32_t name_index){
 static bool take_ownership(const struct storage_controller_info *controller,
                            uint32_t hccparams){
     uint8_t offset=(uint8_t)(hccparams>>8);
-    if(!offset) return true;
-    uint32_t legacy=pci_read_config32(controller->bus,controller->slot,
-                                      controller->function,offset);
-    pci_write_config32(controller->bus,controller->slot,controller->function,
-                       offset,legacy|(1U<<24));
-    for(uint32_t wait=0;wait<EHCI_TIMEOUT;wait++){
-        legacy=pci_read_config32(controller->bus,controller->slot,
-                                 controller->function,offset);
-        if(!(legacy&(1U<<16))) return true;
+    for(uint8_t visited=0;offset && visited<32;visited++){
+        uint32_t legacy=pci_read_config32(controller->bus,controller->slot,
+                                          controller->function,offset);
+        if((legacy&0xFF)==1){
+            pci_write_config32(controller->bus,controller->slot,
+                               controller->function,offset,legacy|(1U<<24));
+            for(uint32_t wait=0;wait<EHCI_TIMEOUT;wait++){
+                legacy=pci_read_config32(controller->bus,controller->slot,
+                                         controller->function,offset);
+                if(!(legacy&(1U<<16))){
+                    if(offset<=0xF8){
+                        pci_write_config32(controller->bus,controller->slot,
+                                           controller->function,(uint8_t)(offset+4),0);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+        offset=(uint8_t)((legacy>>8)&0xFF);
     }
-    return false;
+    return true;
 }
 
 static bool initialize_controller(const struct storage_controller_info *controller,
