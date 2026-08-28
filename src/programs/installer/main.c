@@ -16,6 +16,7 @@ static int32_t disk_count;
 static int32_t selected_disk;
 static struct pc_display_info display;
 static bool installation_committed;
+static struct install_log install_log_snapshot;
 
 static uint32_t visible_disk_count(void){
     uint32_t capacity=display.height>280 ? (display.height-280)/54 : 1;
@@ -188,10 +189,6 @@ static void append_current_stage(struct install_log *log,
 }
 
 static void draw_progress(const struct install_status *status){
-    struct install_log log={0};
-    if(pc_strcmp(status->stage,"Preparing installation")!=0)
-        (void)pc_install_log(&log);
-    append_current_stage(&log,status);
     pc_display_begin_update();
     pc_display_clear(COLOR_BACKGROUND);
     uint32_t panel_x,panel_y,panel_width,panel_height;
@@ -214,6 +211,13 @@ static void draw_progress(const struct install_status *status){
     number_text(percent,progress,"%");
     pc_draw_text(panel_x+panel_width/2-12,bar_y+15,percent,COLOR_TEXT,
                  progress ? COLOR_ACCENT : COLOR_CARD);
+    pc_display_end_update();
+
+    install_log_snapshot.count=0;
+    if(pc_strcmp(status->stage,"Preparing installation")!=0)
+        (void)pc_install_log(&install_log_snapshot);
+    append_current_stage(&install_log_snapshot,status);
+    pc_display_begin_update();
     pc_draw_text(panel_x+30,panel_y+174,"Live installation log",
                  COLOR_TEXT,COLOR_PANEL);
     uint32_t log_top=panel_y+202;
@@ -222,10 +226,12 @@ static void draw_progress(const struct install_status *status){
         pc_draw_rect(panel_x+30,log_top,panel_width-60,
                      footer_top-log_top,COLOR_CARD);
         uint32_t visible=(footer_top-log_top-12)/20;
-        if(visible>log.count) visible=log.count;
-        uint32_t first=log.count-visible;
+        if(visible>install_log_snapshot.count)
+            visible=install_log_snapshot.count;
+        uint32_t first=install_log_snapshot.count-visible;
         for(uint32_t row=0;row<visible;row++){
-            struct install_log_entry *entry=&log.entries[first+row];
+            struct install_log_entry *entry=
+                &install_log_snapshot.entries[first+row];
             char entry_percent[16];
             number_text(entry_percent,entry->progress,"%");
             uint32_t y=log_top+8+row*20;
@@ -373,19 +379,18 @@ static void wait_after_success(const struct install_status *status){
 static void run_installation(bool start_job){
     struct install_status status={0};
     if(start_job){
-        status.state=1;
-        status.progress=1;
-        pc_copy(status.stage,"Preparing installation",sizeof(status.stage));
-        draw_progress(&status);
-        if(pc_install_start(disks[selected_disk].name,
-                            disks[selected_disk].serial)<0){
-            wait_after_failure("Cannot start installation",4);
+        int32_t start_result=pc_install_start(disks[selected_disk].name,
+                                              disks[selected_disk].serial);
+        if(start_result<0){
+            wait_after_failure("Cannot start installation",start_result);
             return;
         }
-    } else if(!pc_install_status(&status)){
+    }
+    if(!pc_install_status(&status)){
         wait_after_failure("Cannot resume installation",5);
         return;
     }
+    draw_progress(&status);
     uint32_t previous_progress=UINT32_MAX;
     uint32_t redraw_ticks=0;
     for(;;){

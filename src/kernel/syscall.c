@@ -90,6 +90,15 @@ static void install_worker(void *argument){
     }
 }
 
+void install_report_ui_crash(int32_t status){
+    if(install_job.state!=0) return;
+    memset(&install_job,0,sizeof(install_job));
+    memset(&install_history,0,sizeof(install_history));
+    install_job.state=3;
+    install_job.result=status;
+    install_progress(0,"Installer UI crashed");
+}
+
 static void print_hex(uint64_t v){
     const char *h="0123456789ABCDEF";
     char buf[17]; buf[16]=0;
@@ -486,10 +495,10 @@ int64_t syscall_handler(struct syscall_regs *r){
             return keyboard_try_getc(&character) ? (uint8_t)character : -1;
         }
         case SYS_INSTALL_START:
-            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)
-               || !readable_string((const char*)(uintptr_t)a1)
-               || !readable_string((const char*)(uintptr_t)a2)
-               || install_job.state==1) return -1;
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -10;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -11;
+            if(install_job.state==1) return -12;
             memset(&install_job,0,sizeof(install_job));
             memset(&install_history,0,sizeof(install_history));
             strncpy(install_device,(const char*)(uintptr_t)a1,

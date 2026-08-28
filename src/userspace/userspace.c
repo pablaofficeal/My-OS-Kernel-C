@@ -161,6 +161,8 @@ int32_t userspace_run_program(const char *path){
         status=0;
         (void)userspace_syscall(SYS_WAIT,(uint64_t)pid,
                                 (uint64_t)&status,0);
+        if(supervise_installer && status>=128)
+            install_report_ui_crash(status);
         if(!supervise_installer || !installer_requires_restart(status)) break;
         installer_pinned=true;
         klogf(KLOG_ERROR,
