@@ -128,18 +128,34 @@ static void execute_program(const char *name, const char *arguments){
             }
         }
         char search_path[PROCESS_ENVIRONMENT_VALUE_LIMIT];
-        if(pc_getenv("PATH",search_path,sizeof(search_path))>=0){
-            const char *directory=search_path;
-            while(*directory){
-                uint32_t length=0;
-                while(directory[length] && directory[length]!=':') length++;
+        if(pc_getenv("PATH",search_path,sizeof(search_path))<0){
+            pc_copy(search_path,"/bin/program:/bin",sizeof(search_path));
+        }
+        const char *directory=search_path;
+        while(*directory){
+            uint32_t length=0;
+            while(directory[length] && directory[length]!=':') length++;
+            if(length){
                 char candidate[SHELL_PATH_CAPACITY];
-                if(length && build_program_path(directory,length,name,candidate,
-                                                sizeof(candidate))
+                if(build_program_path(directory,length,name,candidate,
+                                      sizeof(candidate))
                    && start_program(candidate,expanded)>=0) return;
-                directory+=length;
-                if(*directory==':') directory++;
+            } else {
+                char candidate[SHELL_PATH_CAPACITY];
+                if(build_program_path("/bin/program",12,name,candidate,
+                                      sizeof(candidate))
+                   && start_program(candidate,expanded)>=0) return;
             }
+            directory+=length;
+            if(*directory==':') directory++;
+        }
+        {
+            char candidate[SHELL_PATH_CAPACITY];
+            if(build_program_path("/bin/program",12,name,candidate,
+                                  sizeof(candidate))
+               && start_program(candidate,expanded)>=0) return;
+            if(build_program_path("/bin",4,name,candidate,sizeof(candidate))
+               && start_program(candidate,expanded)>=0) return;
         }
     }
     pc_write(name);
@@ -177,7 +193,7 @@ int shell_run(void){
     char line[SHELL_LINE_CAPACITY];
     pc_display_clear(0x181825);
     pc_write("PureC Terminal\n");
-    pc_write("Minimal shell: type help. Programs need an absolute path.\n\n");
+    pc_write("Minimal shell: type help. Programs resolve via PATH.\n\n");
     for(;;){
         print_prompt();
         pc_read_line("",line,sizeof(line));
