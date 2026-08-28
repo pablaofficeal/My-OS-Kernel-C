@@ -281,14 +281,21 @@ static bool send_verb(uint32_t verb, uint32_t *response) {
         uint16_t current_response = read16(HDA_RIRBWP) & 0xFF;
         if (current_response != old_response) {
             uint16_t response_index = (uint16_t)((old_response + 1) & 0xFF);
+            uint64_t response_entry = rirb[response_index];
+            uint32_t response_value = (uint32_t)response_entry;
+            uint32_t response_extended = (uint32_t)(response_entry >> 32);
             if (response) {
-                *response = (uint32_t)rirb[response_index];
+                *response = response_value;
                 klogf(KLOG_DEBUG,
-                      "audio: HDA VERB IN raw=0x%08x response_slot=%u phys=0x%llx",
-                      *response, response_index,
+                      "audio: HDA VERB IN raw=0x%08x extended=0x%08x unsolicited=%u response_slot=%u phys=0x%llx",
+                      *response, response_extended,
+                      (response_extended & 0x10) != 0 ? 1 : 0, response_index,
                       physical_address(&rirb[response_index]));
             } else {
-                klogf(KLOG_DEBUG, "audio: HDA VERB IN unsolicited response ignored slot=%u",
+                klogf(KLOG_DEBUG,
+                      "audio: HDA VERB ACK raw=0x%08x extended=0x%08x unsolicited=%u slot=%u",
+                      response_value, response_extended,
+                      (response_extended & 0x10) != 0 ? 1 : 0,
                       response_index);
             }
             trace_ring("response-received");
