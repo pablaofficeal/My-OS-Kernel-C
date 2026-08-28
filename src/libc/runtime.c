@@ -84,10 +84,15 @@ void pc_read_line(const char *prompt, char *buffer, uint32_t capacity){
         }
         if((character=='\b' || character==127) && length){
             length--;
+            pc_write("\b");
             continue;
         }
         if(character<' ' || character>'~') continue;
-        if(length+1<capacity) buffer[length++]=character;
+        if(length+1<capacity){
+            char echo[2]={character,'\0'};
+            buffer[length++]=character;
+            pc_write(echo);
+        }
     }
     buffer[length]='\0';
 }

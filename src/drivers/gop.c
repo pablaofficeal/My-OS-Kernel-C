@@ -311,6 +311,11 @@ static void draw_char_sized(char c, uint32_t x, uint32_t y, uint32_t size,
 
 void gop_putc(char c){
     if(!gop.available){ vga_putc(c); return; }
+    if(c=='\b'){
+        if(cur_x>12) cur_x-=8;
+        draw_char(' ',cur_x,cur_y);
+        return;
+    }
     if(c=='\n'){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); return; }
     if(c=='\r'){ cur_x=12; return; }
     if(cur_x+8 >= gop.width){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); }

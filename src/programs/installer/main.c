@@ -1,12 +1,16 @@
 #include "purec.h"
-#include "fs_types.h"
 
 #define CONSOLE_BACKGROUND 0x181824u
 #define MAX_INSTALL_DISKS 20
 
-static struct pc_disk_info disks[MAX_INSTALL_DISKS];
-static int disk_count;
-static int selected_disk;
+#define INSTALL_IDLE 0
+#define INSTALL_RUNNING 1
+#define INSTALL_COMPLETE 2
+#define INSTALL_FAILED 3
+
+static struct storage_device_info disks[MAX_INSTALL_DISKS];
+static int32_t disk_count;
+static int32_t selected_disk;
 
 static void clear_console(void) {
     pc_display_begin_update();
@@ -15,40 +19,54 @@ static void clear_console(void) {
 }
 
 static void print_separator(void) {
-    pc_puts("------------------------------------------------------------\n");
+    pc_write("------------------------------------------------------------\n");
 }
 
-static void print_disk(const struct pc_disk_info *disk, int index) {
-    pc_printf("  %d) %s  %s  %llu MiB", index + 1, disk->name, disk->model,
-              (unsigned long long)(disk->size_bytes / (1024u * 1024u)));
+static uint64_t disk_size_mib(const struct storage_device_info *disk) {
+    return disk->sector_count * disk->sector_size / (1024u * 1024u);
+}
+
+static void print_disk(const struct storage_device_info *disk, int32_t index) {
+    pc_write("  ");
+    pc_write_i64(index + 1);
+    pc_write(") ");
+    pc_write(disk->name);
+    pc_write("  ");
+    pc_write(disk->model);
+    pc_write("  ");
+    pc_write_u64(disk_size_mib(disk));
+    pc_write(" MiB");
     if (!disk->operational) {
-        pc_puts("  [unavailable]");
+        pc_write("  [unavailable]");
     } else if (!disk->writable) {
-        pc_puts("  [read only]");
+        pc_write("  [read only]");
     }
-    pc_puts("\n");
+    pc_write("\n");
 }
 
-static int parse_disk_number(const char *text) {
-    int value = 0;
-    int index = 0;
+static int32_t parse_disk_number(const char *text) {
+    int32_t value = 0;
+    int32_t index = 0;
 
     if (!text || !text[0]) {
         return -1;
     }
-
     while (text[index]) {
         if (text[index] < '0' || text[index] > '9') {
             return -1;
         }
-        value = value * 10 + (text[index] - '0');
+        value = value * 10 + text[index] - '0';
         index++;
     }
-
     if (value < 1 || value > disk_count) {
         return -1;
     }
     return value - 1;
+}
+
+static void wait_for_enter(void) {
+    char input[2];
+    pc_read_line("Press Enter to continue.\n", input, sizeof(input));
 }
 
 static bool select_disk(void) {
@@ -56,31 +74,27 @@ static bool select_disk(void) {
 
     for (;;) {
         clear_console();
-        pc_puts("Pure OS console installer\n");
+        pc_write("Pure OS console installer\n");
         print_separator();
-        pc_puts("Select the target disk. All data on it will be erased.\n\n");
-
-        for (int i = 0; i < disk_count; i++) {
+        pc_write("Select the target disk. All data on it will be erased.\n\n");
+        for (int32_t i = 0; i < disk_count; i++) {
             print_disk(&disks[i], i);
         }
 
-        pc_puts("\nDisk number (or q to quit): ");
-        if (pc_read_line(input, sizeof(input)) < 0) {
-            return false;
-        }
-        if (pc_streq(input, "q") || pc_streq(input, "Q")) {
+        pc_read_line("\nDisk number (or q to quit): ", input, sizeof(input));
+        if (pc_strcmp(input, "q") == 0 || pc_strcmp(input, "Q") == 0) {
             return false;
         }
 
-        int index = parse_disk_number(input);
+        int32_t index = parse_disk_number(input);
         if (index < 0) {
-            pc_puts("Invalid disk number. Press Enter to try again.\n");
-            pc_read_line(input, sizeof(input));
+            pc_write("Invalid disk number.\n");
+            wait_for_enter();
             continue;
         }
         if (!disks[index].operational || !disks[index].writable) {
-            pc_puts("This disk cannot be used. Press Enter to try again.\n");
-            pc_read_line(input, sizeof(input));
+            pc_write("This disk cannot be used.\n");
+            wait_for_enter();
             continue;
         }
 
@@ -91,145 +105,151 @@ static bool select_disk(void) {
 
 static bool confirm_erase(void) {
     char input[32];
-    const struct pc_disk_info *disk = &disks[selected_disk];
+    const struct storage_device_info *disk = &disks[selected_disk];
 
     clear_console();
-    pc_puts("Confirm installation\n");
+    pc_write("Confirm installation\n");
     print_separator();
-    pc_printf("Target: %s  %s\n", disk->name, disk->model);
-    pc_printf("Size:   %llu MiB\n",
-              (unsigned long long)(disk->size_bytes / (1024u * 1024u)));
-    pc_puts("\nWARNING: every partition and file on this disk will be erased.\n");
-    pc_puts("Type ERASE to start, or anything else to cancel: ");
-
-    if (pc_read_line(input, sizeof(input)) < 0) {
-        return false;
-    }
-    return pc_streq(input, "ERASE");
+    pc_write("Target: ");
+    pc_write(disk->name);
+    pc_write("  ");
+    pc_write(disk->model);
+    pc_write("\nSize:   ");
+    pc_write_u64(disk_size_mib(disk));
+    pc_write(" MiB\n\n");
+    pc_write("WARNING: every partition and file on this disk will be erased.\n");
+    pc_read_line("Type ERASE to start, or anything else to cancel: ",
+                 input, sizeof(input));
+    return pc_strcmp(input, "ERASE") == 0;
 }
 
-static void print_new_log_entries(uint32_t *next_sequence) {
-    struct pc_install_log log;
+static void print_progress(uint32_t progress, const char *stage) {
+    pc_write("[");
+    pc_write_u64(progress);
+    pc_write("%] ");
+    pc_write(stage);
+    pc_write("\n");
+}
 
-    if (pc_install_log(*next_sequence, &log) < 0) {
+static void print_new_log_entries(uint32_t *shown_count) {
+    struct install_log log;
+
+    if (!pc_install_log(&log)) {
         return;
     }
-
-    for (uint32_t i = 0; i < log.count; i++) {
-        const struct pc_install_log_entry *entry = &log.entries[i];
-        pc_printf("[%u%%] %s\n", entry->progress, entry->message);
-        *next_sequence = entry->sequence + 1;
+    if (log.count < *shown_count) {
+        *shown_count = 0;
     }
+    for (uint32_t i = *shown_count; i < log.count; i++) {
+        print_progress(log.entries[i].progress, log.entries[i].stage);
+    }
+    *shown_count = log.count;
 }
 
 static bool write_install_config(void) {
+    static const char directory[] = "/purec";
+    static const char path[] = "/purec/install.cfg";
     static const char config[] =
         "boot=/bin/init\n"
         "installer=console-ring3\n"
         "filesystem=fat32\n";
-    int fd = pc_open("/system/install.cfg", FS_OPEN_WRITE | FS_OPEN_CREATE | FS_OPEN_TRUNCATE);
 
-    if (fd < 0) {
-        pc_puts("[96%] Cannot create /system/install.cfg\n");
+    (void)pc_syscall(SYS_DIR_CREATE, (uint64_t)(uintptr_t)directory, 0, 0);
+    (void)pc_syscall(SYS_FILE_CREATE, (uint64_t)(uintptr_t)path, 0, 0);
+    int64_t result = pc_syscall(SYS_FILE_WRITE,
+        (uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)config,
+        sizeof(config) - 1);
+    if (result < 0) {
+        pc_write("[96%] Cannot write /purec/install.cfg\n");
         return false;
     }
-
-    long written = pc_write_fd(fd, config, sizeof(config) - 1);
-    pc_close(fd);
-    if (written != (long)(sizeof(config) - 1)) {
-        pc_puts("[96%] Cannot write /system/install.cfg\n");
-        return false;
-    }
-
-    pc_puts("[96%] Installation configuration written\n");
+    pc_write("[96%] Installation configuration written\n");
     return true;
 }
 
 static void wait_for_reboot(void) {
     char input[32];
 
-    pc_puts("\nInstallation completed successfully.\n");
-    pc_puts("Remove the installation media, type REBOOT and press Enter.\n");
+    pc_write("\nInstallation completed successfully.\n");
+    pc_write("Remove the installation media, type REBOOT and press Enter.\n");
     for (;;) {
-        pc_puts("> ");
-        if (pc_read_line(input, sizeof(input)) >= 0 &&
-            (pc_streq(input, "REBOOT") || pc_streq(input, "reboot"))) {
-            pc_reboot();
+        pc_read_line("> ", input, sizeof(input));
+        if (pc_strcmp(input, "REBOOT") == 0 ||
+            pc_strcmp(input, "reboot") == 0) {
+            (void)pc_syscall(SYS_REBOOT, 0, 0, 0);
         }
     }
 }
 
 static bool run_installation(bool start_job) {
-    struct pc_install_status status;
-    uint32_t next_sequence = 0;
+    struct install_status status;
+    uint32_t shown_log_entries = 0;
 
     clear_console();
-    pc_puts("Pure OS installation\n");
+    pc_write("Pure OS installation\n");
     print_separator();
 
     if (start_job) {
-        const struct pc_disk_info *disk = &disks[selected_disk];
-        int result = pc_install_start(disk->name, disk->serial);
+        const struct storage_device_info *disk = &disks[selected_disk];
+        int32_t result = pc_install_start(disk->name, disk->serial);
         if (result < 0) {
-            pc_printf("Could not start installation (error %d).\n", result);
+            pc_write("Could not start installation. Error: ");
+            pc_write_i64(result);
+            pc_write("\n");
             return false;
         }
-        pc_printf("Installing to %s. Do not power off the computer.\n\n", disk->name);
+        pc_write("Installing to ");
+        pc_write(disk->name);
+        pc_write(". Do not power off the computer.\n\n");
     } else {
-        pc_puts("An installation is already active. Resuming its log.\n\n");
+        pc_write("An installation is already active. Resuming progress.\n\n");
     }
 
     for (;;) {
-        if (pc_install_status(&status) < 0) {
-            pc_puts("Cannot read installation status.\n");
+        if (!pc_install_status(&status)) {
+            pc_write("Cannot read installation status.\n");
             return false;
         }
-
-        print_new_log_entries(&next_sequence);
-
-        if (status.state == PC_INSTALL_FAILED) {
-            pc_printf("\nInstallation failed at %u%%: %s (error %d).\n",
-                      status.progress, status.stage, status.error);
+        print_new_log_entries(&shown_log_entries);
+        if (status.state == INSTALL_FAILED) {
+            pc_write("\nInstallation failed. Error: ");
+            pc_write_i64(status.result);
+            pc_write("\n");
             return false;
         }
-
-        if (status.state == PC_INSTALL_COMPLETE) {
+        if (status.state == INSTALL_COMPLETE) {
             if (!write_install_config()) {
                 return false;
             }
-            pc_puts("[100%] Installation complete\n");
+            pc_write("[100%] Installation complete\n");
             wait_for_reboot();
-            return true;
         }
-
-        pc_yield();
+        pc_sleep(20);
     }
 }
 
 static int installer_main(void) {
-    struct pc_install_status status;
-    char input[16];
+    struct install_status status;
 
-    disk_count = pc_disk_list(disks, MAX_INSTALL_DISKS);
+    disk_count = pc_list_disks(disks, MAX_INSTALL_DISKS);
     if (disk_count <= 0) {
         clear_console();
-        pc_puts("Pure OS console installer\n");
+        pc_write("Pure OS console installer\n");
         print_separator();
-        pc_puts("No disks were detected.\n");
+        pc_write("No disks were detected.\n");
         return 1;
     }
 
-    if (pc_install_status(&status) >= 0 &&
-        status.state != PC_INSTALL_IDLE && status.state != PC_INSTALL_FAILED) {
-        if (run_installation(false)) {
-            return 0;
-        }
+    if (pc_install_status(&status) &&
+        status.state != INSTALL_IDLE && status.state != INSTALL_FAILED) {
+        (void)run_installation(false);
     }
 
     for (;;) {
         if (!select_disk()) {
             clear_console();
-            pc_puts("Installation cancelled.\n");
+            pc_write("Installation cancelled.\n");
             return 0;
         }
         if (!confirm_erase()) {
@@ -238,9 +258,8 @@ static int installer_main(void) {
         if (run_installation(true)) {
             return 0;
         }
-
-        pc_puts("\nPress Enter to return to disk selection.\n");
-        pc_read_line(input, sizeof(input));
+        pc_write("\n");
+        wait_for_enter();
     }
 }
 

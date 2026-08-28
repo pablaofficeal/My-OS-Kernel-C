@@ -1,11 +1,11 @@
-# ADR-004: PID 1, Userspace Binary Layout and GUI Installer
+# ADR-004: PID 1, Userspace Binary Layout and Console Installer
 
 ## Status
 Accepted
 
 ## Context
 The first process was whichever program happened to be started from the shell,
-the installer had a text interface, and Snake still had a linked kernel object.
+the installer was linked into the kernel, and Snake still had a linked kernel object.
 Applications duplicated raw `int 0x80` wrappers. A synchronous format syscall
 also prevented an installer process from drawing truthful progress updates.
 
@@ -24,10 +24,11 @@ file probing, input, mouse and framebuffer primitives. Static linking is used
 because the current ELF loader has no dynamic relocation support.
 
 Expose the installer as a desktop icon only while `/purec/install.cfg` is
-absent. Its GUI lists real block devices and selects them with the mouse. Disk
-formatting runs in a kernel worker and reports real FAT32 stages through
-`SYS_INSTALL_STATUS`; the ring-3 GUI polls this state and redraws its progress
-bar without blocking.
+absent. Starting it opens a standalone console program that lists real block
+devices, accepts a numbered selection and requires the explicit `ERASE`
+confirmation. Disk formatting runs in a kernel worker and reports real FAT32
+stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG`; the ring-3 installer
+prints the progress and stage log without blocking the worker.
 
 ## Consequences
 
@@ -53,8 +54,8 @@ bar without blocking.
 ## Alternatives Considered
 - A fake animated progress bar was rejected because it would not represent disk
   state.
-- A synchronous formatting syscall was rejected because the calling GUI cannot
-  render while blocked.
+- A synchronous formatting syscall was rejected because the calling installer
+  cannot report progress while blocked.
 - A dynamic `.so` was deferred because `PT_DYNAMIC` and relocations are not
   implemented.
 
