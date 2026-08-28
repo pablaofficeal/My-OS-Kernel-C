@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum display_font_face {
     DISPLAY_FONT_CLASSIC,
     DISPLAY_FONT_CLEAN,
@@ -39,3 +43,7 @@ void display_scroll_rect_up(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                             uint32_t amount, uint32_t fill_color);
 void display_draw_line(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1,
                        uint32_t color);
+
+#ifdef __cplusplus
+}
+#endif
