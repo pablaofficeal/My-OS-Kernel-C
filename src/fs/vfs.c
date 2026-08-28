@@ -33,12 +33,12 @@ static const struct kernel_file kernel_files[]={
     {
         "/kernel/init",
         "init",
-        "init=/sbin/init fallback=linked-userspace\n"
+        "process=elf64 ring=3 installer=/boot/installer.elf\n"
     },
     {
         "/kernel/abi",
         "abi",
-        "syscall=int80 fd=linux-like vfs=root:fat32,virtual:/kernel\n"
+        "syscall=int80 process=exec,wait,exit fd=per-process vfs=fat32\n"
     }
 };
 

@@ -3,6 +3,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/panic.h"
 #include "../arch/x86_64/gdt.h"
+#include "../mm/vmm.h"
 #include "../lib/string.h"
 
 static struct thread threads[SCHEDULER_MAX_THREADS];
@@ -14,6 +15,10 @@ static uint32_t core_count = 1;
 static void thread_trampoline(void);
 static struct thread *pick_next(void);
 static uint64_t create_initial_stack(struct thread *thread);
+static int create_thread(void (*entry)(void *arg), void *arg, const char *name,
+                         uint8_t priority, int16_t affinity,
+                         uint64_t address_space, struct process *process,
+                         bool user_mode);
 
 extern void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp);
 
@@ -46,6 +51,7 @@ void scheduler_init(void){
     idle->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     strncpy(idle->name, "idle", sizeof(idle->name)-1);
     idle->entry = NULL;
+    idle->address_space=vmm_kernel_address_space();
     current = idle;
     initialized = true;
     klogf(KLOG_OK, "sched: initialized, cores=%u max_threads=%u stack=%u", core_count, SCHEDULER_MAX_THREADS, SCHEDULER_STACK_SIZE);
@@ -53,7 +59,8 @@ void scheduler_init(void){
 
 static struct thread *alloc_thread(void){
     for(int i=1;i<SCHEDULER_MAX_THREADS;i++){
-        if(threads[i].state==THREAD_FREE){
+        if(threads[i].state==THREAD_FREE
+           || threads[i].state==THREAD_TERMINATED){
             return &threads[i];
         }
     }
@@ -74,7 +81,10 @@ static uint64_t create_initial_stack(struct thread *thread){
     return (uint64_t)stack_ptr;
 }
 
-int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *name, uint8_t priority, int16_t affinity){
+static int create_thread(void (*entry)(void *arg), void *arg, const char *name,
+                         uint8_t priority, int16_t affinity,
+                         uint64_t address_space, struct process *process,
+                         bool user_mode){
     if(!initialized) return -1;
     if(!entry) return -1;
     if(priority>7) priority=7;
@@ -88,6 +98,9 @@ int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *nam
     t->priority = priority;
     t->affinity = affinity;
     t->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
+    t->address_space=address_space ? address_space : vmm_kernel_address_space();
+    t->process=process;
+    t->user_mode=user_mode;
     if(name) strncpy(t->name, name, sizeof(t->name)-1);
     else strncpy(t->name, "thread", sizeof(t->name)-1);
 
@@ -103,11 +116,30 @@ int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *nam
     return t->id;
 }
 
+int scheduler_create_thread(void (*entry)(void *arg), void *arg,
+                            const char *name, uint8_t priority,
+                            int16_t affinity){
+    return create_thread(entry,arg,name,priority,affinity,
+                         vmm_kernel_address_space(),0,false);
+}
+
+int scheduler_create_user_thread(void (*entry)(void *arg), void *arg,
+                                 const char *name, uint8_t priority,
+                                 int16_t affinity, uint64_t address_space,
+                                 struct process *process){
+    if(!address_space || !process) return -1;
+    return create_thread(entry,arg,name,priority,affinity,address_space,
+                         process,true);
+}
+
 struct thread *scheduler_current_thread(void){ return current; }
 int scheduler_current_tid(void){ return current ? (int)current->id : -1; }
 uint32_t scheduler_thread_count(void){
     uint32_t cnt=0;
-    for(int i=0;i<SCHEDULER_MAX_THREADS;i++) if(threads[i].state!=THREAD_FREE) cnt++;
+    for(int i=0;i<SCHEDULER_MAX_THREADS;i++){
+        if(threads[i].state!=THREAD_FREE
+           && threads[i].state!=THREAD_TERMINATED) cnt++;
+    }
     return cnt;
 }
 void scheduler_set_affinity(int tid, int16_t core){
@@ -142,6 +174,12 @@ static struct thread *pick_next(void){
     return NULL;
 }
 
+static void activate_thread(struct thread *thread){
+    gdt_set_kernel_stack((uint64_t)(uintptr_t)
+                         (thread->stack+SCHEDULER_STACK_SIZE));
+    vmm_switch_address_space(thread->address_space);
+}
+
 void scheduler_yield(void){
     if(!initialized) return;
     uint64_t flags;
@@ -157,9 +195,21 @@ void scheduler_yield(void){
     current=next;
     prev->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     next->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
+    activate_thread(next);
     // klogf(KLOG_DEBUG, "sched: yield %u (%s) -> %u (%s)", prev->id, prev->name, next->id, next->name);
     scheduler_asm_switch(&prev->rsp, &next->rsp);
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
+}
+
+void scheduler_sleep(uint32_t milliseconds){
+    if(!initialized || !current || milliseconds==0){
+        scheduler_yield();
+        return;
+    }
+    uint64_t now=timer_ticks();
+    uint64_t wake=now+milliseconds;
+    current->wake_tick=wake<now ? UINT64_MAX : wake;
+    scheduler_block();
 }
 
 void scheduler_block(void){
@@ -176,6 +226,7 @@ void scheduler_block(void){
     }
     next->state = THREAD_RUNNING;
     current = next;
+    activate_thread(next);
     scheduler_asm_switch(&prev->rsp, &next->rsp);
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
@@ -207,6 +258,7 @@ void scheduler_exit(void){
     }
     next->state = THREAD_RUNNING;
     current = next;
+    activate_thread(next);
     scheduler_asm_switch(&prev->rsp, &next->rsp);
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
     for(;;) __asm__ volatile("hlt");

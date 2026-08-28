@@ -2,10 +2,17 @@
 set -e
 
 echo "🔨 Building Limine kernel (higher half, GOP)..."
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/lib/runtime.c -o program_runtime.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/installer/main.c -o installer_program.o
+x86_64-elf-ld -T linker-userspace.ld -o installer.elf program_runtime.o installer_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/init.c -o init_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/system_info.c -o system_info_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/process.c -o process_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/elf.c -o elf_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/mm/pmm.c -o pmm_limine.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/mm/vmm.c -o vmm_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/gdt.c -o gdt_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/idt.c -o idt_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/arch/x86_64/mmio.c -o mmio_limine.o
@@ -41,7 +48,6 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/terminal/shell_path.c -o shell_path_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/editor/nano.c -o nano_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/games/snake.c -o snake_limine.o
-x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/installer/installer.c -o installer_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/monitor/monitor.c -o monitor_limine.o
 x86_64-elf-g++ -std=c++20 -g -O1 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/explorer/explorer.cpp -o explorer_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/apps/datetime_service.c -o datetime_service_limine.o
@@ -59,7 +65,8 @@ x86_64-elf-g++ -std=c++20 -g -O1 -ffreestanding -fno-exceptions -fno-rtti -fno-s
 nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/scheduler.asm -o scheduler_asm_limine.o
-x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o init_limine.o system_info_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o vfs_limine.o display_limine.o userspace_fs_limine.o system_api_limine.o userspace_audio_limine.o audio_overlay_limine.o userspace_limine.o terminal_limine.o commands_limine.o shell_path_limine.o nano_limine.o snake_limine.o installer_limine.o monitor_limine.o explorer_limine.o datetime_service_limine.o clock_app_limine.o calendar_app_limine.o calculator_app_limine.o desktop_apps_limine.o audio_panel_limine.o scheduler_limine.o power_limine.o audio_hda_limine.o audio_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o
+nasm -f elf64 src/arch/x86_64/user.asm -o user_asm_limine.o
+x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o init_limine.o system_info_limine.o process_limine.o elf_limine.o pmm_limine.o vmm_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o vfs_limine.o display_limine.o userspace_fs_limine.o system_api_limine.o userspace_audio_limine.o audio_overlay_limine.o userspace_limine.o terminal_limine.o commands_limine.o shell_path_limine.o nano_limine.o snake_limine.o monitor_limine.o explorer_limine.o datetime_service_limine.o clock_app_limine.o calendar_app_limine.o calculator_app_limine.o desktop_apps_limine.o audio_panel_limine.o scheduler_limine.o power_limine.o audio_hda_limine.o audio_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o user_asm_limine.o
 echo "✅ kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel-limine.elf | head -n12
 
@@ -82,6 +89,7 @@ rm -rf iso_limine
 mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT
 
 cp kernel-limine.elf iso_limine/boot/kernel.elf
+cp installer.elf iso_limine/boot/installer.elf
 cat > iso_limine/boot/limine/limine.conf <<'EOF'
 timeout: 10
 verbose: yes
@@ -90,6 +98,7 @@ serial: yes
     protocol: limine
     kernel_path: boot():/boot/kernel.elf
     module_path: boot():/EFI/BOOT/BOOTX64.EFI
+    module_path: boot():/boot/installer.elf
 EOF
 cp iso_limine/boot/limine/limine.conf iso_limine/limine.conf
 
@@ -111,5 +120,5 @@ echo "🔧 limine bios-install..."
 chmod +x "$LIMINE_BIN" 2>/dev/null || true
 "$LIMINE_BIN" bios-install purec_limine.iso 2>&1 | tail -5
 
-ls -lh purec_limine.iso kernel-limine.elf
+ls -lh purec_limine.iso kernel-limine.elf installer.elf
 echo "✅ purec_limine.iso готов (higher half, no Lower half PHDR panic)"

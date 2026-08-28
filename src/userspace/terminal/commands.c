@@ -16,7 +16,6 @@
 #include "../../kernel/syscall.h"
 #include "../../lib/string.h"
 #include "../games/snake.h"
-#include "../installer/installer.h"
 #include "../monitor/monitor.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -610,7 +609,19 @@ static bool installer_create_dir(const char *path){
 }
 
 static void run_installer(const char *args){
-    installer_run(args);
+    (void)args;
+    int64_t pid=userspace_syscall(SYS_EXEC,
+                                  (uint64_t)"/boot/installer.elf",0,0);
+    if(pid<0){
+        terminal_write("Cannot start /boot/installer.elf from ISO\n");
+        return;
+    }
+    terminal_printf("Started installer process pid=%d\n",(int)pid);
+    int32_t status=0;
+    int64_t waited=userspace_syscall(SYS_WAIT,(uint64_t)pid,
+                                     (uint64_t)&status,0);
+    if(waited<0) terminal_write("Cannot wait for installer process\n");
+    else terminal_printf("Installer process exited status=%d\n",status);
     return;
     terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
     static struct storage_device_info devs[20];

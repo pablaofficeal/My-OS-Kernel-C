@@ -9,8 +9,12 @@
 #include "../arch/x86_64/mmio.h"
 #include "../lib/string.h"
 #include "init.h"
+#include "process.h"
+#include "../mm/pmm.h"
+#include "../mm/vmm.h"
 extern struct limine_memmap_response *memmap_response_ptr;
 extern struct limine_smp_response *smp_response_ptr;
+extern uint64_t hhdm_offset_global;
 #include <stdint.h>
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
@@ -31,6 +35,12 @@ void kernel_main(struct limine_framebuffer *fb) {
     klogf(KLOG_OK, "CPU detected: %s", system_info_cpu_name());
     klogf(KLOG_OK, "Usable RAM: %lu MB", system_info_usable_ram_bytes() / (1024 * 1024));
     klogf(KLOG_INFO, "Framebuffer: %dx%d", gop_get_width(), gop_get_height());
+
+    boot_diag_checkpoint(BOOT_STAGE_SYSTEM_INFO,"initializing physical memory");
+    pmm_init(memmap_response_ptr,hhdm_offset_global);
+    if(!pmm_is_ready()) kernel_panic("physical memory manager initialization failed");
+    vmm_init();
+    process_init();
 
     // GDT/IDT уже настроены в boot.c, но проверяем инт3 как linux-like selftest
     klog(KLOG_INFO, "Testing IDT: int3 breakpoint...");

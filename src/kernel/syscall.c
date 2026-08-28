@@ -16,11 +16,26 @@
 #include "system_info.h"
 #include "../lib/string.h"
 #include "../drivers/power.h"
+#include "../drivers/keyboard.h"
 #include "../kernel/scheduler.h"
+#include "../kernel/process.h"
+#include "../mm/pmm.h"
 #include <stdint.h>
 #include <stdbool.h>
 
 static volatile bool filesystem_syscall_busy;
+
+static bool readable(const void *buffer, uint64_t size){
+    return process_user_buffer(buffer,size,false);
+}
+
+static bool writable(void *buffer, uint64_t size){
+    return process_user_buffer(buffer,size,true);
+}
+
+static bool readable_string(const char *text){
+    return process_user_string(text,4096);
+}
 
 static void filesystem_syscall_lock(void){
     while(__atomic_test_and_set(&filesystem_syscall_busy,__ATOMIC_ACQUIRE))
@@ -50,7 +65,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             const char *s = (const char*)(uintptr_t)a1;
             uint64_t len = a2;
             // fd в a3 игнорируем, пишем в serial+gop
-            if(!s) return -1;
+            if(!readable(s,len)) return -1;
             for(uint64_t i=0;i<len;i++){ serial_putc(s[i]); gop_putc(s[i]); }
             return (int64_t)len;
         }
@@ -75,7 +90,7 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_FB_INFO: {
             struct framebuffer_info *info=(struct framebuffer_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             memset(info,0,sizeof(*info));
             info->width=gop_get_width();
             info->height=gop_get_height();
@@ -90,7 +105,8 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_DRAW_TEXT: {
             struct framebuffer_text_request *request=
                 (struct framebuffer_text_request*)(uintptr_t)a1;
-            if(!request || !request->text) return -1;
+            if(!readable(request,sizeof(*request))
+               || !readable_string(request->text)) return -1;
             gop_draw_text_at(request->x,request->y,request->text,
                              request->fg,request->bg);
             return 0;
@@ -98,7 +114,8 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_DRAW_TEXT_SIZED: {
             struct framebuffer_text_request *request=
                 (struct framebuffer_text_request*)(uintptr_t)a1;
-            if(!request || !request->text) return -1;
+            if(!readable(request,sizeof(*request))
+               || !readable_string(request->text)) return -1;
             gop_draw_text_sized_at(request->x,request->y,request->text,
                                    request->fg,request->bg,request->size);
             return 0;
@@ -106,7 +123,7 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_SCROLL_RECT_UP: {
             struct framebuffer_scroll_request *request=
                 (struct framebuffer_scroll_request*)(uintptr_t)a1;
-            if(!request) return -1;
+            if(!readable(request,sizeof(*request))) return -1;
             gop_scroll_rect_up(request->x,request->y,request->w,request->h,
                                request->amount,request->fill_color);
             return 0;
@@ -118,38 +135,53 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_GET_FONT_FACE:
             return (int64_t)gop_get_font_face();
         case SYS_GETPID:
-            return 42;
+            return process_current_pid();
+        case SYS_EXEC:
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            return process_spawn_module((const char*)(uintptr_t)a1);
         case SYS_GET_MOUSE: {
             struct mouse_state *out = (struct mouse_state*)(uintptr_t)a1;
-            if(!out) return -1;
+            if(!writable(out,sizeof(*out))) return -1;
             *out = mouse_get_state();
             return 0;
         }
         case SYS_FILE_OPEN: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_open((const char*)(uintptr_t)a1);
+            if(result>=0){
+                int32_t descriptor=process_fd_install(result);
+                if(descriptor<0) (void)vfs_close(result);
+                result=descriptor;
+            }
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_READ: {
+            if(!writable((void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            int32_t descriptor=process_fd_resolve((int32_t)a1);
+            if(descriptor<0) return -1;
             filesystem_syscall_lock();
-            int32_t result=vfs_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
+            int32_t result=vfs_read(descriptor,(void*)(uintptr_t)a2,(uint32_t)a3);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_CLOSE: {
             filesystem_syscall_lock();
-            int32_t result=vfs_close((int32_t)a1);
+            int32_t result=process_fd_close((int32_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_DELETE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_delete((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_RENAME: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_rename((const char*)(uintptr_t)a1,
                                       (const char*)(uintptr_t)a2);
@@ -157,6 +189,8 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FILE_MOVE: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_move((const char*)(uintptr_t)a1,
                                     (const char*)(uintptr_t)a2);
@@ -164,6 +198,10 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_DIR_LIST: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !writable((void*)(uintptr_t)a2,
+                            (uint64_t)(uint32_t)a3
+                                *sizeof(struct fs_directory_entry))) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_list((const char*)(uintptr_t)a1,
                                     (struct fs_directory_entry*)(uintptr_t)a2,
@@ -172,24 +210,36 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FILE_CREATE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_create_file((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_DIR_CREATE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_create_directory((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_DISK_LIST:
+            if(!writable((void*)(uintptr_t)a1,
+                         (uint64_t)(uint32_t)a2
+                             *sizeof(struct storage_device_info))) return -1;
             return block_device_list((struct storage_device_info*)(uintptr_t)a1,
                                      (uint32_t)a2);
         case SYS_STORAGE_CONTROLLERS:
+            if(!writable((void*)(uintptr_t)a1,
+                         (uint64_t)(uint32_t)a2
+                             *sizeof(struct storage_controller_info))) return -1;
             return storage_controller_list(
                 (struct storage_controller_info*)(uintptr_t)a1,(uint32_t)a2);
         case SYS_FAT32_FORMAT: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)
+               || (a3 && !readable_string((const char*)(uintptr_t)a3))) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_format_device((const char*)(uintptr_t)a1,
                                              (const char*)(uintptr_t)a2,
@@ -198,6 +248,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FAT32_FORMAT_FORCE: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_format_device_force((const char*)(uintptr_t)a1,
                                                    (const char*)(uintptr_t)a2);
@@ -205,6 +258,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FAT32_FORMAT_UEFI: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_format_uefi_device((const char*)(uintptr_t)a1,
                                                   (const char*)(uintptr_t)a2);
@@ -212,6 +268,8 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FILE_WRITE: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable((const void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_write_file((const char*)(uintptr_t)a1,
                                           (const void*)(uintptr_t)a2,
@@ -220,6 +278,8 @@ int64_t syscall_handler(struct syscall_regs *r){
             return result;
         }
         case SYS_FILE_APPEND: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable((const void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
             filesystem_syscall_lock();
             int32_t result=vfs_append_file((const char*)(uintptr_t)a1,
                                            (const void*)(uintptr_t)a2,
@@ -234,6 +294,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             xhci_get_probe_stats(&xhci_stats);
             ehci_get_probe_stats(&ehci_stats);
             struct usb_scan_status *status=(struct usb_scan_status*)(uintptr_t)a1;
+            if(status && !writable(status,sizeof(*status))) return -1;
             if(status){
                 status->xhci_controllers=xhci_stats.controllers;
                 status->xhci_connected_ports=xhci_stats.connected_ports;
@@ -279,7 +340,7 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_CPU_INFO: {
             struct cpu_monitor_info *info=(struct cpu_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             memset(info,0,sizeof(*info));
             strncpy(info->name,system_info_cpu_name(),sizeof(info->name)-1);
             info->logical_processors=system_info_logical_processors();
@@ -290,9 +351,9 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_MEMORY_INFO: {
             struct memory_monitor_info *info=(struct memory_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             info->total_bytes=system_info_total_ram_bytes();
-            info->available_bytes=system_info_usable_ram_bytes();
+            info->available_bytes=pmm_free_bytes();
             info->used_bytes=info->total_bytes>info->available_bytes
                 ? info->total_bytes-info->available_bytes : 0;
             info->framebuffer_bytes=gop_get_framebuffer_size_bytes();
@@ -300,7 +361,7 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_DISK_STATS: {
             struct disk_monitor_info *info=(struct disk_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             memset(info,0,sizeof(*info));
             info->device_count=block_device_count();
             for(uint32_t index=0;index<info->device_count;index++){
@@ -312,18 +373,13 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         }
         case SYS_EXIT:
-            serial_write_string("[SYSCALL] exit\n");
-            gop_write("[SYSCALL] exit\n");
-            for(;;) __asm__ volatile("cli; hlt");
+            process_exit_current((int32_t)a1);
+        case SYS_WAIT:
+            if(a2 && !writable((void*)(uintptr_t)a2,sizeof(int32_t))) return -1;
+            return process_wait((uint32_t)a1,(int32_t*)(uintptr_t)a2);
         case SYS_SLEEP:
             if(a1>UINT32_MAX) return -1;
-            // Real HW: PIT IRQ may not arrive via APIC – используем busy-wait чтобы не виснуть на hlt.
-            // 1ms ~ 1e6 nop+pause, калибровка грубая но не требует timer_tick.
-            for(volatile uint64_t wait=0;wait<a1*1000000ULL;wait++){
-                __asm__ volatile("pause");
-            }
-            // Yield to scheduler so other threads run
-            scheduler_yield();
+            scheduler_sleep((uint32_t)a1);
             return 0;
         case SYS_REBOOT:
             power_reboot();
@@ -333,12 +389,12 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_BATTERY_INFO: {
             struct battery_info *out=(struct battery_info*)(uintptr_t)a1;
-            if(!out) return -1;
+            if(!writable(out,sizeof(*out))) return -1;
             return power_battery_get(out) ? 0 : -1;
         }
         case SYS_AUDIO_GET_STATUS: {
             struct audio_status *out=(struct audio_status*)(uintptr_t)a1;
-            if(!out) return -1;
+            if(!writable(out,sizeof(*out))) return -1;
             audio_get_status(out);
             return 0;
         }
@@ -371,6 +427,8 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_SCHED_YIELD:
             scheduler_yield();
             return 0;
+        case SYS_GETCHAR:
+            return (uint8_t)keyboard_getc();
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;

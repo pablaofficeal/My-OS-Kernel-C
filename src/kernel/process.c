@@ -1,0 +1,212 @@
+#include "process.h"
+#include "elf.h"
+#include "scheduler.h"
+#include "klog.h"
+#include "../boot/install_source.h"
+#include "../fs/vfs.h"
+#include "../mm/pmm.h"
+#include "../mm/vmm.h"
+#include "../lib/string.h"
+
+#define USER_STACK_TOP 0x00007FFFFFF00000ULL
+#define USER_STACK_PAGES 16
+
+extern void arch_enter_user(uint64_t instruction_pointer,
+                            uint64_t stack_pointer) __attribute__((noreturn));
+
+static struct process processes[PROCESS_MAX_COUNT];
+static uint32_t next_pid=1;
+
+static struct process *allocate_process(void){
+    for(uint32_t index=0;index<PROCESS_MAX_COUNT;index++){
+        if(processes[index].state==PROCESS_FREE){
+            struct process *process=&processes[index];
+            memset(process,0,sizeof(*process));
+            for(uint32_t fd=0;fd<PROCESS_FD_COUNT;fd++) process->descriptors[fd]=-1;
+            process->descriptors[0]=VFS_FD_STDIN;
+            process->descriptors[1]=VFS_FD_STDOUT;
+            process->descriptors[2]=VFS_FD_STDERR;
+            return process;
+        }
+    }
+    return 0;
+}
+
+static void user_process_entry(void *argument){
+    struct process *process=(struct process*)argument;
+    process->state=PROCESS_RUNNING;
+    arch_enter_user(process->entry,process->user_stack_top);
+}
+
+void process_init(void){
+    memset(processes,0,sizeof(processes));
+    next_pid=1;
+    klog(KLOG_OK,"process: table initialized");
+}
+
+int32_t process_spawn_elf(const void *image, uint64_t image_size,
+                          const char *name){
+    struct process *process=allocate_process();
+    if(!process) return -1;
+    process->address_space=vmm_create_address_space();
+    if(!process->address_space) return -1;
+    struct elf_load_result loaded;
+    if(!elf_load_user_image(image,image_size,process->address_space,&loaded)){
+        vmm_destroy_address_space(process->address_space);
+        process->address_space=0;
+        process->state=PROCESS_FREE;
+        return -1;
+    }
+    uint64_t stack_base=USER_STACK_TOP-USER_STACK_PAGES*PMM_PAGE_SIZE;
+    if(!vmm_map_new_pages(process->address_space,stack_base,USER_STACK_PAGES,
+                          VMM_PAGE_USER|VMM_PAGE_WRITABLE|VMM_PAGE_NX)){
+        vmm_destroy_address_space(process->address_space);
+        process->address_space=0;
+        process->state=PROCESS_FREE;
+        return -1;
+    }
+    process->pid=next_pid++;
+    process->parent_pid=(uint32_t)(process_current_pid()>0
+        ? process_current_pid() : 0);
+    process->state=PROCESS_READY;
+    process->entry=loaded.entry;
+    process->user_stack_top=USER_STACK_TOP-16;
+    strncpy(process->name,name ? name : "process",sizeof(process->name)-1);
+    if(name && strcmp(name,"installer.elf")==0)
+        process->capabilities|=PROCESS_CAP_STORAGE_ADMIN;
+    process->thread_id=scheduler_create_user_thread(
+        user_process_entry,process,process->name,2,-1,
+        process->address_space,process);
+    if(process->thread_id<0){
+        vmm_destroy_address_space(process->address_space);
+        process->address_space=0;
+        process->state=PROCESS_FREE;
+        return -1;
+    }
+    klogf(KLOG_OK,"process: pid=%u name=%s entry=0x%llx cr3=0x%llx",
+          process->pid,process->name,process->entry,process->address_space);
+    return (int32_t)process->pid;
+}
+
+int32_t process_spawn_module(const char *path){
+    const void *image;
+    uint64_t size;
+    if(!path || !boot_get_module(path,&image,&size)) return -1;
+    const char *name=path;
+    for(const char *cursor=path;*cursor;cursor++){
+        if(*cursor=='/' && cursor[1]) name=cursor+1;
+    }
+    return process_spawn_elf(image,size,name);
+}
+
+int32_t process_wait(uint32_t pid, int32_t *status){
+    if(!pid) return -1;
+    for(;;){
+        struct process *target=0;
+        for(uint32_t index=0;index<PROCESS_MAX_COUNT;index++){
+            if(processes[index].state!=PROCESS_FREE
+               && processes[index].pid==pid){
+                target=&processes[index];
+                break;
+            }
+        }
+        if(!target) return -1;
+        int32_t caller=process_current_pid();
+        if(caller>0 && target->parent_pid!=(uint32_t)caller) return -1;
+        if(target->state==PROCESS_EXITED){
+            if(status) *status=target->exit_code;
+            vmm_destroy_address_space(target->address_space);
+            target->address_space=0;
+            target->state=PROCESS_FREE;
+            return (int32_t)pid;
+        }
+        scheduler_yield();
+    }
+}
+
+struct process *process_current(void){
+    struct thread *thread=scheduler_current_thread();
+    return thread ? thread->process : 0;
+}
+
+int32_t process_current_pid(void){
+    struct process *process=process_current();
+    return process ? (int32_t)process->pid : 0;
+}
+
+bool process_current_is_user(void){
+    struct thread *thread=scheduler_current_thread();
+    return thread && thread->user_mode;
+}
+
+bool process_has_capability(uint32_t capability){
+    struct process *process=process_current();
+    return !process || (process->capabilities&capability)==capability;
+}
+
+uint64_t process_current_address_space(void){
+    struct process *process=process_current();
+    return process ? process->address_space : vmm_kernel_address_space();
+}
+
+void process_exit_current(int32_t status){
+    struct process *process=process_current();
+    if(process){
+        process->exit_code=status;
+        process->state=PROCESS_EXITED;
+        for(uint32_t fd=3;fd<PROCESS_FD_COUNT;fd++){
+            if(process->descriptors[fd]>=VFS_FD_BASE){
+                (void)vfs_close(process->descriptors[fd]);
+                process->descriptors[fd]=-1;
+            }
+        }
+        klogf(KLOG_INFO,"process: pid=%u exited status=%d",process->pid,status);
+    }
+    scheduler_exit();
+    __builtin_unreachable();
+}
+
+int32_t process_fd_install(int32_t kernel_descriptor){
+    struct process *process=process_current();
+    if(!process) return kernel_descriptor;
+    for(int32_t fd=3;fd<PROCESS_FD_COUNT;fd++){
+        if(process->descriptors[fd]<0){
+            process->descriptors[fd]=kernel_descriptor;
+            return fd;
+        }
+    }
+    return -1;
+}
+
+int32_t process_fd_resolve(int32_t descriptor){
+    struct process *process=process_current();
+    if(!process) return descriptor;
+    if(descriptor<0 || descriptor>=PROCESS_FD_COUNT) return -1;
+    return process->descriptors[descriptor];
+}
+
+int32_t process_fd_close(int32_t descriptor){
+    struct process *process=process_current();
+    if(!process) return vfs_close(descriptor);
+    if(descriptor<3 || descriptor>=PROCESS_FD_COUNT
+       || process->descriptors[descriptor]<VFS_FD_BASE) return -1;
+    int32_t result=vfs_close(process->descriptors[descriptor]);
+    process->descriptors[descriptor]=-1;
+    return result;
+}
+
+bool process_user_buffer(const void *buffer, uint64_t size, bool writable){
+    if(!process_current_is_user()) return buffer || size==0;
+    return buffer && vmm_user_range_accessible(process_current_address_space(),
+        (uint64_t)(uintptr_t)buffer,size,writable);
+}
+
+bool process_user_string(const char *text, uint64_t capacity){
+    if(!process_current_is_user()) return text!=0;
+    if(!text || !capacity) return false;
+    for(uint64_t index=0;index<capacity;index++){
+        if(!process_user_buffer(text+index,1,false)) return false;
+        if(text[index]=='\0') return true;
+    }
+    return false;
+}

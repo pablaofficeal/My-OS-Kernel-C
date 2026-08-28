@@ -1,7 +1,7 @@
 # ADR-002: Add VFS Boundary and Linked Init Process
 
 ## Status
-Accepted
+Superseded by ADR-003
 
 ## Context
 The syscall layer used FAT32 directly for file operations. That made the public
@@ -43,5 +43,6 @@ Negative:
   work.
 
 ## Follow-up
-Add per-process file descriptor tables once process objects exist. Then add
-`SYS_EXEC`, `SYS_WAIT`, `SYS_STAT`, `SYS_LSEEK`, and load `/sbin/init` from VFS.
+ADR-003 added process-owned descriptor tables plus `SYS_EXEC` and `SYS_WAIT`.
+The remaining work is `SYS_STAT`, `SYS_LSEEK`, loading `/sbin/init` from VFS,
+and an IPC transport before the filesystem backend can leave ring 0.

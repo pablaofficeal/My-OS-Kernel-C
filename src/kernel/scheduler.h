@@ -7,6 +7,8 @@
 #define SCHEDULER_STACK_SIZE 16384
 #define SCHEDULER_TIME_SLICE_MS 10
 
+struct process;
+
 enum thread_state {
     THREAD_FREE = 0,
     THREAD_READY = 1,
@@ -26,12 +28,20 @@ struct thread {
     char name[32];
     uint32_t ticks_remaining;
     uint64_t wake_tick;
+    uint64_t address_space;
+    struct process *process;
+    bool user_mode;
     uint8_t stack[SCHEDULER_STACK_SIZE] __attribute__((aligned(16)));
 };
 
 void scheduler_init(void);
 int scheduler_create_thread(void (*entry)(void *arg), void *arg, const char *name, uint8_t priority, int16_t affinity);
+int scheduler_create_user_thread(void (*entry)(void *arg), void *arg,
+                                 const char *name, uint8_t priority,
+                                 int16_t affinity, uint64_t address_space,
+                                 struct process *process);
 void scheduler_yield(void);
+void scheduler_sleep(uint32_t milliseconds);
 void scheduler_block(void);
 void scheduler_unblock(int tid);
 void scheduler_exit(void);

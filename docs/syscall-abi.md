@@ -15,6 +15,23 @@ Return values:
 - `>= 0`: success
 - `< 0`: `FS_ERROR_*` or subsystem error code
 
+User pointers are validated against the current process page tables. A pointer
+must reference present ring-3 pages and output buffers must also be writable.
+
+## Processes
+
+- `SYS_GETPID`: returns the current PID; kernel threads receive PID 0.
+- `SYS_EXEC`: starts a trusted ELF64 Limine module by path and returns its PID.
+- `SYS_WAIT`: waits for a PID and optionally writes its exit status.
+- `SYS_EXIT`: terminates only the calling process or kernel thread.
+- `SYS_SCHED_YIELD`: voluntarily gives up the current time slice.
+- `SYS_SLEEP`: blocks the calling thread until its timer deadline.
+- `SYS_GETCHAR`: returns one keyboard character to a foreground program.
+
+ELF programs run in ring 3 with a private CR3 and user stack. The kernel half
+of the address space remains supervisor-only. The installer module receives
+the storage-administration capability; ordinary processes cannot format disks.
+
 ## File Descriptors
 VFS descriptors follow the Linux shape:
 - `0`: stdin
@@ -22,7 +39,8 @@ VFS descriptors follow the Linux shape:
 - `2`: stderr
 - `3+`: files opened by `SYS_OPEN`
 
-Programs must close descriptors with `SYS_CLOSE`. `SYS_READ` returns `0` at
+Descriptors are translated through the calling process table. Programs must
+close descriptors with `SYS_CLOSE`. `SYS_READ` returns `0` at
 EOF and does not close the descriptor.
 
 ## Stable VFS Calls

@@ -55,6 +55,11 @@ sudo apt install build-essential nasm grub-common xorriso qemu-system-x86
 ### 🔍 Детальные инструкции
 
 #### Сборка ISO-образа
+
+Скрипт `build-limine.sh` создаёт два независимых ELF-файла:
+`kernel-limine.elf` и ring-3 установщик `installer.elf`. Установщик копируется
+в ISO как `/boot/installer.elf` и не линкуется в образ ядра.
+
 ```mermaid
 graph TD
   A[Исходный код] --> B[Компиляция ядра]
@@ -104,4 +109,3 @@ purec-os/
 ---
 
 ![Статистика](https://img.shields.io/github/repo-size/yourusername/purec-os?label=Размер%20репозитория&style=flat-square) ![Лицензия](https://img.shields.io/github/license/yourusername/purec-os?color=blue&style=flat-square)
-   

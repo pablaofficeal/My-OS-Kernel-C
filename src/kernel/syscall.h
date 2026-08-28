@@ -5,7 +5,9 @@
 #define SYS_CLEAR   2
 #define SYS_SLEEP   3
 #define SYS_GETPID  39
+#define SYS_EXEC    59
 #define SYS_EXIT    60
+#define SYS_WAIT    61
 #define SYS_DRAW_RECT 100
 #define SYS_DRAW_LINE 101
 #define SYS_GET_MOUSE 102
@@ -40,6 +42,7 @@
 #define SYS_SCHED_YIELD 221
 #define SYS_FILE_CLOSE 222
 #define SYS_FILE_APPEND 223
+#define SYS_GETCHAR 224
 #define SYS_AUDIO_GET_STATUS 230
 #define SYS_AUDIO_GET_VOLUME 231
 #define SYS_AUDIO_SET_VOLUME 232
