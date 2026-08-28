@@ -17,11 +17,24 @@ struct hda_controller_info {
     bool mmio_ready;
 };
 
+struct hda_output_device_info {
+    uint8_t codec_address;
+    uint8_t function_group_node;
+    uint8_t dac_node;
+    uint8_t pin_node;
+    uint32_t pin_capabilities;
+    uint32_t default_configuration;
+};
+
 void hda_init(void);
 void hda_set_address_mapping(uint64_t kernel_physical_base,
                              uint64_t kernel_virtual_base);
 bool hda_is_present(void);
 bool hda_pcm_output_ready(void);
+uint32_t hda_output_device_count(void);
+uint32_t hda_selected_output_device(void);
+bool hda_get_output_device(uint32_t index, struct hda_output_device_info *out);
+bool hda_select_output_device(uint32_t index);
 bool hda_play_tone(uint16_t frequency_hz, uint8_t volume);
 void hda_stop_tone(void);
 bool hda_get_controller_info(struct hda_controller_info *out);

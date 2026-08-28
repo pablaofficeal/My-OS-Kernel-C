@@ -104,17 +104,27 @@ void audio_init(void) {
     master_bus.test_step = 0;
     master_bus.next_step_ms = 0;
     pc_speaker_off();
+    klog(KLOG_INFO, "audio: probing HDA devices before backend selection");
     hda_init();
     if (hda_is_present()) {
         master_bus.available_backends |= AUDIO_BACKEND_HDA;
         master_bus.pcm_ready = hda_pcm_output_ready();
         if (master_bus.pcm_ready) {
             master_bus.active_backend = AUDIO_BACKEND_HDA;
+            klogf(KLOG_OK, "audio: automatic HDA selection succeeded device=%u",
+                  hda_selected_output_device());
+        } else {
+            klogf(KLOG_WARN,
+                  "audio: legacy fallback reason=HDA_PCM_NOT_READY discovered_outputs=%u",
+                  hda_output_device_count());
         }
-        klogf(KLOG_INFO, "audio: HDA selected present=1 pcm_ready=%u",
-              master_bus.pcm_ready ? 1 : 0);
+        klogf(KLOG_INFO,
+              "audio: HDA probe result present=1 pcm_ready=%u outputs=%u selected=%u",
+              master_bus.pcm_ready ? 1 : 0, hda_output_device_count(),
+              hda_selected_output_device());
     } else {
-        klog(KLOG_WARN, "audio: HDA unavailable, legacy backend selected");
+        klog(KLOG_WARN,
+             "audio: legacy fallback reason=HDA_CONTROLLER_NOT_FOUND");
     }
     klogf(KLOG_INFO, "audio: master bus volume=%u mute=%u backend=%u available=0x%x pcm=%u",
           master_bus.volume, master_bus.muted ? 1 : 0,
@@ -128,16 +138,29 @@ void audio_get_status(struct audio_status *status) {
     }
 
     audio_update();
-    klogf(KLOG_DEBUG, "audio: status volume=%u mute=%u backend=%u available=0x%x pcm=%u test=%u",
+    struct hda_output_device_info device = {0};
+    uint32_t hda_selected = hda_selected_output_device();
+    bool have_hda_device = hda_get_output_device(hda_selected, &device);
+    klogf(KLOG_DEBUG, "audio: status volume=%u mute=%u backend=%u available=0x%x pcm=%u test=%u devices=%u selected=%u codec=%u dac=%u pin=%u",
           master_bus.volume, master_bus.muted ? 1 : 0, master_bus.active_backend,
           master_bus.available_backends, master_bus.pcm_ready ? 1 : 0,
-          master_bus.test_active ? 1 : 0);
+          master_bus.test_active ? 1 : 0, 1U + hda_output_device_count(),
+          master_bus.active_backend == AUDIO_BACKEND_HDA ? hda_selected + 1U : 0U,
+          have_hda_device ? device.codec_address : 0,
+          have_hda_device ? device.dac_node : 0,
+          have_hda_device ? device.pin_node : 0);
     status->volume = master_bus.volume;
     status->muted = master_bus.muted ? 1 : 0;
     status->backend = master_bus.active_backend;
     status->available_backends = master_bus.available_backends;
     status->pcm_ready = master_bus.pcm_ready ? 1 : 0;
     status->test_active = master_bus.test_active ? 1 : 0;
+    status->output_device_count = 1U + hda_output_device_count();
+    status->selected_output_device = master_bus.active_backend == AUDIO_BACKEND_HDA
+        ? hda_selected + 1U : 0U;
+    status->hda_codec = have_hda_device ? device.codec_address : 0;
+    status->hda_dac_node = have_hda_device ? device.dac_node : 0;
+    status->hda_pin_node = have_hda_device ? device.pin_node : 0;
 }
 
 uint8_t audio_get_volume(void) {
@@ -192,6 +215,40 @@ void audio_adjust_volume(int8_t delta) {
     audio_set_volume((uint8_t)next_volume);
 }
 
+bool audio_select_output_device(uint32_t index) {
+    uint32_t count = 1U + hda_output_device_count();
+    klogf(KLOG_INFO,
+          "audio: output selection request index=%u count=%u current_backend=%u",
+          index, count, master_bus.active_backend);
+    if (index >= count) {
+        klogf(KLOG_ERROR,
+              "audio: output selection rejected reason=INDEX_OUT_OF_RANGE index=%u count=%u",
+              index, count);
+        return false;
+    }
+    stop_test_sound();
+    if (index == 0) {
+        master_bus.active_backend = AUDIO_BACKEND_PC_SPEAKER;
+        master_bus.pcm_ready = false;
+        klog(KLOG_OK, "audio: output device selected index=0 backend=PC_SPEAKER");
+        return true;
+    }
+    uint32_t hda_index = index - 1U;
+    if (!hda_select_output_device(hda_index)) {
+        master_bus.active_backend = AUDIO_BACKEND_PC_SPEAKER;
+        master_bus.pcm_ready = false;
+        klogf(KLOG_ERROR,
+              "audio: HDA output selection failed index=%u hda_index=%u fallback=PC_SPEAKER",
+              index, hda_index);
+        return false;
+    }
+    master_bus.active_backend = AUDIO_BACKEND_HDA;
+    master_bus.pcm_ready = true;
+    klogf(KLOG_OK, "audio: output device selected index=%u backend=HDA hda_index=%u",
+          index, hda_index);
+    return true;
+}
+
 void audio_play_test_sound(void) {
     klogf(KLOG_INFO, "audio: test request mute=%u volume=%u backend=%u pcm=%u active=%u",
           master_bus.muted ? 1 : 0, master_bus.volume, master_bus.active_backend,
@@ -213,7 +270,10 @@ void audio_play_test_sound(void) {
         return;
     }
 
-    klog(KLOG_INFO, "audio: starting legacy PC speaker test path");
+    klogf(KLOG_WARN,
+          "audio: test using legacy path reason=PCM_NOT_READY backend=%u hda_present=%u hda_outputs=%u",
+          master_bus.active_backend, hda_is_present() ? 1 : 0,
+          hda_output_device_count());
     start_pc_speaker_test();
 }
 

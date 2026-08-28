@@ -364,6 +364,10 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_AUDIO_UPDATE:
             audio_update();
             return 0;
+        case SYS_AUDIO_SELECT_OUTPUT_DEVICE:
+            klogf(KLOG_INFO, "audio: syscall select output device index=%u",
+                  (uint32_t)a1);
+            return audio_select_output_device((uint32_t)a1) ? 0 : -1;
         case SYS_SCHED_YIELD:
             scheduler_yield();
             return 0;

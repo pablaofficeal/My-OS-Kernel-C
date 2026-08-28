@@ -36,6 +36,10 @@ void userspace_audio_adjust_volume(int8_t delta) {
     (void)userspace_syscall(SYS_AUDIO_ADJUST_VOLUME, (uint64_t)(int64_t)delta, 0, 0);
 }
 
+bool userspace_audio_select_output_device(uint32_t index) {
+    return userspace_syscall(SYS_AUDIO_SELECT_OUTPUT_DEVICE, index, 0, 0) == 0;
+}
+
 void userspace_audio_play_test_sound(void) {
     (void)userspace_syscall(SYS_AUDIO_PLAY_TEST_SOUND, 0, 0, 0);
 }

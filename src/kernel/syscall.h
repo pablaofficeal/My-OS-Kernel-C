@@ -48,6 +48,7 @@
 #define SYS_AUDIO_ADJUST_VOLUME 235
 #define SYS_AUDIO_PLAY_TEST_SOUND 236
 #define SYS_AUDIO_UPDATE 237
+#define SYS_AUDIO_SELECT_OUTPUT_DEVICE 238
 
 #define SYS_OPEN  SYS_FILE_OPEN
 #define SYS_READ  SYS_FILE_READ
@@ -154,6 +155,11 @@ struct audio_status {
     uint32_t available_backends;
     uint32_t pcm_ready;
     uint32_t test_active;
+    uint32_t output_device_count;
+    uint32_t selected_output_device;
+    uint32_t hda_codec;
+    uint32_t hda_dac_node;
+    uint32_t hda_pin_node;
 };
 
 struct syscall_regs {
