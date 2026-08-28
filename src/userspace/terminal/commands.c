@@ -582,6 +582,21 @@ static void run_installer(const char *args){
     terminal_printf("Installer process exited status=%d\n",status);
 }
 
+static void run_update(const char *args){
+    if(args && args[0]){
+        terminal_write("Usage: update\n");
+        return;
+    }
+    terminal_write("Starting full reinstall from the currently booted ISO.\n");
+    terminal_write("Select the system disk and confirm with ERASE.\n");
+    int32_t status=userspace_run_program("/bin/installer");
+    if(status<0){
+        terminal_write("Cannot start /bin/installer from boot media\n");
+        return;
+    }
+    terminal_printf("Update installer exited status=%d\n",status);
+}
+
 static void prompt_read_line(const char *prompt, char *out, uint32_t capacity){
     terminal_write(prompt);
     uint32_t length=0;
@@ -624,6 +639,7 @@ static void show_help(void){
     terminal_write("  mkfs.fat32 DEV SERIAL ERASE (legacy)\n");
     terminal_write("  install [DEV]     interactive installer (archinstall-like)\n");
     terminal_write("  setup             alias for install\n");
+    terminal_write("  update            reinstall from the currently booted ISO\n");
     terminal_write("  dmesg             show kernel boot log\n");
     terminal_write("  uname             show system information\n");
     terminal_write("  about             show userspace information\n");
@@ -742,6 +758,8 @@ void commands_execute(const char *line){
         format_fat32(arguments);
     } else if(strcmp(command,"install")==0 || strcmp(command,"setup")==0){
         run_installer(arguments);
+    } else if(strcmp(command,"update")==0){
+        run_update(arguments);
     } else if(strcmp(command,"dmesg")==0){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);
