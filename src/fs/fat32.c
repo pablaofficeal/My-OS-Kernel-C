@@ -1647,7 +1647,7 @@ static const char uefi_limine_config[]=
     "/PureC OS (UEFI primary)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel.elf\n"
-    "    module_path: boot():/boot/kernel-fallback.elf\n"
+    "    module_path: boot():/boot/kernel2.elf\n"
     "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
@@ -1658,7 +1658,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/lib/libpurec.a\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
-    "    kernel_path: boot():/boot/kernel-fallback.elf\n"
+    "    kernel_path: boot():/boot/kernel2.elf\n"
     "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
@@ -1789,10 +1789,13 @@ static int32_t install_uefi_payload(void){
         klog(KLOG_ERROR,"install: missing kernel.elf");
         return FS_ERROR_NOT_FOUND;
     }
-    if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
+    if(!boot_get_module("/boot/kernel2.elf",&fallback_kernel_image,
                         &fallback_kernel_image_size)){
-        klog(KLOG_ERROR,"install: missing /boot/kernel-fallback.elf");
-        return FS_ERROR_NOT_FOUND;
+        if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
+                            &fallback_kernel_image_size)){
+            klog(KLOG_ERROR,"install: missing fallback");
+            return FS_ERROR_NOT_FOUND;
+        }
     }
     if(fallback_kernel_image_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: fallback too large");
@@ -1860,7 +1863,8 @@ static int32_t install_uefi_payload(void){
         klogf(KLOG_ERROR,"install: write kernel %d",status);
         return status;
     }
-    status=write_lfn_file("/boot","kernel-fallback.elf","/boot/kernel~1.elf","kernel~1.elf",fallback_kernel_image,(uint32_t)fallback_kernel_image_size);
+    status=fat32_write_file("/boot/kernel2.elf",fallback_kernel_image,
+                            (uint32_t)fallback_kernel_image_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write fallback %d",status);
         return status;
@@ -1892,7 +1896,7 @@ static int32_t install_uefi_payload(void){
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
     if(status<0) return status;
-    status=verify_installed_file("/boot/kernel-fallback.elf",
+    status=verify_installed_file("/boot/kernel2.elf",
                                  (uint32_t)fallback_kernel_image_size);
     if(status<0) return status;
     status=verify_installed_file("/bin/init",(uint32_t)init_size);
