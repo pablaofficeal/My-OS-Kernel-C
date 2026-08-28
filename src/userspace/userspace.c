@@ -1,5 +1,6 @@
 #include "userspace.h"
 #include "apps/desktop_apps.h"
+#include "apps/audio_panel.h"
 #include "explorer/explorer.h"
 #include "terminal/terminal.h"
 #include "monitor/monitor.h"
@@ -144,6 +145,7 @@ static void draw_desktop(void){
     display_clear(DESKTOP_BG);
     display_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
     display_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
+    audio_panel_draw(desktop_width);
     draw_desktop_icons();
     draw_power_button();
 }
@@ -155,6 +157,7 @@ static void redraw_scene(void){
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
+    audio_panel_draw(desktop_width);
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
@@ -173,6 +176,7 @@ static void redraw_icon_move(
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
+    audio_panel_draw(desktop_width);
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
@@ -188,7 +192,16 @@ static void handle_desktop_mouse(void){
         power_menu_visible=!power_menu_visible;
         consumed=true;
         redraw=true;
-    } else if(pressed && power_menu_visible){
+    }
+    if(!consumed){
+        bool audio_redraw=false;
+        consumed=audio_panel_handle_mouse(
+            mouse.x,mouse.y,mouse.buttons,pressed,released,
+            desktop_width,&audio_redraw
+        );
+        redraw=redraw || audio_redraw;
+    }
+    if(!consumed && pressed && power_menu_visible){
         uint32_t menu_x=desktop_width-158;
         if(point_inside(mouse.x,mouse.y,menu_x,28,150,30)){
             desktop_apps_save_time();
@@ -300,6 +313,17 @@ static void handle_desktop_mouse(void){
     if(redraw) redraw_scene();
 }
 
+static bool handle_special_keyboard(void){
+    uint8_t key;
+    bool handled=false;
+
+    while(keyboard_try_get_special(&key)){
+        if(audio_panel_handle_special_key(key)) handled=true;
+    }
+
+    return handled;
+}
+
 uint32_t userspace_get_width(void){ return desktop_width; }
 uint32_t userspace_get_height(void){ return desktop_height; }
 
@@ -331,6 +355,7 @@ void userspace_init(void){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
     userspace_set_mouse_debug(true);
+    audio_panel_init();
     desktop_apps_init();
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
@@ -343,6 +368,7 @@ void userspace_input_thread(void *arg){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
         monitor_window_update();
         desktop_apps_update();
@@ -374,6 +400,7 @@ void userspace_run(void){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
 
         char c;

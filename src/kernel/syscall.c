@@ -11,6 +11,7 @@
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
 #include "../drivers/timer.h"
+#include "../drivers/audio.h"
 #include "../fs/vfs.h"
 #include "system_info.h"
 #include "../lib/string.h"
@@ -327,6 +328,29 @@ int64_t syscall_handler(struct syscall_regs *r){
             if(!out) return -1;
             return power_battery_get(out) ? 0 : -1;
         }
+        case SYS_AUDIO_GET_STATUS: {
+            struct audio_status *out=(struct audio_status*)(uintptr_t)a1;
+            if(!out) return -1;
+            audio_get_status(out);
+            return 0;
+        }
+        case SYS_AUDIO_GET_VOLUME:
+            return audio_get_volume();
+        case SYS_AUDIO_SET_VOLUME:
+            if(a1>100) return -1;
+            audio_set_volume((uint8_t)a1);
+            return 0;
+        case SYS_AUDIO_IS_MUTED:
+            return audio_is_muted() ? 1 : 0;
+        case SYS_AUDIO_SET_MUTED:
+            audio_set_muted(a1!=0);
+            return 0;
+        case SYS_AUDIO_ADJUST_VOLUME:
+            audio_adjust_volume((int8_t)(int64_t)a1);
+            return 0;
+        case SYS_AUDIO_PLAY_TEST_SOUND:
+            audio_play_test_sound();
+            return 0;
         case SYS_SCHED_YIELD:
             scheduler_yield();
             return 0;
@@ -338,11 +362,17 @@ int64_t syscall_handler(struct syscall_regs *r){
 
 void syscall_init(void){
     static bool filesystem_checked;
+    static bool audio_checked;
     // IDT 0x80 уже настроен в idt_init с DPL3 (0xEE)
     // используем klog если уже инициализирован, иначе fallback на serial
     // klog_inited проверяется через verbose флаг (если false после init, всё равно работает)
     // просто пишем DEBUG чтобы не спамить primary screen дважды (boot.c уже логирует)
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
+    if(!audio_checked){
+        audio_checked=true;
+        audio_init();
+        klog(KLOG_INFO, "audio: PC speaker backend ready");
+    }
     if(!filesystem_checked){
         filesystem_checked=true;
         boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage: scanning PCI controllers");

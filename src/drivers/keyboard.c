@@ -84,8 +84,11 @@ static const char scancode_set2_shift_map[128] = {
 };
 
 #define KBD_BUF_SIZE 128
+#define KBD_SPECIAL_BUF_SIZE 16
 static char kbd_buf[KBD_BUF_SIZE];
 static uint8_t kbd_head = 0, kbd_tail = 0, kbd_count = 0;
+static uint8_t special_buf[KBD_SPECIAL_BUF_SIZE];
+static uint8_t special_head = 0, special_tail = 0, special_count = 0;
 
 static void kbd_push(char c){
     if(kbd_count >= KBD_BUF_SIZE) return;
@@ -99,6 +102,21 @@ static bool kbd_pop(char *out){
     *out = kbd_buf[kbd_tail];
     kbd_tail = (kbd_tail + 1) % KBD_BUF_SIZE;
     kbd_count--;
+    return true;
+}
+
+static void special_push(uint8_t key){
+    if(special_count >= KBD_SPECIAL_BUF_SIZE) return;
+    special_buf[special_head] = key;
+    special_head = (special_head + 1) % KBD_SPECIAL_BUF_SIZE;
+    special_count++;
+}
+
+static bool special_pop(uint8_t *out){
+    if(special_count==0) return false;
+    *out = special_buf[special_tail];
+    special_tail = (special_tail + 1) % KBD_SPECIAL_BUF_SIZE;
+    special_count--;
     return true;
 }
 
@@ -139,6 +157,18 @@ static void handle_scancode_set1(uint8_t sc){
     }
     if(sc & 0x80){
         // release of other keys, ignore
+        return;
+    }
+    if(sc == 0x3B){
+        special_push(KEYBOARD_SPECIAL_F1);
+        return;
+    }
+    if(sc == 0x3C){
+        special_push(KEYBOARD_SPECIAL_F2);
+        return;
+    }
+    if(sc == 0x3D){
+        special_push(KEYBOARD_SPECIAL_F3);
         return;
     }
     if(sc >= 128) return;
@@ -183,6 +213,18 @@ static void handle_scancode_set2(uint8_t sc){
     if(extended){
         if(sc == 0x5A) kbd_push('\n'); // keypad Enter
         if(sc == 0x4A) kbd_push('/');  // keypad slash
+        return;
+    }
+    if(sc == 0x05){
+        special_push(KEYBOARD_SPECIAL_F1);
+        return;
+    }
+    if(sc == 0x06){
+        special_push(KEYBOARD_SPECIAL_F2);
+        return;
+    }
+    if(sc == 0x04){
+        special_push(KEYBOARD_SPECIAL_F3);
         return;
     }
     if(sc == 0x58){ // Caps Lock
@@ -286,6 +328,7 @@ static bool decoder_self_test(void){
     set2_extended = false;
     set2_pause_bytes = 0;
     kbd_head = kbd_tail = kbd_count = 0;
+    special_head = special_tail = special_count = 0;
 
     handle_scancode(0x1C); // A make in Set 2
     handle_scancode(0xF0);
@@ -303,6 +346,7 @@ static bool decoder_self_test(void){
     set2_extended = false;
     set2_pause_bytes = 0;
     kbd_head = kbd_tail = kbd_count = 0;
+    special_head = special_tail = special_count = 0;
     return ok;
 }
 
@@ -326,6 +370,11 @@ bool keyboard_has_key(void){
 bool keyboard_try_getc(char *out){
     keyboard_poll();
     return kbd_pop(out);
+}
+
+bool keyboard_try_get_special(uint8_t *out){
+    keyboard_poll();
+    return special_pop(out);
 }
 
 char keyboard_getc(void){

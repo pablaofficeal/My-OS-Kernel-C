@@ -39,6 +39,13 @@
 #define SYS_BATTERY_INFO 220
 #define SYS_SCHED_YIELD 221
 #define SYS_FILE_CLOSE 222
+#define SYS_AUDIO_GET_STATUS 230
+#define SYS_AUDIO_GET_VOLUME 231
+#define SYS_AUDIO_SET_VOLUME 232
+#define SYS_AUDIO_IS_MUTED 233
+#define SYS_AUDIO_SET_MUTED 234
+#define SYS_AUDIO_ADJUST_VOLUME 235
+#define SYS_AUDIO_PLAY_TEST_SOUND 236
 
 #define SYS_OPEN  SYS_FILE_OPEN
 #define SYS_READ  SYS_FILE_READ
@@ -132,6 +139,15 @@ struct battery_info {
     uint32_t current_ma;
     char name[32];
     char status_text[32]; // "Charging", "Discharging", "AC"
+};
+
+#define AUDIO_BACKEND_NONE 0
+#define AUDIO_BACKEND_PC_SPEAKER 1
+
+struct audio_status {
+    uint32_t volume;
+    uint32_t muted;
+    uint32_t backend;
 };
 
 struct syscall_regs {
