@@ -37,17 +37,12 @@ static void print_prompt(void){
 
 static void show_help(void){
     pc_write("Builtins: help clear cd pwd echo env set unset exit\n");
-    pc_write("System programs require an absolute path:\n");
-    pc_write("  /bin/program/ls [directory]\n");
-    pc_write("  /bin/program/cat <file>\n");
-    pc_write("  /bin/program/touch <file>\n");
-    pc_write("  /bin/program/mkdir <directory>\n");
-    pc_write("  /bin/program/nano <file>\n");
-    pc_write("  /bin/program/disks | usbscan | dmesg | savelog\n");
-    pc_write("  /bin/program/install | setup | update | mkfs.fat32\n");
-    pc_write("  /bin/program/uname | about | systeminfo | htop\n");
-    pc_write("  /bin/program/font | snake | mouse | battery\n");
-    pc_write("  /bin/program/reboot | poweroff | shutdown | halt\n");
+    pc_write("System programs resolve through PATH=/bin/program:/bin:\n");
+    pc_write("  ls [directory] | cat <file> | touch <file> | mkdir <directory>\n");
+    pc_write("  nano <file> | disks | usbscan | dmesg | savelog\n");
+    pc_write("  install | setup | update | mkfs.fat32\n");
+    pc_write("  uname | about | systeminfo | htop | font | snake\n");
+    pc_write("  mouse | debug | battery | reboot | poweroff | shutdown | halt\n");
 }
 
 static void change_directory(const char *argument){
@@ -82,34 +77,73 @@ static void set_variable(const char *assignment){
         pc_write("set: invalid variable or environment is full\n");
 }
 
-static void execute_program(const char *path, const char *arguments){
-    if(path[0]!='/'){
-        pc_write(path);
-        pc_write(": explicit program path required\n");
-        return;
-    }
-    char expanded[SHELL_LINE_CAPACITY];
-    if(!shell_expand_environment(arguments,expanded,sizeof(expanded))){
-        pc_write("shell: expanded arguments are too long\n");
-        return;
-    }
-    int32_t pid=pc_exec_with_args(path,expanded);
-    if(pid<0){
-        pc_write("shell: cannot execute ");
-        pc_write(path);
-        pc_write("\n");
-        return;
-    }
+static int32_t start_program(const char *path, const char *arguments){
+    int32_t pid=pc_exec_with_args(path,arguments);
+    if(pid<0) return -1;
     int32_t status=0;
     if(pc_wait(pid,&status,false)<0){
         pc_write("shell: wait failed\n");
-        return;
+        return -2;
     }
     if(status){
         pc_write("shell: program exited with status ");
         pc_write_i64(status);
         pc_write("\n");
     }
+    return pid;
+}
+
+static bool build_program_path(const char *directory, uint32_t length,
+                               const char *name, char *output,
+                               uint32_t capacity){
+    uint32_t name_length=pc_strlen(name);
+    bool needs_separator=length && directory[length-1]!='/';
+    if(length+name_length+(needs_separator ? 1 : 0)+1>capacity) return false;
+    uint32_t output_length=0;
+    for(uint32_t index=0;index<length;index++)
+        output[output_length++]=directory[index];
+    if(needs_separator) output[output_length++]='/';
+    for(uint32_t index=0;index<name_length;index++)
+        output[output_length++]=name[index];
+    output[output_length]='\0';
+    return true;
+}
+
+static void execute_program(const char *name, const char *arguments){
+    char expanded[SHELL_LINE_CAPACITY];
+    if(!shell_expand_environment(arguments,expanded,sizeof(expanded))){
+        pc_write("shell: expanded arguments are too long\n");
+        return;
+    }
+    if(name[0]=='/'){
+        if(start_program(name,expanded)>=0) return;
+    } else if(name[0] && !name[1] && name[0]=='.'){
+        pc_write("shell: executable name required\n");
+        return;
+    } else {
+        for(const char *cursor=name;*cursor;cursor++){
+            if(*cursor=='/'){
+                pc_write("shell: relative executable paths are not supported\n");
+                return;
+            }
+        }
+        char search_path[PROCESS_ENVIRONMENT_VALUE_LIMIT];
+        if(pc_getenv("PATH",search_path,sizeof(search_path))>=0){
+            const char *directory=search_path;
+            while(*directory){
+                uint32_t length=0;
+                while(directory[length] && directory[length]!=':') length++;
+                char candidate[SHELL_PATH_CAPACITY];
+                if(length && build_program_path(directory,length,name,candidate,
+                                                sizeof(candidate))
+                   && start_program(candidate,expanded)>=0) return;
+                directory+=length;
+                if(*directory==':') directory++;
+            }
+        }
+    }
+    pc_write(name);
+    pc_write(": command not found\n");
 }
 
 static bool execute_line(char *line){

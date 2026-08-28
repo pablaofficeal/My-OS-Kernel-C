@@ -48,8 +48,8 @@ the storage-administration capability; ordinary processes cannot format disks.
 
 `/bin/init` is mandatory and must receive PID 1. Boot-media applications are
 addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal` and
-`/bin/program/nano`. The minimal shell does not search `PATH`; executable names
-must be absolute.
+`/bin/program/nano`. The minimal shell searches the process `PATH`, which
+defaults to `/bin/program:/bin`, and also accepts absolute executable paths.
 
 Traditional commands such as `/bin/program/ls`, `/bin/program/cat` and
 `/bin/program/install` are aliases of the trusted `/bin/program/system` module.

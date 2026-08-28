@@ -73,7 +73,7 @@ static void environment_initialize(struct process *process,
     environment_put(process,"PWD","/");
     environment_put(process,"USER","purec");
     environment_put(process,"SHELL","/bin/program/terminal");
-    environment_put(process,"PATH","");
+    environment_put(process,"PATH","/bin/program:/bin");
 }
 
 static struct process *allocate_process(void){

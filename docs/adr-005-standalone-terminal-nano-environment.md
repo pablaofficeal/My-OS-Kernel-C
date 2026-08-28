@@ -34,8 +34,8 @@ flowchart LR
   127-byte values and a 255-byte command line.
 - The current loader executes trusted Limine modules, not arbitrary ELF files
   read from FAT32. Installed programs therefore remain listed as boot modules.
-- `PATH` exists as environment data but is intentionally empty and is not
-  searched. This enforces explicit executable paths.
+- `PATH` defaults to `/bin/program:/bin`. The shell searches it for bare command
+  names while still accepting explicit absolute executable paths.
 - Command-line parsing is deliberately small and does not yet support quoting
   or file names containing spaces.
 
