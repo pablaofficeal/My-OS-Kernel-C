@@ -97,7 +97,7 @@ static void draw_disk_selection(void){
     pc_display_end_update();
 }
 
-static void draw_install_confirmation(void){
+static void draw_install_confirmation(int32_t pressed_button){
     pc_display_begin_update();
     pc_display_clear(COLOR_BACKGROUND);
     uint32_t panel_x=display.width>700 ? (display.width-700)/2 : 20;
@@ -122,9 +122,11 @@ static void draw_install_confirmation(void){
     pc_draw_text(panel_x+30,panel_y+214,
                  "This operation cannot be undone.",COLOR_DANGER,COLOR_PANEL);
     uint32_t button_y=panel_y+270;
-    draw_button(panel_x+30,button_y,150,"Back",COLOR_CARD);
+    draw_button(panel_x+30,button_y,150,"Back",
+                pressed_button==0 ? COLOR_ACCENT : COLOR_CARD);
     draw_button(panel_x+panel_width-230,button_y,200,
-                "Erase & Install",COLOR_DANGER);
+                "Erase & Install",
+                pressed_button==1 ? COLOR_ACCENT : COLOR_DANGER);
     pc_display_end_update();
 }
 
@@ -134,30 +136,42 @@ static bool confirm_installation(void){
     uint32_t panel_y=display.height>380 ? (display.height-380)/2 : 20;
     uint32_t button_y=panel_y+270;
     uint32_t confirm_x=panel_x+panel_width-230;
-    bool mouse_armed=false;
-    struct mouse_state previous={0};
+    int32_t pressed_button=-1;
+    struct mouse_state mouse={0};
+    bool previous_down=false;
+    if(pc_mouse_get(&mouse)) previous_down=(mouse.buttons&1)!=0;
     uint32_t redraw_ticks=0;
-    draw_install_confirmation();
+    draw_install_confirmation(pressed_button);
     for(;;){
         int32_t key=pc_try_getchar();
         if(key==27 || key=='q' || key=='Q') return false;
         if(key=='y' || key=='Y' || key=='\r' || key=='\n') return true;
-        struct mouse_state mouse;
         if(pc_mouse_get(&mouse)){
             bool button_down=(mouse.buttons&1)!=0;
-            if(!button_down) mouse_armed=true;
-            bool pressed=mouse_armed && button_down && !(previous.buttons&1);
-            if(pressed){
-                mouse_armed=false;
+            if(button_down && !previous_down){
                 if(inside(mouse.x,mouse.y,panel_x+30,button_y,150,40))
+                    pressed_button=0;
+                else if(inside(mouse.x,mouse.y,confirm_x,button_y,200,40))
+                    pressed_button=1;
+                else
+                    pressed_button=-1;
+                draw_install_confirmation(pressed_button);
+            }
+            if(!button_down && previous_down){
+                int32_t released_button=pressed_button;
+                pressed_button=-1;
+                draw_install_confirmation(pressed_button);
+                if(released_button==0
+                   && inside(mouse.x,mouse.y,panel_x+30,button_y,150,40))
                     return false;
-                if(inside(mouse.x,mouse.y,confirm_x,button_y,200,40))
+                if(released_button==1
+                   && inside(mouse.x,mouse.y,confirm_x,button_y,200,40))
                     return true;
             }
-            previous=mouse;
+            previous_down=button_down;
         }
         if(++redraw_ticks>=15){
-            draw_install_confirmation();
+            draw_install_confirmation(pressed_button);
             redraw_ticks=0;
         }
         pc_sleep(20);
