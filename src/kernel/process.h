@@ -23,6 +23,7 @@ struct process {
     uint64_t entry;
     uint64_t user_stack_top;
     int32_t thread_id;
+    int32_t waiter_thread_id;
     uint32_t capabilities;
     int32_t descriptors[PROCESS_FD_COUNT];
     char name[32];

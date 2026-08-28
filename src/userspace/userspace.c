@@ -435,6 +435,10 @@ void userspace_terminal_thread(void *arg){
     (void)arg;
     klog(KLOG_INFO, "sched: terminal thread started (file I/O + keyboard)");
     for(;;){
+        if(external_program_active){
+            scheduler_yield();
+            continue;
+        }
         char c;
         while(keyboard_try_getc(&c)){
             if(!desktop_apps_handle_key(c)

@@ -59,6 +59,8 @@ static void draw_disk_selection(void){
                  COLOR_MUTED,COLOR_PANEL);
     pc_draw_text(panel_x+28,108,"All data on the selected disk will be erased.",
                  COLOR_DANGER,COLOR_PANEL);
+    pc_draw_text(panel_x+panel_width-250,108,"Esc: cancel  Enter: install",
+                 COLOR_MUTED,COLOR_PANEL);
     uint32_t visible=visible_disk_count();
     for(uint32_t index=0;index<visible;index++){
         uint32_t y=136+index*54;
@@ -160,11 +162,26 @@ static int installer_main(void){
     selected_disk=0;
     draw_disk_selection();
     struct mouse_state previous={0};
+    bool mouse_armed=false;
     for(;;){
+        int32_t key=pc_try_getchar();
+        if(key==27 || key=='q' || key=='Q') return 0;
+        if(key=='w' || key=='W'){
+            if(selected_disk>0) selected_disk--;
+            draw_disk_selection();
+        } else if(key=='s' || key=='S'){
+            if(selected_disk+1<(int32_t)visible_disk_count()) selected_disk++;
+            draw_disk_selection();
+        } else if(key=='\r' || key=='\n'){
+            return run_installation();
+        }
         struct mouse_state mouse;
         if(!pc_mouse_get(&mouse)){ pc_sleep(20); continue; }
-        bool pressed=(mouse.buttons&1) && !(previous.buttons&1);
+        bool button_down=(mouse.buttons&1)!=0;
+        if(!button_down) mouse_armed=true;
+        bool pressed=mouse_armed && button_down && !(previous.buttons&1);
         if(pressed){
+            mouse_armed=false;
             uint32_t panel_x=display.width>820 ? (display.width-820)/2 : 20;
             uint32_t panel_width=display.width>860 ? 820 : display.width-40;
             uint32_t visible=visible_disk_count();

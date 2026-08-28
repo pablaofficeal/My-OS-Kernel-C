@@ -23,6 +23,7 @@ static struct process *allocate_process(void){
         if(processes[index].state==PROCESS_FREE){
             struct process *process=&processes[index];
             memset(process,0,sizeof(*process));
+            process->waiter_thread_id=-1;
             for(uint32_t fd=0;fd<PROCESS_FD_COUNT;fd++) process->descriptors[fd]=-1;
             process->descriptors[0]=VFS_FD_STDIN;
             process->descriptors[1]=VFS_FD_STDOUT;
@@ -122,7 +123,14 @@ int32_t process_wait(uint32_t pid, int32_t *status, bool nohang){
             return (int32_t)pid;
         }
         if(nohang) return 0;
-        scheduler_yield();
+        int32_t waiter_thread_id=scheduler_current_tid();
+        if(waiter_thread_id<0) return -1;
+        if(target->waiter_thread_id>=0
+           && target->waiter_thread_id!=waiter_thread_id) return -1;
+        target->waiter_thread_id=waiter_thread_id;
+        /* Waiting must remove the caller from the ready queue. A yielding
+           high-priority parent otherwise starves its lower-priority child. */
+        scheduler_block();
     }
 }
 
@@ -164,6 +172,8 @@ void process_exit_current(int32_t status){
             }
         }
         klogf(KLOG_INFO,"process: pid=%u exited status=%d",process->pid,status);
+        if(process->waiter_thread_id>=0)
+            scheduler_unblock(process->waiter_thread_id);
     }
     scheduler_exit();
     __builtin_unreachable();
