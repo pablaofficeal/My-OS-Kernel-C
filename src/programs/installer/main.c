@@ -85,6 +85,73 @@ static void draw_disk_selection(void){
     pc_display_end_update();
 }
 
+static void draw_install_confirmation(void){
+    pc_display_begin_update();
+    pc_display_clear(COLOR_BACKGROUND);
+    uint32_t panel_x=display.width>700 ? (display.width-700)/2 : 20;
+    uint32_t panel_width=display.width>740 ? 700 : display.width-40;
+    uint32_t panel_y=display.height>380 ? (display.height-380)/2 : 20;
+    pc_draw_rect(panel_x,panel_y,panel_width,340,COLOR_PANEL);
+    pc_draw_text(panel_x+30,panel_y+30,"Confirm disk erase",COLOR_TEXT,COLOR_PANEL);
+    pc_draw_text(panel_x+30,panel_y+62,
+                 "The selected disk will be erased completely.",
+                 COLOR_DANGER,COLOR_PANEL);
+    pc_draw_rect(panel_x+30,panel_y+100,panel_width-60,92,COLOR_CARD);
+    pc_draw_text(panel_x+46,panel_y+116,disks[selected_disk].name,
+                 COLOR_TEXT,COLOR_CARD);
+    pc_draw_text(panel_x+146,panel_y+116,disks[selected_disk].model,
+                 COLOR_TEXT,COLOR_CARD);
+    char size[32];
+    number_text(size,
+                (disks[selected_disk].sector_count
+                 *disks[selected_disk].sector_size)/(1024*1024),
+                " MiB");
+    pc_draw_text(panel_x+46,panel_y+150,size,COLOR_MUTED,COLOR_CARD);
+    pc_draw_text(panel_x+30,panel_y+214,
+                 "This operation cannot be undone.",COLOR_DANGER,COLOR_PANEL);
+    uint32_t button_y=panel_y+270;
+    draw_button(panel_x+30,button_y,150,"Back",COLOR_CARD);
+    draw_button(panel_x+panel_width-230,button_y,200,
+                "Erase & Install",COLOR_DANGER);
+    pc_display_end_update();
+}
+
+static bool confirm_installation(void){
+    uint32_t panel_x=display.width>700 ? (display.width-700)/2 : 20;
+    uint32_t panel_width=display.width>740 ? 700 : display.width-40;
+    uint32_t panel_y=display.height>380 ? (display.height-380)/2 : 20;
+    uint32_t button_y=panel_y+270;
+    uint32_t confirm_x=panel_x+panel_width-230;
+    bool mouse_armed=false;
+    struct mouse_state previous={0};
+    uint32_t redraw_ticks=0;
+    draw_install_confirmation();
+    for(;;){
+        int32_t key=pc_try_getchar();
+        if(key==27 || key=='q' || key=='Q') return false;
+        if(key=='y' || key=='Y' || key=='\r' || key=='\n') return true;
+        struct mouse_state mouse;
+        if(pc_mouse_get(&mouse)){
+            bool button_down=(mouse.buttons&1)!=0;
+            if(!button_down) mouse_armed=true;
+            bool pressed=mouse_armed && button_down && !(previous.buttons&1);
+            if(pressed){
+                mouse_armed=false;
+                if(inside(mouse.x,mouse.y,panel_x+30,button_y,150,40))
+                    return false;
+                if(inside(mouse.x,mouse.y,confirm_x,button_y,200,40))
+                    return true;
+            }
+            previous=mouse;
+        }
+        if(++redraw_ticks>=15){
+            draw_install_confirmation();
+            redraw_ticks=0;
+        }
+        pc_sleep(20);
+    }
+}
+
 static void draw_progress(const struct install_status *status){
     pc_display_begin_update();
     pc_display_clear(COLOR_BACKGROUND);
@@ -273,6 +340,16 @@ static void run_installation(bool start_job){
     wait_after_success(&status);
 }
 
+static void start_selected_installation(void){
+    if(!confirm_installation()){
+        draw_disk_selection();
+        return;
+    }
+    installation_committed=true;
+    run_installation(true);
+    draw_disk_selection();
+}
+
 static int installer_main(void){
     if(!pc_display_get_info(&display) || !display.available) return 1;
     disk_count=pc_list_disks(disks,20);
@@ -304,9 +381,7 @@ static int installer_main(void){
             if(selected_disk+1<(int32_t)visible_disk_count()) selected_disk++;
             draw_disk_selection();
         } else if(key=='\r' || key=='\n'){
-            installation_committed=true;
-            run_installation(true);
-            draw_disk_selection();
+            start_selected_installation();
             previous=(struct mouse_state){0};
             mouse_armed=false;
             continue;
@@ -332,9 +407,7 @@ static int installer_main(void){
             if(!installation_committed
                && inside(mouse.x,mouse.y,panel_x+28,button_y,150,40)) return 0;
             if(inside(mouse.x,mouse.y,panel_x+panel_width-218,button_y,190,40)){
-                installation_committed=true;
-                run_installation(true);
-                draw_disk_selection();
+                start_selected_installation();
                 previous=(struct mouse_state){0};
                 mouse_armed=false;
                 continue;
