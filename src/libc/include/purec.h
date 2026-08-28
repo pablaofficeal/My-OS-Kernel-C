@@ -31,6 +31,7 @@ int32_t pc_exec_with_args(const char *path, const char *arguments);
 int32_t pc_wait(int32_t pid, int32_t *status, bool nohang);
 int32_t pc_try_getchar(void);
 int32_t pc_get_command_line(char *buffer, uint32_t capacity);
+int32_t pc_get_process_name(char *buffer, uint32_t capacity);
 int32_t pc_getenv(const char *name, char *buffer, uint32_t capacity);
 int32_t pc_setenv(const char *name, const char *value);
 int32_t pc_unsetenv(const char *name);

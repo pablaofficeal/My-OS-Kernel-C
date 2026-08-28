@@ -126,6 +126,11 @@ int32_t pc_get_command_line(char *buffer, uint32_t capacity){
         (uint64_t)(uintptr_t)buffer,capacity,0);
 }
 
+int32_t pc_get_process_name(char *buffer, uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_GET_PROCESS_NAME,
+        (uint64_t)(uintptr_t)buffer,capacity,0);
+}
+
 int32_t pc_getenv(const char *name, char *buffer, uint32_t capacity){
     return (int32_t)pc_syscall(SYS_ENV_GET,(uint64_t)(uintptr_t)name,
         (uint64_t)(uintptr_t)buffer,capacity);

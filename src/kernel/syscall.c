@@ -207,6 +207,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             if(a2>PROCESS_COMMAND_LINE_CAPACITY) return -1;
             if(!writable((void*)(uintptr_t)a1,(uint32_t)a2)) return -1;
             return process_command_line((char*)(uintptr_t)a1,(uint32_t)a2);
+        case SYS_GET_PROCESS_NAME:
+            if(a2>32 || !writable((void*)(uintptr_t)a1,(uint32_t)a2)) return -1;
+            return process_name((char*)(uintptr_t)a1,(uint32_t)a2);
         case SYS_ENV_GET:
             if(a3>PROCESS_ENVIRONMENT_VALUE_CAPACITY) return -1;
             if(!readable_string((const char*)(uintptr_t)a1)

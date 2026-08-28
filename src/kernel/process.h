@@ -58,6 +58,7 @@ int32_t process_fd_close(int32_t descriptor);
 bool process_user_buffer(const void *buffer, uint64_t size, bool writable);
 bool process_user_string(const char *text, uint64_t capacity);
 int32_t process_command_line(char *buffer, uint32_t capacity);
+int32_t process_name(char *buffer, uint32_t capacity);
 int32_t process_environment_get(const char *name, char *buffer,
                                 uint32_t capacity);
 int32_t process_environment_set(const char *name, const char *value);

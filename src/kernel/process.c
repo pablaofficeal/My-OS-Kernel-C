@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "klog.h"
 #include "panic.h"
+#include "program_alias.h"
 #include "../boot/install_source.h"
 #include "../fs/vfs.h"
 #include "../mm/pmm.h"
@@ -157,7 +158,12 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
 int32_t process_spawn_module(const char *path, const char *command_line){
     const void *image;
     uint64_t size;
-    if(!path || !boot_get_module(path,&image,&size)) return -1;
+    const char *module_path=path;
+    if(!path) return -1;
+    if(!boot_get_module(module_path,&image,&size)){
+        if(!program_alias_resolve(path,&module_path)
+           || !boot_get_module(module_path,&image,&size)) return -1;
+    }
     const char *name=path;
     for(const char *cursor=path;*cursor;cursor++){
         if(*cursor=='/' && cursor[1]) name=cursor+1;
@@ -294,6 +300,15 @@ int32_t process_command_line(char *buffer, uint32_t capacity){
     uint32_t length=(uint32_t)strlen(process->command_line);
     if(length+1>capacity) return -1;
     memcpy(buffer,process->command_line,length+1);
+    return (int32_t)length;
+}
+
+int32_t process_name(char *buffer, uint32_t capacity){
+    struct process *process=process_current();
+    if(!process || !buffer || !capacity) return -1;
+    uint32_t length=(uint32_t)strlen(process->name);
+    if(length+1>capacity) return -1;
+    memcpy(buffer,process->name,length+1);
     return (int32_t)length;
 }
 

@@ -19,7 +19,6 @@
 #define SYS_GET_FONT_FACE 108
 #define SYS_FB_BEGIN_UPDATE 109
 #define SYS_FB_END_UPDATE 110
-// VFS ABI: Linux-like descriptors start at 3; stdin/stdout/stderr are 0..2.
 #define SYS_FILE_OPEN   200
 #define SYS_FILE_READ   201
 #define SYS_FILE_DELETE 202
@@ -63,6 +62,7 @@
 #define SYS_ENV_SET 241
 #define SYS_ENV_UNSET 242
 #define SYS_ENV_LIST 243
+#define SYS_GET_PROCESS_NAME 244
 
 #define PROCESS_ENVIRONMENT_LIMIT 16
 #define PROCESS_ENVIRONMENT_NAME_LIMIT 32
