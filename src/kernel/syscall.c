@@ -28,6 +28,7 @@
 
 static volatile bool filesystem_syscall_busy;
 static struct install_status install_job;
+static struct install_log install_history;
 static char install_device[STORAGE_DEVICE_NAME_CAPACITY];
 static char install_serial[STORAGE_SERIAL_CAPACITY];
 
@@ -53,9 +54,24 @@ static void filesystem_syscall_unlock(void){
 }
 
 static void install_progress(uint32_t progress, const char *stage){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
     install_job.progress=progress;
     if(stage) strncpy(install_job.stage,stage,sizeof(install_job.stage)-1);
     install_job.stage[sizeof(install_job.stage)-1]='\0';
+    if(stage){
+        if(install_history.count==INSTALL_LOG_CAPACITY){
+            for(uint32_t index=1;index<INSTALL_LOG_CAPACITY;index++)
+                install_history.entries[index-1]=install_history.entries[index];
+            install_history.count--;
+        }
+        struct install_log_entry *entry=
+            &install_history.entries[install_history.count++];
+        entry->progress=progress;
+        strncpy(entry->stage,stage,sizeof(entry->stage)-1);
+        entry->stage[sizeof(entry->stage)-1]='\0';
+    }
+    if(flags&(1ULL<<9)) __asm__ volatile("sti":::"memory");
 }
 
 static void install_worker(void *argument){
@@ -475,6 +491,7 @@ int64_t syscall_handler(struct syscall_regs *r){
                || !readable_string((const char*)(uintptr_t)a2)
                || install_job.state==1) return -1;
             memset(&install_job,0,sizeof(install_job));
+            memset(&install_history,0,sizeof(install_history));
             strncpy(install_device,(const char*)(uintptr_t)a1,
                     sizeof(install_device)-1);
             strncpy(install_serial,(const char*)(uintptr_t)a2,
@@ -492,6 +509,10 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_INSTALL_STATUS:
             if(!writable((void*)(uintptr_t)a1,sizeof(install_job))) return -1;
             *(struct install_status*)(uintptr_t)a1=install_job;
+            return 0;
+        case SYS_INSTALL_LOG:
+            if(!writable((void*)(uintptr_t)a1,sizeof(install_history))) return -1;
+            *(struct install_log*)(uintptr_t)a1=install_history;
             return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");

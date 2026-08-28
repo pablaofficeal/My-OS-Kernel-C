@@ -176,6 +176,11 @@ bool pc_install_status(struct install_status *status){
         (uint64_t)(uintptr_t)status,0,0)>=0;
 }
 
+bool pc_install_log(struct install_log *log){
+    return log && pc_syscall(SYS_INSTALL_LOG,
+        (uint64_t)(uintptr_t)log,0,0)>=0;
+}
+
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

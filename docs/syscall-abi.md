@@ -30,6 +30,8 @@ must reference present ring-3 pages and output buffers must also be writable.
 - `SYS_TRY_GETCHAR`: returns a character or `-1` without blocking.
 - `SYS_INSTALL_START`: starts the privileged asynchronous UEFI install worker.
 - `SYS_INSTALL_STATUS`: returns the real install stage, progress and result.
+- `SYS_INSTALL_LOG`: returns the bounded history of install stages and their
+  progress percentages so a restarted GUI can reconstruct the live log.
 
 ELF programs run in ring 3 with a private CR3 and user stack. The kernel half
 of the address space remains supervisor-only. The installer module receives

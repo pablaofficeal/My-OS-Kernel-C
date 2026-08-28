@@ -42,4 +42,5 @@ bool pc_mouse_get(struct mouse_state *state);
 int32_t pc_list_disks(struct storage_device_info *devices, uint32_t capacity);
 int32_t pc_install_start(const char *device, const char *serial);
 bool pc_install_status(struct install_status *status);
+bool pc_install_log(struct install_log *log);
 void pc_exit(int32_t status) __attribute__((noreturn));

@@ -48,6 +48,7 @@
 #define SYS_INSTALL_START 225
 #define SYS_INSTALL_STATUS 226
 #define SYS_TRY_GETCHAR 227
+#define SYS_INSTALL_LOG 228
 #define SYS_AUDIO_GET_STATUS 230
 #define SYS_AUDIO_GET_VOLUME 231
 #define SYS_AUDIO_SET_VOLUME 232
@@ -89,12 +90,23 @@ struct disk_monitor_info {
 };
 
 #define INSTALL_STAGE_CAPACITY 48
+#define INSTALL_LOG_CAPACITY 16
 
 struct install_status {
     uint32_t state;
     uint32_t progress;
     int32_t result;
     char stage[INSTALL_STAGE_CAPACITY];
+};
+
+struct install_log_entry {
+    uint32_t progress;
+    char stage[INSTALL_STAGE_CAPACITY];
+};
+
+struct install_log {
+    uint32_t count;
+    struct install_log_entry entries[INSTALL_LOG_CAPACITY];
 };
 
 struct framebuffer_info {
