@@ -253,6 +253,11 @@ int64_t syscall_handler(struct syscall_regs *r){
             *out = mouse_get_state();
             return 0;
         }
+        case SYS_MOUSE_DEBUG_GET:
+            return mouse_get_debug_overlay() ? 1 : 0;
+        case SYS_MOUSE_DEBUG_SET:
+            mouse_set_debug_overlay(a1!=0);
+            return 0;
         case SYS_FILE_OPEN: {
             if(!readable_string((const char*)(uintptr_t)a1)) return -1;
             filesystem_syscall_lock();

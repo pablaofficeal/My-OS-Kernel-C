@@ -125,6 +125,20 @@ static int command_mouse(void){
     return 0;
 }
 
+static int command_debug(const char *arguments){
+    bool enabled=pc_syscall(SYS_MOUSE_DEBUG_GET,0,0,0)>0;
+    if(pc_strcmp(arguments,"on")==0) enabled=true;
+    else if(pc_strcmp(arguments,"off")==0) enabled=false;
+    else if(arguments[0]){
+        pc_write("debug: use on or off\n");
+        return 1;
+    } else enabled=!enabled;
+    if(pc_syscall(SYS_MOUSE_DEBUG_SET,enabled ? 1 : 0,0,0)<0) return 1;
+    pc_write("Mouse debug panel: ");
+    pc_write(enabled ? "on\n" : "off\n");
+    return 0;
+}
+
 static int command_battery(void){
     struct battery_info info={0};
     if(pc_syscall(SYS_BATTERY_INFO,(uint64_t)(uintptr_t)&info,0,0)<0) return 1;
@@ -160,10 +174,7 @@ int system_platform_command(const char *name, const char *arguments){
     if(pc_strcmp(name,"font")==0) return command_font(arguments);
     if(pc_strcmp(name,"snake")==0) return run_program("/bin/snake",arguments);
     if(pc_strcmp(name,"mouse")==0) return command_mouse();
-    if(pc_strcmp(name,"debug")==0){
-        pc_write("debug: desktop overlay is unavailable outside the desktop process\n");
-        return 1;
-    }
+    if(pc_strcmp(name,"debug")==0) return command_debug(arguments);
     if(pc_strcmp(name,"reboot")==0)
         return pc_syscall(SYS_REBOOT,0,0,0)<0;
     if(pc_strcmp(name,"poweroff")==0 || pc_strcmp(name,"shutdown")==0
