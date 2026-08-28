@@ -46,6 +46,7 @@
 #define SYS_AUDIO_SET_MUTED 234
 #define SYS_AUDIO_ADJUST_VOLUME 235
 #define SYS_AUDIO_PLAY_TEST_SOUND 236
+#define SYS_AUDIO_UPDATE 237
 
 #define SYS_OPEN  SYS_FILE_OPEN
 #define SYS_READ  SYS_FILE_READ
@@ -143,11 +144,15 @@ struct battery_info {
 
 #define AUDIO_BACKEND_NONE 0
 #define AUDIO_BACKEND_PC_SPEAKER 1
+#define AUDIO_BACKEND_HDA 2
 
 struct audio_status {
     uint32_t volume;
     uint32_t muted;
     uint32_t backend;
+    uint32_t available_backends;
+    uint32_t pcm_ready;
+    uint32_t test_active;
 };
 
 struct syscall_regs {

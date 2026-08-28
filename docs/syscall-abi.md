@@ -46,6 +46,7 @@ EOF and does not close the descriptor.
 - `SYS_AUDIO_SET_MUTED`: `a1 != 0` mutes audio.
 - `SYS_AUDIO_ADJUST_VOLUME`: `a1` is a signed step.
 - `SYS_AUDIO_PLAY_TEST_SOUND`: plays the current backend's test sound.
+- `SYS_AUDIO_UPDATE`: advances non-blocking audio state from the scheduler loop.
 
 ## Kernel Virtual Files
 The kernel exposes a small read-only virtual filesystem:

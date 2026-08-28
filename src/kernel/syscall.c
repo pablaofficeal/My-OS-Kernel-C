@@ -335,12 +335,14 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         }
         case SYS_AUDIO_GET_VOLUME:
+            audio_update();
             return audio_get_volume();
         case SYS_AUDIO_SET_VOLUME:
             if(a1>100) return -1;
             audio_set_volume((uint8_t)a1);
             return 0;
         case SYS_AUDIO_IS_MUTED:
+            audio_update();
             return audio_is_muted() ? 1 : 0;
         case SYS_AUDIO_SET_MUTED:
             audio_set_muted(a1!=0);
@@ -350,6 +352,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_AUDIO_PLAY_TEST_SOUND:
             audio_play_test_sound();
+            return 0;
+        case SYS_AUDIO_UPDATE:
+            audio_update();
             return 0;
         case SYS_SCHED_YIELD:
             scheduler_yield();

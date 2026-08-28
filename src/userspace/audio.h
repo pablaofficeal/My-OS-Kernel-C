@@ -16,6 +16,7 @@ void userspace_audio_set_muted(bool muted);
 void userspace_audio_toggle_mute(void);
 void userspace_audio_adjust_volume(int8_t delta);
 void userspace_audio_play_test_sound(void);
+void userspace_audio_update(void);
 
 #ifdef __cplusplus
 }

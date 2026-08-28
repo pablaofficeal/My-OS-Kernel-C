@@ -12,3 +12,4 @@ void audio_set_volume(uint8_t volume);
 void audio_set_muted(bool muted);
 void audio_adjust_volume(int8_t delta);
 void audio_play_test_sound(void);
+void audio_update(void);

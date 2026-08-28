@@ -5,6 +5,7 @@
 #include "terminal/terminal.h"
 #include "monitor/monitor.h"
 #include "syscall.h"
+#include "audio.h"
 #include "display.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
@@ -368,6 +369,7 @@ void userspace_input_thread(void *arg){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        userspace_audio_update();
         if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
         monitor_window_update();
@@ -400,6 +402,7 @@ void userspace_run(void){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        userspace_audio_update();
         if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
 

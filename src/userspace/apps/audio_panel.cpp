@@ -84,6 +84,16 @@ void make_volume_label(char *buffer, uint32_t capacity, const struct audio_statu
     append_char(buffer, &length, capacity, '%');
 }
 
+const char *backend_label(const struct audio_status &status) {
+    if ((status.backend & AUDIO_BACKEND_HDA) != 0) {
+        return status.pcm_ready != 0 ? "HDA PCM" : "HDA found";
+    }
+    if ((status.backend & AUDIO_BACKEND_PC_SPEAKER) != 0) {
+        return "Legacy";
+    }
+    return "No audio";
+}
+
 void draw_slider(uint32_t x, uint32_t y, uint8_t volume, bool muted) {
     uint32_t filled = (SliderWidth * volume) / 100;
     uint32_t knob_x = filled >= SliderWidth ? SliderWidth - 6 : filled;
@@ -139,6 +149,7 @@ extern "C" void audio_panel_draw(uint32_t screen_width) {
     display_draw_rect(px + 2, 30, PopupWidth - 4, PopupHeight - 4, PanelBg);
     display_draw_text_at(px + 12, 42, "Sound", Text, PanelBg);
     display_draw_text_at(px + 122, 42, label, status.muted != 0 ? MutedText : Good, PanelBg);
+    display_draw_text_at(px + 12, 58, backend_label(status), status.pcm_ready != 0 ? Good : MutedText, PanelBg);
     draw_slider(px + 28, 74, status.volume, status.muted != 0);
     display_draw_rect(px + 12, 102, 82, 26, status.muted != 0 ? Warn : PanelBorder);
     display_draw_text_at(px + 24, 111, status.muted != 0 ? "Unmute" : "Mute", Text, status.muted != 0 ? Warn : PanelBorder);

@@ -39,3 +39,7 @@ void userspace_audio_adjust_volume(int8_t delta) {
 void userspace_audio_play_test_sound(void) {
     (void)userspace_syscall(SYS_AUDIO_PLAY_TEST_SOUND, 0, 0, 0);
 }
+
+void userspace_audio_update(void) {
+    (void)userspace_syscall(SYS_AUDIO_UPDATE, 0, 0, 0);
+}
