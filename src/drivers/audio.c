@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "audio_hda.h"
 #include "../kernel/system_info.h"
+#include "../kernel/klog.h"
 
 #define PIT_CHANNEL2_PORT 0x42
 #define PIT_COMMAND_PORT  0x43
@@ -101,6 +102,10 @@ void audio_init(void) {
         master_bus.active_backend = AUDIO_BACKEND_HDA;
         master_bus.pcm_ready = hda_pcm_output_ready();
     }
+    klogf(KLOG_INFO, "audio: master bus volume=%u mute=%u backend=%u available=0x%x pcm=%u",
+          master_bus.volume, master_bus.muted ? 1 : 0,
+          master_bus.active_backend, master_bus.available_backends,
+          master_bus.pcm_ready ? 1 : 0);
 }
 
 void audio_get_status(struct audio_status *status) {
@@ -126,7 +131,12 @@ bool audio_is_muted(void) {
 }
 
 void audio_set_volume(uint8_t volume) {
-    master_bus.volume = clamp_volume(volume);
+    uint8_t next_volume = clamp_volume(volume);
+    if (next_volume != master_bus.volume) {
+        klogf(KLOG_INFO, "audio: master volume %u -> %u",
+              master_bus.volume, next_volume);
+    }
+    master_bus.volume = next_volume;
     if (master_bus.volume > 0) {
         master_bus.muted = false;
     }
@@ -136,6 +146,9 @@ void audio_set_volume(uint8_t volume) {
 }
 
 void audio_set_muted(bool muted) {
+    if (master_bus.muted != muted) {
+        klogf(KLOG_INFO, "audio: master mute=%u", muted ? 1 : 0);
+    }
     master_bus.muted = muted;
     if (master_bus.muted) {
         stop_test_sound();
@@ -157,13 +170,16 @@ void audio_adjust_volume(int8_t delta) {
 
 void audio_play_test_sound(void) {
     if (master_bus.muted || master_bus.volume == 0) {
+        klog(KLOG_WARN, "audio: test sound ignored while master bus is muted or zero");
         return;
     }
 
     if (master_bus.pcm_ready) {
+        klog(KLOG_WARN, "audio: PCM test path is not wired yet");
         return;
     }
 
+    klog(KLOG_INFO, "audio: starting legacy PC speaker test path");
     start_pc_speaker_test();
 }
 

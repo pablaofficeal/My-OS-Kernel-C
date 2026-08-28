@@ -39,6 +39,10 @@ static void inspect_audio_device(const struct pci_device_info *device, void *con
     present = true;
 
     uint64_t bar0 = pci_read_bar(device->bus, device->slot, device->function, 0);
+    if (bar0 == 0) {
+        klog(KLOG_WARN, "audio: HDA BAR0 is empty");
+        return;
+    }
     volatile uint8_t *regs = (volatile uint8_t *)mmio_map(bar0, HDA_MMIO_SIZE);
     if (regs) {
         uint16_t capabilities = mmio_read16(regs, 0x00);
@@ -48,6 +52,8 @@ static void inspect_audio_device(const struct pci_device_info *device, void *con
         controller.minor_version = mmio_read8(regs, 0x02);
         controller.major_version = mmio_read8(regs, 0x03);
         controller.mmio_ready = true;
+    } else {
+        klogf(KLOG_WARN, "audio: HDA BAR0 0x%llx could not be mapped", bar0);
     }
 }
 
@@ -81,6 +87,9 @@ bool hda_is_present(void) {
 }
 
 bool hda_pcm_output_ready(void) {
+    if (present && !controller.mmio_ready) {
+        klog(KLOG_WARN, "audio: HDA controller found but MMIO is unavailable");
+    }
     return false;
 }
 
