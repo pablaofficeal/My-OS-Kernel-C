@@ -31,6 +31,9 @@ void klog_dump(void); // dmesg в serial
 void klog_dump_to_screen(void); // dmesg на экран (если включён)
 void klog_foreach(void (*cb)(char c));
 void klog_dump_with(void (*cb)(char c));
+uint32_t klog_read_since(uint64_t *cursor, char *buffer, uint32_t capacity,
+                         bool *data_lost);
+uint64_t klog_total_bytes(void);
 
 // цвета для GOP/VGA
 #define KLOG_BG        0x1E1E2E

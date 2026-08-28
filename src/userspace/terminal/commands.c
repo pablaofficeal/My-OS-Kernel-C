@@ -910,9 +910,10 @@ void commands_execute(const char *line){
         terminal_write("--- kernel log ---\n");
         klog_dump_with(terminal_putc);
         terminal_write("\n--- end kernel log ---\n");
-        terminal_write("Hint: run 'savelog' to save to /dmesg.txt for host mount\n");
+        terminal_write("Full streaming log: /kernel.log (up to 4 GiB)\n");
+        terminal_write("Hint: run 'savelog' only for an 8 MiB /dmesg.txt snapshot\n");
     } else if(strcmp(command,"savelog")==0){
-        terminal_write("Saving dmesg to /dmesg.txt without memory limit...\n");
+        terminal_write("Saving current 8 MiB ring snapshot to /dmesg.txt...\n");
         savelog_pos=0;
         savelog_total=0;
         savelog_failed=false;

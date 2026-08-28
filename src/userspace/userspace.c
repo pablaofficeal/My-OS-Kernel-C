@@ -36,6 +36,9 @@
 #define ICON_H           72
 #define ICON_DIRTY_W     72
 #define ICON_DIRTY_H     72
+#define PERSISTENT_LOG_CHUNK (64 * 1024)
+#define PERSISTENT_LOG_MAX_BYTES 0xFFFFFFFFULL
+#define PERSISTENT_LOG_PATH "/kernel.log"
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
@@ -54,6 +57,7 @@ static int32_t icon_drag_offset_x;
 static int32_t icon_drag_offset_y;
 static bool icon_drag_moved;
 static bool icon_layout_ready;
+static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -397,6 +401,70 @@ void userspace_terminal_thread(void *arg){
         // Yield so input thread can run even while terminal is idle
         scheduler_yield();
         for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
+    }
+}
+
+void userspace_log_thread(void *arg){
+    (void)arg;
+    uint64_t cursor=0;
+    uint64_t file_size=0;
+    uint32_t pending=0;
+    uint64_t last_flush_tick=timer_ticks();
+    int64_t clear_result=userspace_syscall(
+        SYS_FILE_WRITE,(uint64_t)PERSISTENT_LOG_PATH,0,0);
+    if(clear_result<0){
+        klogf(KLOG_ERROR,
+              "klog-disk: cannot create %s status=%d; persistent logging disabled",
+              PERSISTENT_LOG_PATH,(int)clear_result);
+        scheduler_exit();
+        return;
+    }
+    klogf(KLOG_OK,
+          "klog-disk: streaming enabled path=%s chunk=%u max_bytes=%llu ram_ring=%u",
+          PERSISTENT_LOG_PATH,PERSISTENT_LOG_CHUNK,
+          PERSISTENT_LOG_MAX_BYTES,8U*1024U*1024U);
+    for(;;){
+        bool data_lost=false;
+        uint32_t amount=klog_read_since(
+            &cursor,persistent_log_buffer+pending,
+            sizeof(persistent_log_buffer)-pending,
+            &data_lost);
+        pending+=amount;
+        if(data_lost){
+            klogf(KLOG_ERROR,
+                  "klog-disk: RAM ring overrun cursor advanced to=%llu total=%llu",
+                  cursor,klog_total_bytes());
+        }
+        uint64_t now=timer_ticks();
+        if(pending==0 || (pending<sizeof(persistent_log_buffer)
+                          && now-last_flush_tick<1000)){
+            scheduler_yield();
+            continue;
+        }
+        uint64_t remaining=PERSISTENT_LOG_MAX_BYTES-file_size;
+        amount=pending;
+        if(amount>remaining) amount=(uint32_t)remaining;
+        if(amount==0){
+            klogf(KLOG_WARN,
+                  "klog-disk: file reached FAT32 limit bytes=%llu path=%s",
+                  file_size,PERSISTENT_LOG_PATH);
+            scheduler_exit();
+            return;
+        }
+        int64_t result=userspace_syscall(
+            SYS_FILE_APPEND,(uint64_t)PERSISTENT_LOG_PATH,
+            (uint64_t)persistent_log_buffer,amount);
+        if(result<0 || (uint32_t)result!=amount){
+            klogf(KLOG_ERROR,
+                  "klog-disk: append failed status=%d requested=%u written=%u file_size=%llu",
+                  (int)result,amount,result>0 ? (uint32_t)result : 0,file_size);
+            scheduler_exit();
+            return;
+        }
+        file_size+=(uint32_t)result;
+        pending=0;
+        last_flush_tick=now;
+        scheduler_yield();
     }
 }
 

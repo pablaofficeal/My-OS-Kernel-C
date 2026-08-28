@@ -1070,9 +1070,11 @@ int32_t fat32_append_file(const char *path, const void *buffer, uint32_t count){
     }
 
     uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
-    uint32_t old_clusters=(entry.size+cluster_size-1)/cluster_size;
+    uint32_t old_clusters=(uint32_t)(((uint64_t)entry.size+cluster_size-1)
+                                     /cluster_size);
     uint32_t new_size=entry.size+count;
-    uint32_t required_clusters=(new_size+cluster_size-1)/cluster_size;
+    uint32_t required_clusters=(uint32_t)(((uint64_t)new_size+cluster_size-1)
+                                          /cluster_size);
     uint32_t cluster=entry.first_cluster;
 
     if(old_clusters==0){
