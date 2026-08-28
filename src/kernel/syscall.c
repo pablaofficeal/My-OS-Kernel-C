@@ -375,7 +375,10 @@ void syscall_init(void){
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
     if(!audio_checked){
         audio_checked=true;
+        bool screen_logging = klog_is_screen_enabled();
+        klog_set_screen_enabled(false);
         audio_init();
+        klog_set_screen_enabled(screen_logging);
         klog(KLOG_INFO, "audio: PC speaker backend ready");
     }
     if(!filesystem_checked){

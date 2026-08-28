@@ -34,6 +34,7 @@
 #define HDA_WIDGET_PIN 0x04
 #define HDA_PARAMETER_SUBNODES 0x04
 #define HDA_PARAMETER_WIDGET_CAPS 0x09
+#define HDA_PARAMETER_CONNECTION_LIST_LENGTH 0x0E
 #define HDA_VERB_GET_PARAMETER 0xF000
 #define HDA_VERB_SET_CONNECTION_SELECT 0x701
 #define HDA_VERB_SET_STREAM_FORMAT 0x200
@@ -97,12 +98,22 @@ static bool wait_reset_state(bool asserted) {
 }
 
 static bool reset_controller(void) {
+    klogf(KLOG_DEBUG, "audio: HDA reset begin GCTL=0x%08x", read32(HDA_GCTL));
     write32(HDA_GCTL, read32(HDA_GCTL) & ~HDA_GCTL_RESET);
     if (!wait_reset_state(false)) {
+        klogf(KLOG_ERROR, "audio: HDA reset deassert timeout GCTL=0x%08x",
+              read32(HDA_GCTL));
         return false;
     }
     write32(HDA_GCTL, read32(HDA_GCTL) | HDA_GCTL_RESET);
-    return wait_reset_state(true);
+    if (!wait_reset_state(true)) {
+        klogf(KLOG_ERROR, "audio: HDA reset assert timeout GCTL=0x%08x",
+              read32(HDA_GCTL));
+        return false;
+    }
+    klogf(KLOG_DEBUG, "audio: HDA reset complete GCTL=0x%08x STATESTS=0x%04x",
+          read32(HDA_GCTL), read16(HDA_STATESTS));
+    return true;
 }
 
 static bool setup_command_ring(void) {
@@ -121,8 +132,13 @@ static bool setup_command_ring(void) {
     write16(HDA_CORBSIZE, (uint16_t)((read16(HDA_CORBSIZE) & 0xF0) | 0x02));
     write16(HDA_CORBCTL, 0x02);
     write16(HDA_RIRBCTL, 0x02);
-    return (read16(HDA_CORBCTL) & 0x02) != 0
+    bool ready = (read16(HDA_CORBCTL) & 0x02) != 0
         && (read16(HDA_RIRBCTL) & 0x02) != 0;
+    klogf(ready ? KLOG_DEBUG : KLOG_ERROR,
+          "audio: HDA CORB/RIRB corb=0x%llx rirb=0x%llx size=0x%04x ctl=0x%04x/0x%04x ready=%u",
+          corb_address, rirb_address, read16(HDA_CORBSIZE),
+          read16(HDA_CORBCTL), read16(HDA_RIRBCTL), ready ? 1 : 0);
+    return ready;
 }
 
 static bool send_verb(uint32_t verb, uint32_t *response) {
@@ -136,11 +152,16 @@ static bool send_verb(uint32_t verb, uint32_t *response) {
         if (current_response != old_response) {
             if (response) {
                 *response = (uint32_t)rirb[(old_response + 1) & 0xFF];
+                klogf(KLOG_DEBUG, "audio: HDA verb 0x%08x -> 0x%08x", verb, *response);
+            } else {
+                klogf(KLOG_DEBUG, "audio: HDA verb 0x%08x acknowledged", verb);
             }
             return true;
         }
         __asm__ volatile("pause");
     }
+    klogf(KLOG_ERROR, "audio: HDA verb timeout 0x%08x CORBWP=0x%04x RIRBWP=0x%04x",
+          verb, read16(HDA_CORBWP), read16(HDA_RIRBWP));
     return false;
 }
 
@@ -160,23 +181,39 @@ static bool discover_codec(void) {
     uint32_t subnodes;
     uint32_t function_group;
     if (!codec_parameter(0, HDA_PARAMETER_SUBNODES, &subnodes)) {
+        klogf(KLOG_ERROR, "audio: codec%u root subnode query failed", codec_address);
         return false;
     }
     uint8_t first_group = (uint8_t)(subnodes & 0xFF);
     uint8_t group_count = (uint8_t)(subnodes >> 16);
     if (group_count == 0 || !codec_parameter(first_group, HDA_PARAMETER_SUBNODES,
                                               &function_group)) {
+        klogf(KLOG_ERROR, "audio: codec%u function group query failed first=%u count=%u",
+              codec_address, first_group, group_count);
         return false;
     }
     uint8_t first_widget = (uint8_t)(function_group & 0xFF);
     uint8_t widget_count = (uint8_t)(function_group >> 16);
+    uint32_t vendor_id = 0;
+    uint32_t revision_id = 0;
+    (void)codec_parameter(0, 0x00, &vendor_id);
+    (void)codec_parameter(0, 0x02, &revision_id);
+    klogf(KLOG_INFO, "audio: codec%u vendor=0x%08x revision=0x%08x root=0x%08x group=0x%08x",
+          codec_address, vendor_id, revision_id, subnodes, function_group);
     for (uint8_t index = 0; index < widget_count; index++) {
         uint8_t node = (uint8_t)(first_widget + index);
         uint32_t capabilities;
         if (!codec_parameter(node, HDA_PARAMETER_WIDGET_CAPS, &capabilities)) {
+            klogf(KLOG_WARN, "audio: codec%u node%u widget caps query failed",
+                  codec_address, node);
             continue;
         }
         uint8_t type = (uint8_t)((capabilities >> 20) & 0x0F);
+        uint32_t connection_length = 0;
+        (void)codec_parameter(node, HDA_PARAMETER_CONNECTION_LIST_LENGTH,
+                               &connection_length);
+        klogf(KLOG_DEBUG, "audio: codec%u node%u caps=0x%08x type=0x%x connections=0x%08x",
+              codec_address, node, capabilities, type, connection_length);
         if (type == HDA_WIDGET_AUDIO_OUTPUT && dac_node == 0) {
             dac_node = node;
         }
@@ -190,11 +227,29 @@ static bool discover_codec(void) {
 }
 
 static bool configure_codec(void) {
-    return codec_command(pin_node, HDA_VERB_SET_PIN_WIDGET_CONTROL, 0x40)
-        && codec_command(pin_node, HDA_VERB_SET_EAPD_BTL, 0x02)
-        && codec_command(pin_node, HDA_VERB_SET_CONNECTION_SELECT, 0)
-        && codec_command(dac_node, HDA_VERB_SET_STREAM_FORMAT, HDA_PCM_FORMAT)
-        && codec_command(dac_node, HDA_VERB_SET_AMP_GAIN_MUTE, 0xB07F);
+    klogf(KLOG_INFO, "audio: configuring codec%u pin=%u dac=%u format=0x%04x",
+          codec_address, pin_node, dac_node, HDA_PCM_FORMAT);
+    if (!codec_command(pin_node, HDA_VERB_SET_PIN_WIDGET_CONTROL, 0x40)) {
+        klog(KLOG_ERROR, "audio: failed to enable output pin");
+        return false;
+    }
+    if (!codec_command(pin_node, HDA_VERB_SET_EAPD_BTL, 0x02)) {
+        klog(KLOG_ERROR, "audio: failed to enable codec amplifier");
+        return false;
+    }
+    if (!codec_command(pin_node, HDA_VERB_SET_CONNECTION_SELECT, 0)) {
+        klog(KLOG_ERROR, "audio: failed to select pin connection index 0");
+        return false;
+    }
+    if (!codec_command(dac_node, HDA_VERB_SET_STREAM_FORMAT, HDA_PCM_FORMAT)) {
+        klog(KLOG_ERROR, "audio: failed to set DAC stream format");
+        return false;
+    }
+    if (!codec_command(dac_node, HDA_VERB_SET_AMP_GAIN_MUTE, 0xB07F)) {
+        klog(KLOG_ERROR, "audio: failed to set DAC amplifier gain");
+        return false;
+    }
+    return true;
 }
 
 static bool configure_stream(void) {
@@ -215,6 +270,8 @@ static bool configure_stream(void) {
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPL) = (uint32_t)bdl_address;
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPU) = (uint32_t)(bdl_address >> 32);
     *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = 0x00100002;
+    klogf(KLOG_DEBUG, "audio: HDA stream base=0x%x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
+          HDA_STREAM_BASE, HDA_PCM_BYTES * 2U, 1, HDA_PCM_FORMAT, bdl_address);
     return true;
 }
 
@@ -228,6 +285,7 @@ static bool setup_pcm(void) {
         return false;
     }
     uint16_t state = read16(HDA_STATESTS);
+    klogf(KLOG_INFO, "audio: HDA codec presence STATESTS=0x%04x", state);
     for (uint8_t address = 0; address < 15; address++) {
         if ((state & (1U << address)) == 0) {
             continue;
@@ -277,6 +335,9 @@ static void inspect_audio_device(const struct pci_device_info *device, void *con
     controller.major_version = *((volatile uint8_t *)(regs + 0x03));
     controller.mmio_ready = true;
     present = true;
+    klogf(KLOG_INFO, "audio: HDA PCI %u:%u.%u command 0x%08x BAR0=0x%llx GCAP=0x%04x version=%u.%u",
+          device->bus, device->slot, device->function, command | 0x00000006,
+          bar0, capabilities, controller.major_version, controller.minor_version);
 }
 
 void hda_set_address_mapping(uint64_t physical_base, uint64_t virtual_base) {
