@@ -21,6 +21,7 @@
 #define HDA_RIRBWP 0x58
 #define HDA_RINTCNT 0x5A
 #define HDA_RIRBCTL 0x5C
+#define HDA_RIRBSTS 0x5D
 #define HDA_STREAM_BASE 0x80
 #define HDA_STREAM_CTL 0x00
 #define HDA_STREAM_CBL 0x08
