@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+FALLBACK_KERNEL_IMAGE="kernel-fallback.elf"
+if [ -f kernel-limine.elf ]; then
+  cp kernel-limine.elf "$FALLBACK_KERNEL_IMAGE"
+fi
+
 echo "🔨 Building Limine kernel (higher half, GOP)..."
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libc/runtime.c -o purec_runtime.o
 x86_64-elf-ar rcs libpurec.a purec_runtime.o
@@ -75,6 +80,9 @@ nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/scheduler.asm -o scheduler_asm_limine.o
 nasm -f elf64 src/arch/x86_64/user.asm -o user_asm_limine.o
 x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o init_limine.o system_info_limine.o process_limine.o elf_limine.o pmm_limine.o vmm_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o vfs_limine.o display_limine.o userspace_fs_limine.o system_api_limine.o userspace_audio_limine.o audio_overlay_limine.o userspace_limine.o monitor_limine.o explorer_limine.o datetime_service_limine.o clock_app_limine.o calendar_app_limine.o calculator_app_limine.o desktop_apps_limine.o audio_panel_limine.o scheduler_limine.o power_limine.o audio_hda_limine.o audio_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o user_asm_limine.o
+if [ ! -f "$FALLBACK_KERNEL_IMAGE" ]; then
+  cp kernel-limine.elf "$FALLBACK_KERNEL_IMAGE"
+fi
 echo "✅ kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel-limine.elf | head -n12
 
@@ -93,11 +101,6 @@ for p in /usr/bin/limine /tmp/limine-pkg/usr/bin/limine; do
 done
 
 echo "📦 Limine: $LIMINE_SHARE"
-FALLBACK_KERNEL_IMAGE="iso/boot/kernel.elf"
-if [ ! -f "$FALLBACK_KERNEL_IMAGE" ]; then
-  echo "❌ fallback kernel не найден: $FALLBACK_KERNEL_IMAGE"
-  exit 1
-fi
 rm -rf iso_limine
 mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT iso_limine/bin/program iso_limine/lib
 
@@ -124,7 +127,7 @@ serial: yes
     module_path: boot():/bin/program/terminal
     module_path: boot():/bin/program/nano
     module_path: boot():/lib/libpurec.a
-/PureC OS 64-bit (fallback legacy image)
+/PureC OS 64-bit (fallback previous image)
     protocol: limine
     kernel_path: boot():/boot/kernel-fallback.elf
     module_path: boot():/EFI/BOOT/BOOTX64.EFI

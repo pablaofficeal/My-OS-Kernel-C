@@ -1655,7 +1655,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/lib/libpurec.a\n"
-    "/PureC OS (UEFI fallback legacy image)\n"
+    "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel-fallback.elf\n"
     "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
