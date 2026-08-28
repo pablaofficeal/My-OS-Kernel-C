@@ -148,18 +148,22 @@ static bool setup_command_ring(void) {
     write8(HDA_CORBCTL, 0);
     write8(HDA_RIRBCTL, 0);
     write16(HDA_CORBRP, 0x8000);
+    write16(HDA_CORBRP, 0x0000);
     write32(HDA_CORBLBASE, (uint32_t)corb_address);
     write32(HDA_CORBUBASE, (uint32_t)(corb_address >> 32));
     write32(HDA_RIRBLBASE, (uint32_t)rirb_address);
     write32(HDA_RIRBUBASE, (uint32_t)(rirb_address >> 32));
     write16(HDA_CORBWP, 0);
     write16(HDA_RIRBWP, 0x8000);
+    write16(HDA_RIRBWP, 0x0000);
     write16(HDA_RINTCNT, 1);
     write8(HDA_CORBSIZE, (uint8_t)((read8(HDA_CORBSIZE) & 0xF0) | 0x02));
     write8(HDA_CORBCTL, 0x02);
     write8(HDA_RIRBCTL, 0x02);
     bool ready = (read8(HDA_CORBCTL) & 0x02) != 0
         && (read8(HDA_RIRBCTL) & 0x02) != 0;
+    klogf(KLOG_DEBUG, "audio: HDA ring pointers reset corbrp=0x%04x rirbwp=0x%04x",
+          read16(HDA_CORBRP), read16(HDA_RIRBWP));
     klogf(ready ? KLOG_DEBUG : KLOG_ERROR,
           "audio: HDA CORB/RIRB corb=0x%llx rirb=0x%llx size=0x%04x ctl=0x%04x/0x%04x ready=%u",
           corb_address, rirb_address, read8(HDA_CORBSIZE),
