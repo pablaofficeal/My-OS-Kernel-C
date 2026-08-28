@@ -38,7 +38,7 @@ static const struct kernel_file kernel_files[]={
     {
         "/kernel/abi",
         "abi",
-        "syscall=int80 process=exec,wait,exit fd=per-process vfs=fat32\n"
+        "syscall=int80 process=exec,args,env,wait,exit fd=per-process vfs=fat32\n"
     }
 };
 
