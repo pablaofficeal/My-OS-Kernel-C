@@ -1860,8 +1860,7 @@ static int32_t install_uefi_payload(void){
         klogf(KLOG_ERROR,"install: write kernel %d",status);
         return status;
     }
-    status=fat32_write_file("/boot/kernel-fallback.elf",fallback_kernel_image,
-                            (uint32_t)fallback_kernel_image_size);
+    status=write_lfn_file("/boot","kernel-fallback.elf","/boot/kernel~1.elf","kernel~1.elf",fallback_kernel_image,(uint32_t)fallback_kernel_image_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write fallback %d",status);
         return status;
