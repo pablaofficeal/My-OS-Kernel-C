@@ -134,6 +134,7 @@ void audio_init(void) {
 
 void audio_get_status(struct audio_status *status) {
     if (!status) {
+        klog(KLOG_ERROR, "audio: status request rejected reason=NULL_OUTPUT");
         return;
     }
 

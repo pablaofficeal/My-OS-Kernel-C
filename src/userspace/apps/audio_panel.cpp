@@ -152,6 +152,7 @@ extern "C" void audio_panel_draw(uint32_t screen_width) {
     if (!userspace_audio_get_status(&status)) {
         status.volume = 0;
         status.muted = 1;
+        status.output_device_count = 1;
     }
 
     make_volume_label(label, sizeof(label), status);

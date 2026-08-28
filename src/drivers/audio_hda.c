@@ -592,10 +592,23 @@ static bool configure_stream(void) {
           bdl[0].address, bdl[0].length, bdl[0].flags, bdl[1].address,
           bdl[1].length, bdl[1].flags);
     *(volatile uint32_t *)(stream + HDA_STREAM_CBL) = HDA_PCM_BYTES * 2U;
+    klogf(KLOG_DEBUG, "audio: HDA stream CBL write=%u readback=%u",
+          HDA_PCM_BYTES * 2U,
+          *(volatile uint32_t *)(stream + HDA_STREAM_CBL));
     *(volatile uint16_t *)(stream + HDA_STREAM_LVI) = 1;
+    klogf(KLOG_DEBUG, "audio: HDA stream LVI write=1 readback=%u",
+          *(volatile uint16_t *)(stream + HDA_STREAM_LVI));
     *(volatile uint16_t *)(stream + HDA_STREAM_FMT) = HDA_PCM_FORMAT;
+    klogf(KLOG_DEBUG, "audio: HDA stream FMT write=0x%04x readback=0x%04x",
+          HDA_PCM_FORMAT, *(volatile uint16_t *)(stream + HDA_STREAM_FMT));
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPL) = (uint32_t)bdl_address;
+    klogf(KLOG_DEBUG, "audio: HDA stream BDPL write=0x%08x readback=0x%08x",
+          (uint32_t)bdl_address,
+          *(volatile uint32_t *)(stream + HDA_STREAM_BDPL));
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPU) = (uint32_t)(bdl_address >> 32);
+    klogf(KLOG_DEBUG, "audio: HDA stream BDPU write=0x%08x readback=0x%08x",
+          (uint32_t)(bdl_address >> 32),
+          *(volatile uint32_t *)(stream + HDA_STREAM_BDPU));
     write_stream_control(stream, (uint32_t)HDA_STREAM_TAG << 20);
     klogf(KLOG_DEBUG, "audio: HDA stream programmed base=0x%x ctl=0x%08x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
           stream_offset, read_stream_control(stream),
