@@ -371,10 +371,12 @@ void klog_dump_to_screen(void){
 
 void klog_foreach(void (*cb)(char c)){
     if(!cb) return;
-    if(!klog_ring_wrapped){
-        for(uint32_t i=0;i<klog_ring_pos;i++) cb(klog_ring[i % KLOG_RING_SIZE]);
+    uint32_t snapshot_pos=klog_ring_pos;
+    bool snapshot_wrapped=klog_ring_wrapped;
+    if(!snapshot_wrapped){
+        for(uint32_t i=0;i<snapshot_pos;i++) cb(klog_ring[i % KLOG_RING_SIZE]);
     } else {
-        uint32_t start = klog_ring_pos % KLOG_RING_SIZE;
+        uint32_t start = snapshot_pos % KLOG_RING_SIZE;
         for(uint32_t i=0;i<KLOG_RING_SIZE;i++) cb(klog_ring[(start + i) % KLOG_RING_SIZE]);
     }
 }

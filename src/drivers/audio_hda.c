@@ -177,6 +177,16 @@ static bool wait_stream_control(volatile uint8_t *stream, uint32_t mask,
     return false;
 }
 
+static void trace_stream_status(const char *stage, volatile uint8_t *stream) {
+    uint8_t status = *(volatile uint8_t *)(stream + HDA_STREAM_STS);
+    klogf(KLOG_DEBUG,
+          "audio: HDA stream status stage=%s raw=0x%02x fifo_ready=%u descriptor_error=%u fifo_error=%u buffer_complete=%u lpib=0x%08x",
+          stage, status, (status & 0x20) != 0 ? 1 : 0,
+          (status & 0x10) != 0 ? 1 : 0, (status & 0x08) != 0 ? 1 : 0,
+          (status & 0x04) != 0 ? 1 : 0,
+          *(volatile uint32_t *)(stream + 0x04));
+}
+
 static bool reset_stream(volatile uint8_t *stream) {
     uint32_t control = read_stream_control(stream) & ~HDA_STREAM_RUN;
     klogf(KLOG_DEBUG, "audio: HDA stream reset begin ctl=0x%06x", control);
@@ -1252,6 +1262,7 @@ bool hda_play_tone(uint16_t frequency_hz, uint8_t volume) {
           read_stream_control(stream),
           *(volatile uint8_t *)(stream + 0x03),
           *(volatile uint32_t *)(stream + 0x04));
+    trace_stream_status("after-run", stream);
     return true;
 }
 
@@ -1271,6 +1282,7 @@ void hda_stop_tone(void) {
     klogf(KLOG_DEBUG, "audio: HDA PCM stream STOP ctl=0x%08x sts=0x%02x",
           read_stream_control(stream),
           *(volatile uint8_t *)(stream + 0x03));
+    trace_stream_status("after-stop", stream);
 }
 
 bool hda_get_controller_info(struct hda_controller_info *out) {
