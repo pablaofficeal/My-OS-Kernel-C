@@ -1691,38 +1691,82 @@ static int32_t install_program_payload(void){
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size;
     uint64_t library_size;
-    if(!boot_get_module("/bin/init",&init_image,&init_size)
-       || !boot_get_module("/bin/installer",&installer_image,&installer_size)
-       || !boot_get_module("/bin/snake",&snake_image,&snake_size)
-       || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
-       || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
-       || !boot_get_module("/bin/program/system",&system_image,&system_size)
-       || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
-       || init_size>UINT32_MAX || installer_size>UINT32_MAX
-       || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
-       || nano_size>UINT32_MAX || system_size>UINT32_MAX
-       || library_size>UINT32_MAX){
+    if(!boot_get_module("/bin/init",&init_image,&init_size)){
+        klog(KLOG_ERROR,"install: missing /bin/init");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/installer",&installer_image,&installer_size)){
+        klog(KLOG_ERROR,"install: missing /bin/installer");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
+        klog(KLOG_ERROR,"install: missing /bin/snake");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/terminal");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/nano",&nano_image,&nano_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/nano");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/system",&system_image,&system_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/system");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
+        klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
     int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write /bin/init %d",status);
+        return status;
+    }
     status=write_lfn_file("/bin","installer","/bin/instal~1","instal~1",
                           installer_image,(uint32_t)installer_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write installer %d",status);
+        return status;
+    }
     status=fat32_write_file("/bin/snake",snake_image,(uint32_t)snake_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write snake %d",status);
+        return status;
+    }
     status=fat32_write_file("/game/snake",snake_image,(uint32_t)snake_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write game/snake %d",status);
+        return status;
+    }
     status=fat32_write_file("/bin/program/terminal",terminal_image,
                             (uint32_t)terminal_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write terminal %d",status);
+        return status;
+    }
     status=fat32_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write nano %d",status);
+        return status;
+    }
     status=fat32_write_file("/bin/program/system",system_image,
                             (uint32_t)system_size);
-    if(status<0) return status;
-    return fat32_write_file("/lib/libpurec.a",library_image,
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write system %d",status);
+        return status;
+    }
+    status=fat32_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write libpurec %d",status);
+    }
+    return status;
 }
 
 static int32_t install_uefi_payload(void){
@@ -1742,16 +1786,24 @@ static int32_t install_uefi_payload(void){
     uint64_t fallback_kernel_image_size;
     uint32_t efi_loader_size;
     if(!boot_get_kernel_image(&kernel_image,&kernel_image_size)){
+        klog(KLOG_ERROR,"install: missing kernel.elf");
         return FS_ERROR_NOT_FOUND;
     }
     if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
-                        &fallback_kernel_image_size)
-       || fallback_kernel_image_size>UINT32_MAX){
+                        &fallback_kernel_image_size)){
+        klog(KLOG_ERROR,"install: missing /boot/kernel-fallback.elf");
         return FS_ERROR_NOT_FOUND;
     }
-    if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)
-       || ((const uint8_t*)efi_loader)[0]!=0x4D
-       || ((const uint8_t*)efi_loader)[1]!=0x5A){
+    if(fallback_kernel_image_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: fallback too large");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)){
+        klog(KLOG_ERROR,"install: missing BOOTX64.EFI");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(((const uint8_t*)efi_loader)[0]!=0x4D || ((const uint8_t*)efi_loader)[1]!=0x5A){
+        klog(KLOG_ERROR,"install: BOOTX64.EFI bad MZ");
         return FS_ERROR_NOT_FOUND;
     }
     const void *init_image;
@@ -1764,30 +1816,61 @@ static int32_t install_uefi_payload(void){
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size;
     uint64_t library_size;
-    if(!boot_get_module("/bin/init",&init_image,&init_size)
-       || !boot_get_module("/bin/installer",&installer_image,&installer_size)
-       || !boot_get_module("/bin/snake",&snake_image,&snake_size)
-       || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
-       || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
-       || !boot_get_module("/bin/program/system",&system_image,&system_size)
-       || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
-       || init_size>UINT32_MAX || installer_size>UINT32_MAX
-       || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
-       || nano_size>UINT32_MAX || system_size>UINT32_MAX
-       || library_size>UINT32_MAX){
+    if(!boot_get_module("/bin/init",&init_image,&init_size)){
+        klog(KLOG_ERROR,"install: missing /bin/init uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/installer",&installer_image,&installer_size)){
+        klog(KLOG_ERROR,"install: missing /bin/installer uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
+        klog(KLOG_ERROR,"install: missing /bin/snake uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
+        klog(KLOG_ERROR,"install: missing terminal uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/nano",&nano_image,&nano_size)){
+        klog(KLOG_ERROR,"install: missing nano uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/system",&system_image,&system_size)){
+        klog(KLOG_ERROR,"install: missing system uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
+        klog(KLOG_ERROR,"install: missing libpurec uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: module too large uefi");
         return FS_ERROR_NOT_FOUND;
     }
 
     int32_t status=fat32_write_file("/EFI/BOOT/BOOTX64.EFI",
                                     efi_loader,efi_loader_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write BOOTX64 %d",status);
+        return status;
+    }
     status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write kernel %d",status);
+        return status;
+    }
     status=fat32_write_file("/boot/kernel-fallback.elf",fallback_kernel_image,
                             (uint32_t)fallback_kernel_image_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write fallback %d",status);
+        return status;
+    }
     status=install_program_payload();
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: program payload %d",status);
+        return status;
+    }
 
     static const struct {
         const char *directory;
