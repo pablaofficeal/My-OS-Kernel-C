@@ -2,6 +2,7 @@
 #include "elf.h"
 #include "scheduler.h"
 #include "klog.h"
+#include "panic.h"
 #include "../boot/install_source.h"
 #include "../fs/vfs.h"
 #include "../mm/pmm.h"
@@ -153,6 +154,7 @@ uint64_t process_current_address_space(void){
 void process_exit_current(int32_t status){
     struct process *process=process_current();
     if(process){
+        if(process->pid==1) kernel_panic("PID 1 exited");
         process->exit_code=status;
         process->state=PROCESS_EXITED;
         for(uint32_t fd=3;fd<PROCESS_FD_COUNT;fd++){

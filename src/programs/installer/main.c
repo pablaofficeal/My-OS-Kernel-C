@@ -16,6 +16,13 @@ static int32_t disk_count;
 static int32_t selected_disk;
 static struct pc_display_info display;
 
+static uint32_t visible_disk_count(void){
+    uint32_t capacity=display.height>280 ? (display.height-280)/54 : 1;
+    if(capacity>MAX_VISIBLE_DISKS) capacity=MAX_VISIBLE_DISKS;
+    if(capacity>(uint32_t)disk_count) capacity=(uint32_t)disk_count;
+    return capacity;
+}
+
 static bool inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                    uint32_t width, uint32_t height){
     return x>=(int32_t)left && y>=(int32_t)top
@@ -50,10 +57,11 @@ static void draw_disk_selection(void){
     pc_draw_text(panel_x+28,88,
                  "Choose a target disk. Installation uses UEFI/GPT.",
                  COLOR_MUTED,COLOR_PANEL);
-    uint32_t visible=(uint32_t)disk_count;
-    if(visible>MAX_VISIBLE_DISKS) visible=MAX_VISIBLE_DISKS;
+    pc_draw_text(panel_x+28,108,"All data on the selected disk will be erased.",
+                 COLOR_DANGER,COLOR_PANEL);
+    uint32_t visible=visible_disk_count();
     for(uint32_t index=0;index<visible;index++){
-        uint32_t y=126+index*54;
+        uint32_t y=136+index*54;
         uint32_t color=(int32_t)index==selected_disk ? COLOR_ACCENT : COLOR_CARD;
         pc_draw_rect(panel_x+28,y,panel_width-56,44,color);
         pc_draw_text(panel_x+42,y+9,disks[index].name,COLOR_TEXT,color);
@@ -159,10 +167,9 @@ static int installer_main(void){
         if(pressed){
             uint32_t panel_x=display.width>820 ? (display.width-820)/2 : 20;
             uint32_t panel_width=display.width>860 ? 820 : display.width-40;
-            uint32_t visible=(uint32_t)disk_count;
-            if(visible>MAX_VISIBLE_DISKS) visible=MAX_VISIBLE_DISKS;
+            uint32_t visible=visible_disk_count();
             for(uint32_t index=0;index<visible;index++){
-                if(inside(mouse.x,mouse.y,panel_x+28,126+index*54,
+                if(inside(mouse.x,mouse.y,panel_x+28,136+index*54,
                           panel_width-56,44)){
                     selected_disk=(int32_t)index;
                     draw_disk_selection();

@@ -13,3 +13,7 @@ iso_limine/boot/limine/limine-bios.sys
 *.log
 *.elf
 *repair-backups/
+init
+installer
+libpurec.a
+snake

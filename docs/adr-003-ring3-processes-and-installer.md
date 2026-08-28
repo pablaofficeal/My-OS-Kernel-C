@@ -21,8 +21,9 @@ thread. Update CR3 and TSS.RSP0 at context switches. Enter programs through the
 ring-3 GDT selectors and `iretq`; timer interrupts and system calls return
 through the existing interrupt frame.
 
-Compile the installer with its own linker script as `installer.elf`, omit its
-object from `kernel-limine.elf`, and copy it to `/boot/installer.elf` in the ISO.
+Compile the installer with its own linker script, omit its object from
+`kernel-limine.elf`, and copy it as a separate boot module. ADR-004 standardizes
+the final path as `/bin/installer`.
 Limine supplies it as a boot module. The shell starts it with `SYS_EXEC` and
 waits with `SYS_WAIT`. Only this trusted module receives permission to invoke
 destructive formatting calls.
