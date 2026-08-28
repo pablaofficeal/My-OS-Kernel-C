@@ -56,9 +56,9 @@ sudo apt install build-essential nasm grub-common xorriso qemu-system-x86
 
 #### Сборка ISO-образа
 
-Скрипт `build-limine.sh` создаёт два независимых ELF-файла:
-`kernel-limine.elf` и ring-3 установщик `installer.elf`. Установщик копируется
-в ISO как `/boot/installer.elf` и не линкуется в образ ядра.
+Скрипт `build-limine.sh` отдельно создаёт ядро, `libpurec.a` и ring-3 программы
+`/bin/init`, `/bin/installer`, `/bin/snake`. Установщик и змейка не линкуются
+в образ ядра. При установке змейка также копируется в `/game/snake`.
 
 ```mermaid
 graph TD

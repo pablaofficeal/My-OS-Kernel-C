@@ -3,6 +3,7 @@
 #include "klog.h"
 #include "panic.h"
 #include "scheduler.h"
+#include "process.h"
 #include "../drivers/serial.h"
 #include "../userspace/userspace.h"
 
@@ -20,11 +21,6 @@ void init_process_start(uint32_t detected_cpu_count){
     klog(KLOG_OK, "Booting init process...");
     boot_log_pause();
 
-    serial_write_string("[INIT] linked userspace init\n");
-    userspace_init();
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN,
-                         "init complete, starting scheduler");
-
     scheduler_init();
     int core_count=scheduler_get_core_count();
     if(detected_cpu_count>1){
@@ -34,6 +30,15 @@ void init_process_start(uint32_t detected_cpu_count){
     }
     klogf(KLOG_INFO, "sched: active cores=%d, creating init threads",
           core_count);
+
+    int32_t init_pid=process_spawn_module("/bin/init");
+    if(init_pid!=1) kernel_panic("cannot start /bin/init as PID 1");
+    klog(KLOG_OK,"process: /bin/init started as PID 1");
+
+    serial_write_string("[INIT] PID 1 registered, initializing desktop\n");
+    userspace_init();
+    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN,
+                         "init and desktop ready, starting scheduler");
 
     scheduler_create_thread(userspace_input_thread, 0, "init-input", 0, 0);
     scheduler_create_thread(userspace_terminal_thread, 0, "init-terminal", 1, 0);

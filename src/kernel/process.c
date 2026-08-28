@@ -72,7 +72,7 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
     process->entry=loaded.entry;
     process->user_stack_top=USER_STACK_TOP-16;
     strncpy(process->name,name ? name : "process",sizeof(process->name)-1);
-    if(name && strcmp(name,"installer.elf")==0)
+    if(name && strcmp(name,"installer")==0)
         process->capabilities|=PROCESS_CAP_STORAGE_ADMIN;
     process->thread_id=scheduler_create_user_thread(
         user_process_entry,process,process->name,2,-1,
@@ -99,7 +99,7 @@ int32_t process_spawn_module(const char *path){
     return process_spawn_elf(image,size,name);
 }
 
-int32_t process_wait(uint32_t pid, int32_t *status){
+int32_t process_wait(uint32_t pid, int32_t *status, bool nohang){
     if(!pid) return -1;
     for(;;){
         struct process *target=0;
@@ -120,6 +120,7 @@ int32_t process_wait(uint32_t pid, int32_t *status){
             target->state=PROCESS_FREE;
             return (int32_t)pid;
         }
+        if(nohang) return 0;
         scheduler_yield();
     }
 }

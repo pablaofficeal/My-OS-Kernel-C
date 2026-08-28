@@ -1,7 +1,7 @@
 # ADR-003: Ring-3 Processes and a Separate Installer ELF
 
 ## Status
-Accepted
+Superseded by ADR-004
 
 ## Context
 The scheduler previously switched only linked ring-0 threads. Every thread

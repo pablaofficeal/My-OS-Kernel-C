@@ -14,7 +14,10 @@ C++20 for selected desktop modules, NASM assembly and custom linker scripts.
 - `src/kernel/scheduler.*` preempts kernel and user threads on the PIT tick.
 - `src/kernel/syscall.*` is the ring-3 boundary and validates user memory.
 - `src/fs/vfs.*` routes virtual kernel files and the FAT32 root backend.
-- `src/programs/installer/main.c` is a standalone ring-3 installation program.
+- `src/libc/*` builds the common freestanding `libpurec.a` application API.
+- `src/programs/init/main.c` is the mandatory PID-1 image.
+- `src/programs/installer/main.c` is a graphical ring-3 installation program.
+- `src/programs/game/snake/main.c` is the standalone graphical Snake image.
 
 ## Observed Requirements
 - OBS-BOOT-001: When Limine omits HHDM or the memory map, the kernel shall panic
@@ -36,8 +39,12 @@ C++20 for selected desktop modules, NASM assembly and custom linker scripts.
 - OBS-SEC-002: When a process without storage-administration permission requests
   disk formatting, the syscall shall fail (`src/kernel/syscall.c`).
 - OBS-INSTALL-001: When the ISO is assembled, the installer shall be copied as
-  `/boot/installer.elf` and shall not be linked into the kernel ELF
+  `/bin/installer` and shall not be linked into the kernel ELF
   (`build-limine.sh`).
+- OBS-INIT-001: When userspace starts, `/bin/init` shall be created before every
+  other process and shall have PID 1 (`src/kernel/init.c`).
+- OBS-INSTALL-002: While disk installation runs, the GUI shall obtain progress
+  from completed FAT32 stages rather than elapsed time (`src/fs/fat32.c`).
 
 ## Non-Functional Observations
 - Scheduling is single-core even when Limine reports additional CPUs.

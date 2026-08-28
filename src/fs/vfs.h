@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "fs_types.h"
+#include "fat32.h"
 
 #define VFS_FD_STDIN  0
 #define VFS_FD_STDOUT 1
@@ -31,3 +32,6 @@ int32_t vfs_format_device_force(const char *device_name,
                                 const char *serial_confirmation);
 int32_t vfs_format_uefi_device(const char *device_name,
                                const char *serial_confirmation);
+int32_t vfs_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback);

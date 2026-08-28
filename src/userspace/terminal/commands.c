@@ -15,7 +15,6 @@
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"
 #include "../../lib/string.h"
-#include "../games/snake.h"
 #include "../monitor/monitor.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -573,56 +572,16 @@ static void format_fat32(const char *arguments){
     }
 }
 
-static void prompt_read_line(const char *prompt, char *out, uint32_t cap){
-    terminal_write(prompt);
-    uint32_t len=0;
-    memset(out,0,cap);
-    for(;;){
-        char c=keyboard_getc();
-        if(c=='\r' || c=='\n'){
-            terminal_putc('\n');
-            break;
-        }
-        if(c=='\b' || c==127){
-            if(len){
-                len--;
-                terminal_putc('\b');
-            }
-            continue;
-        }
-        if(c<' ' || c>'~') continue;
-        if(len+1<cap){
-            out[len++]=c;
-            terminal_putc(c);
-        }
-    }
-    out[len]=0;
-}
-
-static bool installer_write_file(const char *path, const char *content){
-    int64_t r=userspace_syscall(SYS_FILE_WRITE,(uint64_t)path,(uint64_t)content,strlen(content));
-    return r>=0;
-}
-static bool installer_create_dir(const char *path){
-    int64_t r=userspace_syscall(SYS_DIR_CREATE,(uint64_t)path,0,0);
-    return r==0 || r==FS_ERROR_EXISTS;
-}
-
 static void run_installer(const char *args){
     (void)args;
-    int64_t pid=userspace_syscall(SYS_EXEC,
-                                  (uint64_t)"/boot/installer.elf",0,0);
-    if(pid<0){
-        terminal_write("Cannot start /boot/installer.elf from ISO\n");
+    int32_t status=userspace_run_program("/bin/installer");
+    if(status<0){
+        terminal_write("Cannot start /bin/installer from boot media\n");
         return;
     }
-    terminal_printf("Started installer process pid=%d\n",(int)pid);
-    int32_t status=0;
-    int64_t waited=userspace_syscall(SYS_WAIT,(uint64_t)pid,
-                                     (uint64_t)&status,0);
-    if(waited<0) terminal_write("Cannot wait for installer process\n");
-    else terminal_printf("Installer process exited status=%d\n",status);
+    terminal_printf("Installer process exited status=%d\n",status);
     return;
+#if 0
     terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
     static struct storage_device_info devs[20];
     int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
@@ -779,6 +738,7 @@ static void run_installer(const char *args){
     terminal_write("  Files: /etc/hostname /boot/loader.cfg\n");
     terminal_write("Run 'ls /purec' and 'cat /purec/install.cfg' to verify.\n");
     terminal_write("Reboot to test auto-mount.\n");
+#endif
 }
 
 static void show_help(void){
@@ -958,7 +918,8 @@ void commands_execute(const char *line){
     } else if(strcmp(command,"font")==0){
         configure_font(arguments);
     } else if(strcmp(command,"snake")==0){
-        snake_run();
+        if(userspace_run_program("/bin/snake")<0)
+            terminal_write("Cannot start /bin/snake\n");
     } else if(strcmp(command,"mouse")==0){
         show_mouse();
     } else if(strcmp(command,"debug")==0){

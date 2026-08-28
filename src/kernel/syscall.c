@@ -5,6 +5,7 @@
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/mouse/usb_mouse.h"
 #include "../drivers/storage/block_device.h"
 #include "../drivers/storage/ahci.h"
 #include "../drivers/storage/storage_probe.h"
@@ -24,6 +25,9 @@
 #include <stdbool.h>
 
 static volatile bool filesystem_syscall_busy;
+static struct install_status install_job;
+static char install_device[STORAGE_DEVICE_NAME_CAPACITY];
+static char install_serial[STORAGE_SERIAL_CAPACITY];
 
 static bool readable(const void *buffer, uint64_t size){
     return process_user_buffer(buffer,size,false);
@@ -44,6 +48,28 @@ static void filesystem_syscall_lock(void){
 
 static void filesystem_syscall_unlock(void){
     __atomic_clear(&filesystem_syscall_busy,__ATOMIC_RELEASE);
+}
+
+static void install_progress(uint32_t progress, const char *stage){
+    install_job.progress=progress;
+    if(stage) strncpy(install_job.stage,stage,sizeof(install_job.stage)-1);
+    install_job.stage[sizeof(install_job.stage)-1]='\0';
+}
+
+static void install_worker(void *argument){
+    (void)argument;
+    filesystem_syscall_lock();
+    int32_t result=vfs_format_uefi_device_progress(
+        install_device,install_serial,install_progress);
+    filesystem_syscall_unlock();
+    install_job.result=result;
+    if(result<0){
+        install_job.state=3;
+        install_progress(100,"Installation failed");
+    } else {
+        install_job.state=2;
+        install_progress(92,"Disk layout complete");
+    }
 }
 
 static void print_hex(uint64_t v){
@@ -142,6 +168,8 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_GET_MOUSE: {
             struct mouse_state *out = (struct mouse_state*)(uintptr_t)a1;
             if(!writable(out,sizeof(*out))) return -1;
+            ps2_mouse_poll();
+            usb_mouse_poll();
             *out = mouse_get_state();
             return 0;
         }
@@ -376,7 +404,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             process_exit_current((int32_t)a1);
         case SYS_WAIT:
             if(a2 && !writable((void*)(uintptr_t)a2,sizeof(int32_t))) return -1;
-            return process_wait((uint32_t)a1,(int32_t*)(uintptr_t)a2);
+            return process_wait((uint32_t)a1,(int32_t*)(uintptr_t)a2,a3!=0);
         case SYS_SLEEP:
             if(a1>UINT32_MAX) return -1;
             scheduler_sleep((uint32_t)a1);
@@ -429,6 +457,33 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_GETCHAR:
             return (uint8_t)keyboard_getc();
+        case SYS_TRY_GETCHAR: {
+            char character;
+            return keyboard_try_getc(&character) ? (uint8_t)character : -1;
+        }
+        case SYS_INSTALL_START:
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)
+               || !readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)
+               || install_job.state==1) return -1;
+            memset(&install_job,0,sizeof(install_job));
+            strncpy(install_device,(const char*)(uintptr_t)a1,
+                    sizeof(install_device)-1);
+            strncpy(install_serial,(const char*)(uintptr_t)a2,
+                    sizeof(install_serial)-1);
+            install_job.state=1;
+            install_progress(1,"Starting installer worker");
+            if(scheduler_create_thread(install_worker,0,"installer-io",1,-1)<0){
+                install_job.state=3;
+                install_job.result=-1;
+                install_progress(100,"Cannot start installer worker");
+                return -1;
+            }
+            return 0;
+        case SYS_INSTALL_STATUS:
+            if(!writable((void*)(uintptr_t)a1,sizeof(install_job))) return -1;
+            *(struct install_status*)(uintptr_t)a1=install_job;
+            return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;

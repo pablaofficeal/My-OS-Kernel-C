@@ -50,6 +50,9 @@ static uint32_t htop_icon_y=ICON_Y;
 static uint32_t terminal_icon_y=ICON_Y;
 static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
 static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
+static uint32_t installer_icon_x=256,installer_icon_y=ICON_Y;
+static bool installer_icon_visible=true;
+static bool external_program_active;
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
 static int8_t dragged_icon=-1;
@@ -58,6 +61,7 @@ static int32_t icon_drag_offset_y;
 static bool icon_drag_moved;
 static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
+static void redraw_scene(void);
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -113,6 +117,36 @@ static void draw_desktop_icons(void){
     draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
     draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
     draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
+    if(installer_icon_visible)
+        draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
+}
+
+static bool installation_present(void){
+    int64_t descriptor=userspace_syscall(
+        SYS_OPEN,(uint64_t)"/purec/install.cfg",0,0);
+    if(descriptor<0) return false;
+    (void)userspace_syscall(SYS_CLOSE,(uint64_t)descriptor,0,0);
+    return true;
+}
+
+static void launch_installer(void){
+    (void)userspace_run_program("/bin/installer");
+    installer_icon_visible=!installation_present();
+}
+
+int32_t userspace_run_program(const char *path){
+    if(!path || external_program_active) return -1;
+    external_program_active=true;
+    int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+    if(pid<0){
+        external_program_active=false;
+        return -1;
+    }
+    int32_t status=0;
+    (void)userspace_syscall(SYS_WAIT,(uint64_t)pid,(uint64_t)&status,0);
+    external_program_active=false;
+    redraw_scene();
+    return status;
 }
 
 static void draw_power_button(void){
@@ -253,24 +287,27 @@ static void handle_desktop_mouse(void){
                                       pressed,released,
                                       desktop_width,desktop_height) || redraw;
     }
-    uint32_t *icon_positions[6]={
+    uint32_t *icon_positions[7]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
         &clock_icon_x,
         &calculator_icon_x,
-        &calendar_icon_x
+        &calendar_icon_x,
+        &installer_icon_x
     };
-    uint32_t *icon_y_positions[6]={
+    uint32_t *icon_y_positions[7]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
         &clock_icon_y,
         &calculator_icon_y,
-        &calendar_icon_y
+        &calendar_icon_y,
+        &installer_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<6;index++){
+        for(int8_t index=0;index<7;index++){
+            if(index==6 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
                     *icon_positions[index],*icon_y_positions[index],
@@ -314,6 +351,7 @@ static void handle_desktop_mouse(void){
             if(icon==0) explorer_open(desktop_width,desktop_height);
             else if(icon==1) monitor_run();
             else if(icon==2) terminal_set_visible(true);
+            else if(icon==6) launch_installer();
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;
@@ -366,6 +404,7 @@ void userspace_init(void){
     userspace_set_mouse_debug(true);
     audio_panel_init();
     desktop_apps_init();
+    installer_icon_visible=!installation_present();
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
@@ -378,6 +417,10 @@ void userspace_input_thread(void *arg){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        if(external_program_active){
+            scheduler_yield();
+            continue;
+        }
         if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
         monitor_window_update();

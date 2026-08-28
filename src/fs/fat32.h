@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include "fs_types.h"
 
+typedef void (*fat32_progress_callback)(uint32_t progress,
+                                        const char *stage);
+
 bool fat32_init(void);
 bool fat32_is_mounted(void);
 const char *fat32_device_name(void);
@@ -24,3 +27,6 @@ int32_t fat32_format_device(const char *device_name,
                             const char *erase_confirmation);
 int32_t fat32_format_device_force(const char *device_name, const char *serial_confirmation);
 int32_t fat32_format_uefi_device(const char *device_name, const char *serial_confirmation);
+int32_t fat32_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback);

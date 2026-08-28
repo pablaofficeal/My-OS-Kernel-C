@@ -1571,7 +1571,11 @@ static const char uefi_limine_config[]=
     "/PureC OS (UEFI)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel.elf\n"
-    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n";
+    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
+    "    module_path: boot():/bin/init\n"
+    "    module_path: boot():/bin/installer\n"
+    "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/lib/libpurec.a\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1586,9 +1590,37 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
     return entry.size==expected_size?0:FS_ERROR_IO;
 }
 
+static int32_t install_program_payload(void){
+    if(create_directory_checked("/bin")<0
+       || create_directory_checked("/game")<0
+       || create_directory_checked("/lib")<0) return FS_ERROR_IO;
+    const void *init_image,*installer_image,*snake_image,*library_image;
+    uint64_t init_size,installer_size,snake_size,library_size;
+    if(!boot_get_module("/bin/init",&init_image,&init_size)
+       || !boot_get_module("/bin/installer",&installer_image,&installer_size)
+       || !boot_get_module("/bin/snake",&snake_image,&snake_size)
+       || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
+       || init_size>UINT32_MAX || installer_size>UINT32_MAX
+       || snake_size>UINT32_MAX || library_size>UINT32_MAX){
+        return FS_ERROR_NOT_FOUND;
+    }
+    int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
+    if(status<0) return status;
+    status=write_lfn_file("/bin","installer","/bin/install~1","install~1",
+                          installer_image,(uint32_t)installer_size);
+    if(status<0) return status;
+    status=fat32_write_file("/bin/snake",snake_image,(uint32_t)snake_size);
+    if(status<0) return status;
+    status=fat32_write_file("/game/snake",snake_image,(uint32_t)snake_size);
+    if(status<0) return status;
+    return fat32_write_file("/lib/libpurec.a",library_image,
+                            (uint32_t)library_size);
+}
+
 static int32_t install_uefi_payload(void){
     static const char *directories[]={
-        "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine"
+        "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine",
+        "/bin","/game","/lib"
     };
     for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
         int32_t status=create_directory_checked(directories[index]);
@@ -1607,11 +1639,26 @@ static int32_t install_uefi_payload(void){
        || ((const uint8_t*)efi_loader)[1]!=0x5A){
         return FS_ERROR_NOT_FOUND;
     }
+    const void *init_image;
+    const void *installer_image;
+    const void *snake_image;
+    const void *library_image;
+    uint64_t init_size,installer_size,snake_size,library_size;
+    if(!boot_get_module("/bin/init",&init_image,&init_size)
+       || !boot_get_module("/bin/installer",&installer_image,&installer_size)
+       || !boot_get_module("/bin/snake",&snake_image,&snake_size)
+       || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
+       || init_size>UINT32_MAX || installer_size>UINT32_MAX
+       || snake_size>UINT32_MAX || library_size>UINT32_MAX){
+        return FS_ERROR_NOT_FOUND;
+    }
 
     int32_t status=fat32_write_file("/EFI/BOOT/BOOTX64.EFI",
                                     efi_loader,efi_loader_size);
     if(status<0) return status;
     status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
+    if(status<0) return status;
+    status=install_program_payload();
     if(status<0) return status;
 
     static const struct {
@@ -1635,6 +1682,16 @@ static int32_t install_uefi_payload(void){
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
     if(status<0) return status;
+    status=verify_installed_file("/bin/init",(uint32_t)init_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/installer",(uint32_t)installer_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/snake",(uint32_t)snake_size);
+    if(status<0) return status;
+    status=verify_installed_file("/game/snake",(uint32_t)snake_size);
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpurec.a",(uint32_t)library_size);
+    if(status<0) return status;
     for(uint8_t index=0;index<sizeof(config_locations)/sizeof(config_locations[0]);index++){
         status=verify_installed_file(config_locations[index].alias_path,
                                      sizeof(uefi_limine_config)-1);
@@ -1644,7 +1701,10 @@ static int32_t install_uefi_payload(void){
 }
 
 // UEFI install: GPT, a 512 MiB ESP, and a separate system partition.
-int32_t fat32_format_uefi_device(const char *device_name, const char *serial_confirmation){
+int32_t fat32_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback){
+    if(callback) callback(2,"Validating target disk");
     if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
     int32_t idx=block_device_find(device_name);
     if(idx<0) return FS_ERROR_NOT_FOUND;
@@ -1672,12 +1732,14 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         return FS_ERROR_TOO_SMALL;
     }
     if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
+    if(callback) callback(8,"Writing GPT partition table");
     klogf(KLOG_INFO,"fat32_uefi: %s total %u ESP %u sectors data %u sectors",
           device_name,total_sectors,FAT32_ESP_SECTORS,data_sectors);
     if(!write_gpt_layout(total_sectors,info.serial)){
         klogf(KLOG_ERROR,"fat32_uefi: GPT write failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(18,"Formatting EFI system partition");
     if(!write_format_metadata_at(FAT32_ESP_START_LBA,&esp_layout,
                                  esp_volume_label)){
         klogf(KLOG_ERROR,"fat32_uefi: ESP format failed");
@@ -1689,12 +1751,14 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         klogf(KLOG_ERROR,"fat32_uefi: ESP mount failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(45,"Copying bootloader and kernel");
     int32_t status=install_uefi_payload();
     if(status<0){
         klogf(KLOG_ERROR,"fat32_uefi: boot payload failed %d",status);
         return status;
     }
 
+    if(callback) callback(70,"Formatting PureC system partition");
     if(!write_format_metadata_at(data_start,&data_layout,
                                  required_volume_label)){
         klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
@@ -1706,6 +1770,18 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(88,"Copying programs to /bin and /game");
+    status=install_program_payload();
+    if(status<0){
+        klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
+        return status;
+    }
+    if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
+}
+
+int32_t fat32_format_uefi_device(const char *device_name,
+                                 const char *serial_confirmation){
+    return fat32_format_uefi_device_progress(device_name,serial_confirmation,0);
 }

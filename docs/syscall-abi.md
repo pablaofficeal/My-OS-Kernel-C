@@ -27,10 +27,16 @@ must reference present ring-3 pages and output buffers must also be writable.
 - `SYS_SCHED_YIELD`: voluntarily gives up the current time slice.
 - `SYS_SLEEP`: blocks the calling thread until its timer deadline.
 - `SYS_GETCHAR`: returns one keyboard character to a foreground program.
+- `SYS_TRY_GETCHAR`: returns a character or `-1` without blocking.
+- `SYS_INSTALL_START`: starts the privileged asynchronous UEFI install worker.
+- `SYS_INSTALL_STATUS`: returns the real install stage, progress and result.
 
 ELF programs run in ring 3 with a private CR3 and user stack. The kernel half
 of the address space remains supervisor-only. The installer module receives
 the storage-administration capability; ordinary processes cannot format disks.
+
+`/bin/init` is mandatory and must receive PID 1. Boot-media applications are
+addressed as `/bin/installer` and `/bin/snake`.
 
 ## File Descriptors
 VFS descriptors follow the Linux shape:

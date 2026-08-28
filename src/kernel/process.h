@@ -32,7 +32,7 @@ void process_init(void);
 int32_t process_spawn_elf(const void *image, uint64_t image_size,
                           const char *name);
 int32_t process_spawn_module(const char *path);
-int32_t process_wait(uint32_t pid, int32_t *status);
+int32_t process_wait(uint32_t pid, int32_t *status, bool nohang);
 struct process *process_current(void);
 int32_t process_current_pid(void);
 bool process_current_is_user(void);

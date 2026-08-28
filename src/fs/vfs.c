@@ -33,7 +33,7 @@ static const struct kernel_file kernel_files[]={
     {
         "/kernel/init",
         "init",
-        "process=elf64 ring=3 installer=/boot/installer.elf\n"
+        "pid1=/bin/init installer=/bin/installer games=/bin/snake\n"
     },
     {
         "/kernel/abi",
@@ -222,4 +222,11 @@ int32_t vfs_format_device_force(const char *device_name,
 int32_t vfs_format_uefi_device(const char *device_name,
                                const char *serial_confirmation){
     return fat32_format_uefi_device(device_name,serial_confirmation);
+}
+
+int32_t vfs_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback){
+    return fat32_format_uefi_device_progress(device_name,serial_confirmation,
+                                              callback);
 }
