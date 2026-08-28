@@ -93,10 +93,16 @@ for p in /usr/bin/limine /tmp/limine-pkg/usr/bin/limine; do
 done
 
 echo "📦 Limine: $LIMINE_SHARE"
+FALLBACK_KERNEL_IMAGE="iso/boot/kernel.elf"
+if [ ! -f "$FALLBACK_KERNEL_IMAGE" ]; then
+  echo "❌ fallback kernel не найден: $FALLBACK_KERNEL_IMAGE"
+  exit 1
+fi
 rm -rf iso_limine
 mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT iso_limine/bin/program iso_limine/lib
 
 cp kernel-limine.elf iso_limine/boot/kernel.elf
+cp "$FALLBACK_KERNEL_IMAGE" iso_limine/boot/kernel-fallback.elf
 cp init iso_limine/bin/init
 cp installer iso_limine/bin/installer
 cp snake iso_limine/bin/snake
@@ -107,9 +113,20 @@ cat > iso_limine/boot/limine/limine.conf <<'EOF'
 timeout: 10
 verbose: yes
 serial: yes
-/PureC OS 64-bit Limine+GOP
+/PureC OS 64-bit Limine+GOP (primary)
     protocol: limine
     kernel_path: boot():/boot/kernel.elf
+    module_path: boot():/boot/kernel-fallback.elf
+    module_path: boot():/EFI/BOOT/BOOTX64.EFI
+    module_path: boot():/bin/init
+    module_path: boot():/bin/installer
+    module_path: boot():/bin/snake
+    module_path: boot():/bin/program/terminal
+    module_path: boot():/bin/program/nano
+    module_path: boot():/lib/libpurec.a
+/PureC OS 64-bit (fallback legacy image)
+    protocol: limine
+    kernel_path: boot():/boot/kernel-fallback.elf
     module_path: boot():/EFI/BOOT/BOOTX64.EFI
     module_path: boot():/bin/init
     module_path: boot():/bin/installer

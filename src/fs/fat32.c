@@ -1644,9 +1644,20 @@ static int32_t create_directory_checked(const char *path){
 static const char uefi_limine_config[]=
     "timeout: 10\n"
     "verbose: yes\n"
-    "/PureC OS (UEFI)\n"
+    "/PureC OS (UEFI primary)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel.elf\n"
+    "    module_path: boot():/boot/kernel-fallback.elf\n"
+    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
+    "    module_path: boot():/bin/init\n"
+    "    module_path: boot():/bin/installer\n"
+    "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/program/terminal\n"
+    "    module_path: boot():/bin/program/nano\n"
+    "    module_path: boot():/lib/libpurec.a\n"
+    "/PureC OS (UEFI fallback legacy image)\n"
+    "    protocol: limine\n"
+    "    kernel_path: boot():/boot/kernel-fallback.elf\n"
     "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
@@ -1717,10 +1728,17 @@ static int32_t install_uefi_payload(void){
     }
 
     const void *kernel_image;
+    const void *fallback_kernel_image;
     const void *efi_loader;
     uint32_t kernel_image_size;
+    uint64_t fallback_kernel_image_size;
     uint32_t efi_loader_size;
     if(!boot_get_kernel_image(&kernel_image,&kernel_image_size)){
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
+                        &fallback_kernel_image_size)
+       || fallback_kernel_image_size>UINT32_MAX){
         return FS_ERROR_NOT_FOUND;
     }
     if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)
@@ -1753,6 +1771,9 @@ static int32_t install_uefi_payload(void){
     if(status<0) return status;
     status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
     if(status<0) return status;
+    status=fat32_write_file("/boot/kernel-fallback.elf",fallback_kernel_image,
+                            (uint32_t)fallback_kernel_image_size);
+    if(status<0) return status;
     status=install_program_payload();
     if(status<0) return status;
 
@@ -1776,6 +1797,9 @@ static int32_t install_uefi_payload(void){
     status=verify_installed_file("/EFI/BOOT/BOOTX64.EFI",efi_loader_size);
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
+    if(status<0) return status;
+    status=verify_installed_file("/boot/kernel-fallback.elf",
+                                 (uint32_t)fallback_kernel_image_size);
     if(status<0) return status;
     status=verify_installed_file("/bin/init",(uint32_t)init_size);
     if(status<0) return status;
