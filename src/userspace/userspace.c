@@ -62,6 +62,14 @@ static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 static void redraw_scene(void);
 
+static bool external_program_has_input_focus(void){
+    return __atomic_load_n(&external_program_active,__ATOMIC_ACQUIRE);
+}
+
+static void set_external_program_input_focus(bool active){
+    __atomic_store_n(&external_program_active,active,__ATOMIC_RELEASE);
+}
+
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
     return x>=(int32_t)left && y>=(int32_t)top
@@ -142,8 +150,8 @@ static bool installer_requires_restart(int32_t status){
 }
 
 int32_t userspace_run_program(const char *path){
-    if(!path || external_program_active) return -1;
-    external_program_active=true;
+    if(!path || external_program_has_input_focus()) return -1;
+    set_external_program_input_focus(true);
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
     bool installer_pinned=false;
     int32_t status=-1;
@@ -169,7 +177,7 @@ int32_t userspace_run_program(const char *path){
               status);
         scheduler_sleep(20);
     }
-    external_program_active=false;
+    set_external_program_input_focus(false);
     redraw_scene();
     return status;
 }
@@ -439,7 +447,7 @@ void userspace_input_thread(void *arg){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
-        if(external_program_active){
+        if(external_program_has_input_focus()){
             scheduler_sleep(10);
             continue;
         }
@@ -457,12 +465,12 @@ void userspace_terminal_thread(void *arg){
     (void)arg;
     klog(KLOG_INFO, "sched: terminal thread started (file I/O + keyboard)");
     for(;;){
-        if(external_program_active){
+        if(external_program_has_input_focus()){
             scheduler_sleep(10);
             continue;
         }
         char c;
-        while(keyboard_try_getc(&c)){
+        while(!external_program_has_input_focus() && keyboard_try_getc(&c)){
             if(!desktop_apps_handle_key(c)
                && !explorer_window_handle_key(c) && terminal_is_visible())
                 terminal_handle_key(c);
@@ -544,6 +552,10 @@ void userspace_run(void){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        if(external_program_has_input_focus()){
+            scheduler_yield();
+            continue;
+        }
         if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
 
