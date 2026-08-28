@@ -71,12 +71,20 @@ static uint16_t read16(uint32_t offset) {
     return *(volatile uint16_t *)(regs + offset);
 }
 
+static uint8_t read8(uint32_t offset) {
+    return *(volatile uint8_t *)(regs + offset);
+}
+
 static uint32_t read32(uint32_t offset) {
     return *(volatile uint32_t *)(regs + offset);
 }
 
 static void write16(uint32_t offset, uint16_t value) {
     *(volatile uint16_t *)(regs + offset) = value;
+}
+
+static void write8(uint32_t offset, uint8_t value) {
+    *(volatile uint8_t *)(regs + offset) = value;
 }
 
 static void write32(uint32_t offset, uint32_t value) {
@@ -119,8 +127,8 @@ static bool reset_controller(void) {
 static bool setup_command_ring(void) {
     uint64_t corb_address = physical_address(corb);
     uint64_t rirb_address = physical_address(rirb);
-    write16(HDA_CORBCTL, 0);
-    write16(HDA_RIRBCTL, 0);
+    write8(HDA_CORBCTL, 0);
+    write8(HDA_RIRBCTL, 0);
     write16(HDA_CORBRP, 0x8000);
     write32(HDA_CORBLBASE, (uint32_t)corb_address);
     write32(HDA_CORBUBASE, (uint32_t)(corb_address >> 32));
@@ -129,15 +137,15 @@ static bool setup_command_ring(void) {
     write16(HDA_CORBWP, 0);
     write16(HDA_RIRBWP, 0x8000);
     write16(HDA_RINTCNT, 1);
-    write16(HDA_CORBSIZE, (uint16_t)((read16(HDA_CORBSIZE) & 0xF0) | 0x02));
-    write16(HDA_CORBCTL, 0x02);
-    write16(HDA_RIRBCTL, 0x02);
-    bool ready = (read16(HDA_CORBCTL) & 0x02) != 0
-        && (read16(HDA_RIRBCTL) & 0x02) != 0;
+    write8(HDA_CORBSIZE, (uint8_t)((read8(HDA_CORBSIZE) & 0xF0) | 0x02));
+    write8(HDA_CORBCTL, 0x02);
+    write8(HDA_RIRBCTL, 0x02);
+    bool ready = (read8(HDA_CORBCTL) & 0x02) != 0
+        && (read8(HDA_RIRBCTL) & 0x02) != 0;
     klogf(ready ? KLOG_DEBUG : KLOG_ERROR,
           "audio: HDA CORB/RIRB corb=0x%llx rirb=0x%llx size=0x%04x ctl=0x%04x/0x%04x ready=%u",
-          corb_address, rirb_address, read16(HDA_CORBSIZE),
-          read16(HDA_CORBCTL), read16(HDA_RIRBCTL), ready ? 1 : 0);
+          corb_address, rirb_address, read8(HDA_CORBSIZE),
+          read8(HDA_CORBCTL), read8(HDA_RIRBCTL), ready ? 1 : 0);
     return ready;
 }
 
