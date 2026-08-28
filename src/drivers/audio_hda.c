@@ -91,6 +91,14 @@ static void write32(uint32_t offset, uint32_t value) {
     *(volatile uint32_t *)(regs + offset) = value;
 }
 
+static void trace_ring(const char *stage) {
+    klogf(KLOG_DEBUG,
+          "audio: HDA %s CORBWP=0x%04x CORBRP=0x%04x CORBCTL=0x%02x CORBSIZE=0x%02x RIRBWP=0x%04x RIRBCTL=0x%02x RIRBSTS=0x%02x STATESTS=0x%04x",
+          stage, read16(HDA_CORBWP), read16(HDA_CORBRP), read8(HDA_CORBCTL),
+          read8(HDA_CORBSIZE), read16(HDA_RIRBWP), read8(HDA_RIRBCTL),
+          read8(HDA_RIRBSTS), read16(HDA_STATESTS));
+}
+
 static uint64_t physical_address(const void *pointer) {
     return (uint64_t)(uintptr_t)pointer - kernel_virtual_base + kernel_physical_base;
 }
@@ -153,30 +161,49 @@ static bool send_verb(uint32_t verb, uint32_t *response) {
     uint16_t old_write = read16(HDA_CORBWP) & 0xFF;
     uint16_t next_write = (uint16_t)((old_write + 1) & 0xFF);
     uint16_t old_response = read16(HDA_RIRBWP) & 0xFF;
+    uint8_t codec = (uint8_t)(verb >> 28);
+    uint8_t node = (uint8_t)((verb >> 20) & 0x7F);
+    uint16_t command = (uint16_t)((verb >> 8) & 0x0FFF);
+    uint8_t payload = (uint8_t)verb;
+    klogf(KLOG_DEBUG,
+          "audio: HDA VERB OUT raw=0x%08x codec=%u node=0x%02x verb=0x%03x payload=0x%02x slot=%u",
+          verb, codec, node, command, payload, next_write);
+    trace_ring("before-submit");
     corb[next_write] = verb;
     write16(HDA_CORBWP, next_write);
+    klogf(KLOG_DEBUG, "audio: HDA CORB[%u] phys=0x%llx value=0x%08x",
+          next_write, physical_address(&corb[next_write]), corb[next_write]);
+    trace_ring("after-submit");
     for (uint32_t wait = 0; wait < HDA_TIMEOUT; wait++) {
         uint16_t current_response = read16(HDA_RIRBWP) & 0xFF;
         if (current_response != old_response) {
+            uint16_t response_index = (uint16_t)((old_response + 1) & 0xFF);
             if (response) {
-                *response = (uint32_t)rirb[(old_response + 1) & 0xFF];
-                klogf(KLOG_DEBUG, "audio: HDA verb 0x%08x -> 0x%08x", verb, *response);
+                *response = (uint32_t)rirb[response_index];
+                klogf(KLOG_DEBUG,
+                      "audio: HDA VERB IN raw=0x%08x response_slot=%u phys=0x%llx",
+                      *response, response_index,
+                      physical_address(&rirb[response_index]));
             } else {
-                klogf(KLOG_DEBUG, "audio: HDA verb 0x%08x acknowledged", verb);
+                klogf(KLOG_DEBUG, "audio: HDA VERB IN unsolicited response ignored slot=%u",
+                      response_index);
             }
+            trace_ring("response-received");
             return true;
         }
         __asm__ volatile("pause");
     }
-    klogf(KLOG_ERROR, "audio: HDA verb timeout 0x%08x CORBWP=0x%04x RIRBWP=0x%04x",
-          verb, read16(HDA_CORBWP), read16(HDA_RIRBWP));
+    trace_ring("response-timeout");
+    klogf(KLOG_ERROR,
+          "audio: HDA VERB TIMEOUT raw=0x%08x codec=%u node=0x%02x verb=0x%03x payload=0x%02x expected_rirbwp=0x%04x",
+          verb, codec, node, command, payload, old_response);
     return false;
 }
 
 static bool codec_parameter(uint8_t node, uint8_t parameter, uint32_t *value) {
     return send_verb(((uint32_t)codec_address << 28)
                      | ((uint32_t)node << 20)
-                     | HDA_VERB_GET_PARAMETER | parameter, value);
+                     | ((HDA_VERB_GET_PARAMETER | parameter) << 8), value);
 }
 
 static bool codec_command(uint8_t node, uint16_t verb, uint16_t payload) {
