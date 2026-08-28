@@ -196,8 +196,52 @@ int64_t syscall_handler(struct syscall_regs *r){
         case SYS_GETPID:
             return process_current_pid();
         case SYS_EXEC:
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || (a2 && !readable_string((const char*)(uintptr_t)a2)))
+                return -1;
+            if(a2 && strlen((const char*)(uintptr_t)a2)
+                     >=PROCESS_COMMAND_LINE_CAPACITY) return -1;
+            return process_spawn_module((const char*)(uintptr_t)a1,
+                                        (const char*)(uintptr_t)a2);
+        case SYS_GET_COMMAND_LINE:
+            if(a2>PROCESS_COMMAND_LINE_CAPACITY) return -1;
+            if(!writable((void*)(uintptr_t)a1,(uint32_t)a2)) return -1;
+            return process_command_line((char*)(uintptr_t)a1,(uint32_t)a2);
+        case SYS_ENV_GET:
+            if(a3>PROCESS_ENVIRONMENT_VALUE_CAPACITY) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !writable((void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            return process_environment_get((const char*)(uintptr_t)a1,
+                                           (char*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_ENV_SET:
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            return process_environment_set((const char*)(uintptr_t)a1,
+                                           (const char*)(uintptr_t)a2);
+        case SYS_ENV_UNSET:
             if(!readable_string((const char*)(uintptr_t)a1)) return -1;
-            return process_spawn_module((const char*)(uintptr_t)a1);
+            return process_environment_unset((const char*)(uintptr_t)a1);
+        case SYS_ENV_LIST: {
+            if(a2>PROCESS_ENVIRONMENT_LIMIT) return -1;
+            struct process_environment_variable *variables=
+                (struct process_environment_variable*)(uintptr_t)a1;
+            if(a2 && !writable(variables,a2*sizeof(*variables))) return -1;
+            struct process_environment_entry entries[PROCESS_ENVIRONMENT_LIMIT];
+            int32_t count=process_environment_list(entries,(uint32_t)a2);
+            if(count<0) return count;
+            uint32_t copied=(uint32_t)count<(uint32_t)a2
+                ? (uint32_t)count : (uint32_t)a2;
+            for(uint32_t index=0;index<copied;index++){
+                variables[index].used=entries[index].used ? 1 : 0;
+                strncpy(variables[index].name,entries[index].name,
+                        sizeof(variables[index].name)-1);
+                variables[index].name[sizeof(variables[index].name)-1]='\0';
+                strncpy(variables[index].value,entries[index].value,
+                        sizeof(variables[index].value)-1);
+                variables[index].value[sizeof(variables[index].value)-1]='\0';
+            }
+            return count;
+        }
         case SYS_GET_MOUSE: {
             struct mouse_state *out = (struct mouse_state*)(uintptr_t)a1;
             if(!writable(out,sizeof(*out))) return -1;

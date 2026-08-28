@@ -31,7 +31,7 @@ void init_process_start(uint32_t detected_cpu_count){
     klogf(KLOG_INFO, "sched: active cores=%d, creating init threads",
           core_count);
 
-    int32_t init_pid=process_spawn_module("/bin/init");
+    int32_t init_pid=process_spawn_module("/bin/init","");
     if(init_pid!=1) kernel_panic("cannot start /bin/init as PID 1");
     klog(KLOG_OK,"process: /bin/init started as PID 1");
 
@@ -41,7 +41,7 @@ void init_process_start(uint32_t detected_cpu_count){
                          "init and desktop ready, starting scheduler");
 
     scheduler_create_thread(userspace_input_thread, 0, "init-input", 0, 0);
-    scheduler_create_thread(userspace_terminal_thread, 0, "init-terminal", 1, 0);
+    scheduler_create_thread(userspace_keyboard_thread, 0, "desktop-keyboard", 1, 0);
     scheduler_create_thread(userspace_log_thread, 0, "kernel-log", 2, 0);
     klog(KLOG_OK, "sched: init threads created, starting scheduler");
     serial_write_string("[SCHED] start\n");

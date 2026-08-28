@@ -107,6 +107,11 @@ int32_t pc_exec(const char *path){
     return (int32_t)pc_syscall(SYS_EXEC,(uint64_t)(uintptr_t)path,0,0);
 }
 
+int32_t pc_exec_with_args(const char *path, const char *arguments){
+    return (int32_t)pc_syscall(SYS_EXEC,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)arguments,0);
+}
+
 int32_t pc_wait(int32_t pid, int32_t *status, bool nohang){
     return (int32_t)pc_syscall(SYS_WAIT,(uint32_t)pid,
         (uint64_t)(uintptr_t)status,nohang ? 1 : 0);
@@ -114,6 +119,49 @@ int32_t pc_wait(int32_t pid, int32_t *status, bool nohang){
 
 int32_t pc_try_getchar(void){
     return (int32_t)pc_syscall(SYS_TRY_GETCHAR,0,0,0);
+}
+
+int32_t pc_get_command_line(char *buffer, uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_GET_COMMAND_LINE,
+        (uint64_t)(uintptr_t)buffer,capacity,0);
+}
+
+int32_t pc_getenv(const char *name, char *buffer, uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_ENV_GET,(uint64_t)(uintptr_t)name,
+        (uint64_t)(uintptr_t)buffer,capacity);
+}
+
+int32_t pc_setenv(const char *name, const char *value){
+    return (int32_t)pc_syscall(SYS_ENV_SET,(uint64_t)(uintptr_t)name,
+        (uint64_t)(uintptr_t)value,0);
+}
+
+int32_t pc_unsetenv(const char *name){
+    return (int32_t)pc_syscall(SYS_ENV_UNSET,(uint64_t)(uintptr_t)name,0,0);
+}
+
+int32_t pc_listenv(struct process_environment_variable *variables,
+                   uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_ENV_LIST,
+        (uint64_t)(uintptr_t)variables,capacity,0);
+}
+
+int32_t pc_file_open(const char *path){
+    return (int32_t)pc_syscall(SYS_FILE_OPEN,(uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_file_read(int32_t descriptor, void *buffer, uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_FILE_READ,(uint32_t)descriptor,
+        (uint64_t)(uintptr_t)buffer,capacity);
+}
+
+int32_t pc_file_close(int32_t descriptor){
+    return (int32_t)pc_syscall(SYS_FILE_CLOSE,(uint32_t)descriptor,0,0);
+}
+
+int32_t pc_file_write(const char *path, const void *buffer, uint32_t size){
+    return (int32_t)pc_syscall(SYS_FILE_WRITE,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)buffer,size);
 }
 
 bool pc_file_exists(const char *path){

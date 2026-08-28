@@ -33,7 +33,7 @@ static const struct kernel_file kernel_files[]={
     {
         "/kernel/init",
         "init",
-        "pid1=/bin/init installer=/bin/installer games=/bin/snake\n"
+        "pid1=/bin/init shell=/bin/program/terminal editor=/bin/program/nano\n"
     },
     {
         "/kernel/abi",

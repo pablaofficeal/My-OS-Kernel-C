@@ -18,6 +18,63 @@ extern void arch_enter_user(uint64_t instruction_pointer,
 static struct process processes[PROCESS_MAX_COUNT];
 static uint32_t next_pid=1;
 
+static bool environment_name_valid(const char *name){
+    if(!name || !name[0]) return false;
+    for(uint32_t index=0;name[index];index++){
+        char character=name[index];
+        if(index>=PROCESS_ENVIRONMENT_NAME_CAPACITY-1
+           || !((character>='a' && character<='z')
+                || (character>='A' && character<='Z')
+                || character=='_' || (index>0 && character>='0'
+                                      && character<='9'))) return false;
+    }
+    return true;
+}
+
+static int32_t environment_find(const struct process *process,
+                                const char *name){
+    for(uint32_t index=0;index<PROCESS_ENVIRONMENT_COUNT;index++){
+        if(process->environment[index].used
+           && strcmp(process->environment[index].name,name)==0)
+            return (int32_t)index;
+    }
+    return -1;
+}
+
+static void environment_put(struct process *process, const char *name,
+                            const char *value){
+    int32_t slot=environment_find(process,name);
+    if(slot<0){
+        for(uint32_t index=0;index<PROCESS_ENVIRONMENT_COUNT;index++){
+            if(!process->environment[index].used){
+                slot=(int32_t)index;
+                break;
+            }
+        }
+    }
+    if(slot<0) return;
+    struct process_environment_entry *entry=&process->environment[slot];
+    entry->used=true;
+    strncpy(entry->name,name,sizeof(entry->name)-1);
+    entry->name[sizeof(entry->name)-1]='\0';
+    strncpy(entry->value,value,sizeof(entry->value)-1);
+    entry->value[sizeof(entry->value)-1]='\0';
+}
+
+static void environment_initialize(struct process *process,
+                                   const struct process *parent){
+    if(parent){
+        memcpy(process->environment,parent->environment,
+               sizeof(process->environment));
+        return;
+    }
+    environment_put(process,"HOME","/");
+    environment_put(process,"PWD","/");
+    environment_put(process,"USER","purec");
+    environment_put(process,"SHELL","/bin/program/terminal");
+    environment_put(process,"PATH","");
+}
+
 static struct process *allocate_process(void){
     for(uint32_t index=0;index<PROCESS_MAX_COUNT;index++){
         if(processes[index].state==PROCESS_FREE){
@@ -47,7 +104,8 @@ void process_init(void){
 }
 
 int32_t process_spawn_elf(const void *image, uint64_t image_size,
-                          const char *name){
+                          const char *name, const char *command_line){
+    struct process *parent=process_current();
     struct process *process=allocate_process();
     if(!process) return -1;
     process->address_space=vmm_create_address_space();
@@ -73,6 +131,12 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
     process->state=PROCESS_READY;
     process->entry=loaded.entry;
     process->user_stack_top=USER_STACK_TOP-16;
+    environment_initialize(process,parent);
+    if(command_line){
+        strncpy(process->command_line,command_line,
+                sizeof(process->command_line)-1);
+        process->command_line[sizeof(process->command_line)-1]='\0';
+    }
     strncpy(process->name,name ? name : "process",sizeof(process->name)-1);
     if(name && strcmp(name,"installer")==0)
         process->capabilities|=PROCESS_CAP_STORAGE_ADMIN;
@@ -90,7 +154,7 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
     return (int32_t)process->pid;
 }
 
-int32_t process_spawn_module(const char *path){
+int32_t process_spawn_module(const char *path, const char *command_line){
     const void *image;
     uint64_t size;
     if(!path || !boot_get_module(path,&image,&size)) return -1;
@@ -98,7 +162,7 @@ int32_t process_spawn_module(const char *path){
     for(const char *cursor=path;*cursor;cursor++){
         if(*cursor=='/' && cursor[1]) name=cursor+1;
     }
-    return process_spawn_elf(image,size,name);
+    return process_spawn_elf(image,size,name,command_line);
 }
 
 int32_t process_wait(uint32_t pid, int32_t *status, bool nohang){
@@ -222,4 +286,66 @@ bool process_user_string(const char *text, uint64_t capacity){
         if(text[index]=='\0') return true;
     }
     return false;
+}
+
+int32_t process_command_line(char *buffer, uint32_t capacity){
+    struct process *process=process_current();
+    if(!process || !buffer || !capacity) return -1;
+    uint32_t length=(uint32_t)strlen(process->command_line);
+    if(length+1>capacity) return -1;
+    memcpy(buffer,process->command_line,length+1);
+    return (int32_t)length;
+}
+
+int32_t process_environment_get(const char *name, char *buffer,
+                                uint32_t capacity){
+    struct process *process=process_current();
+    if(!process || !environment_name_valid(name) || !buffer || !capacity)
+        return -1;
+    int32_t slot=environment_find(process,name);
+    if(slot<0) return -1;
+    uint32_t length=(uint32_t)strlen(process->environment[slot].value);
+    if(length+1>capacity) return -1;
+    memcpy(buffer,process->environment[slot].value,length+1);
+    return (int32_t)length;
+}
+
+int32_t process_environment_set(const char *name, const char *value){
+    struct process *process=process_current();
+    if(!process || !environment_name_valid(name) || !value
+       || strlen(value)>=PROCESS_ENVIRONMENT_VALUE_CAPACITY) return -1;
+    int32_t slot=environment_find(process,name);
+    if(slot<0){
+        for(uint32_t index=0;index<PROCESS_ENVIRONMENT_COUNT;index++){
+            if(!process->environment[index].used){
+                slot=(int32_t)index;
+                break;
+            }
+        }
+    }
+    if(slot<0) return -1;
+    environment_put(process,name,value);
+    return 0;
+}
+
+int32_t process_environment_unset(const char *name){
+    struct process *process=process_current();
+    if(!process || !environment_name_valid(name)) return -1;
+    int32_t slot=environment_find(process,name);
+    if(slot<0) return -1;
+    memset(&process->environment[slot],0,sizeof(process->environment[slot]));
+    return 0;
+}
+
+int32_t process_environment_list(struct process_environment_entry *entries,
+                                 uint32_t capacity){
+    struct process *process=process_current();
+    if(!process || (!entries && capacity)) return -1;
+    uint32_t count=0;
+    for(uint32_t index=0;index<PROCESS_ENVIRONMENT_COUNT;index++){
+        if(!process->environment[index].used) continue;
+        if(count<capacity) entries[count]=process->environment[index];
+        count++;
+    }
+    return (int32_t)count;
 }

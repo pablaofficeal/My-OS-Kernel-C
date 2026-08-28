@@ -1651,6 +1651,8 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
     "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/program/terminal\n"
+    "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/lib/libpurec.a\n";
 
 static int32_t write_uefi_config(const char *directory,
@@ -1668,16 +1670,22 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
 
 static int32_t install_program_payload(void){
     if(create_directory_checked("/bin")<0
+       || create_directory_checked("/bin/program")<0
        || create_directory_checked("/game")<0
        || create_directory_checked("/lib")<0) return FS_ERROR_IO;
-    const void *init_image,*installer_image,*snake_image,*library_image;
-    uint64_t init_size,installer_size,snake_size,library_size;
+    const void *init_image,*installer_image,*snake_image,*terminal_image;
+    const void *nano_image,*library_image;
+    uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t library_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)
        || !boot_get_module("/bin/installer",&installer_image,&installer_size)
        || !boot_get_module("/bin/snake",&snake_image,&snake_size)
+       || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
+       || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
        || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
        || init_size>UINT32_MAX || installer_size>UINT32_MAX
-       || snake_size>UINT32_MAX || library_size>UINT32_MAX){
+       || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
+       || nano_size>UINT32_MAX || library_size>UINT32_MAX){
         return FS_ERROR_NOT_FOUND;
     }
     int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
@@ -1689,6 +1697,11 @@ static int32_t install_program_payload(void){
     if(status<0) return status;
     status=fat32_write_file("/game/snake",snake_image,(uint32_t)snake_size);
     if(status<0) return status;
+    status=fat32_write_file("/bin/program/terminal",terminal_image,
+                            (uint32_t)terminal_size);
+    if(status<0) return status;
+    status=fat32_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
+    if(status<0) return status;
     return fat32_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
 }
@@ -1696,7 +1709,7 @@ static int32_t install_program_payload(void){
 static int32_t install_uefi_payload(void){
     static const char *directories[]={
         "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine",
-        "/bin","/game","/lib"
+        "/bin","/bin/program","/game","/lib"
     };
     for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
         int32_t status=create_directory_checked(directories[index]);
@@ -1718,14 +1731,20 @@ static int32_t install_uefi_payload(void){
     const void *init_image;
     const void *installer_image;
     const void *snake_image;
+    const void *terminal_image;
+    const void *nano_image;
     const void *library_image;
-    uint64_t init_size,installer_size,snake_size,library_size;
+    uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t library_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)
        || !boot_get_module("/bin/installer",&installer_image,&installer_size)
        || !boot_get_module("/bin/snake",&snake_image,&snake_size)
+       || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
+       || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
        || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
        || init_size>UINT32_MAX || installer_size>UINT32_MAX
-       || snake_size>UINT32_MAX || library_size>UINT32_MAX){
+       || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
+       || nano_size>UINT32_MAX || library_size>UINT32_MAX){
         return FS_ERROR_NOT_FOUND;
     }
 
@@ -1765,6 +1784,11 @@ static int32_t install_uefi_payload(void){
     status=verify_installed_file("/bin/snake",(uint32_t)snake_size);
     if(status<0) return status;
     status=verify_installed_file("/game/snake",(uint32_t)snake_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/terminal",
+                                 (uint32_t)terminal_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/nano",(uint32_t)nano_size);
     if(status<0) return status;
     status=verify_installed_file("/lib/libpurec.a",(uint32_t)library_size);
     if(status<0) return status;

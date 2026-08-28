@@ -2,7 +2,6 @@
 #include "apps/desktop_apps.h"
 #include "apps/audio_panel.h"
 #include "explorer/explorer.h"
-#include "terminal/terminal.h"
 #include "monitor/monitor.h"
 #include "syscall.h"
 #include "audio.h"
@@ -226,7 +225,6 @@ static void draw_desktop(void){
 static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
-    if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
@@ -245,7 +243,6 @@ static void redraw_icon_move(
     display_draw_rect(old_x,old_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
     display_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
     draw_desktop_icons();
-    if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
@@ -311,12 +308,6 @@ static void handle_desktop_mouse(void){
                                             desktop_width,desktop_height)
             || redraw;
     }
-    if(!consumed && terminal_is_visible()){
-        consumed=terminal_contains_point(mouse.x,mouse.y);
-        redraw=terminal_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                      pressed,released,
-                                      desktop_width,desktop_height) || redraw;
-    }
     uint32_t *icon_positions[7]={
         &explorer_icon_x,
         &htop_icon_x,
@@ -380,7 +371,8 @@ static void handle_desktop_mouse(void){
         if(!icon_drag_moved){
             if(icon==0) explorer_open(desktop_width,desktop_height);
             else if(icon==1) monitor_run();
-            else if(icon==2) terminal_set_visible(true);
+            else if(icon==2)
+                (void)userspace_run_program("/bin/program/terminal");
             else if(icon==6) launch_installer();
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
@@ -425,10 +417,6 @@ void userspace_init(void){
     // ring and serial, while panic forcibly restores a visible panic screen.
     klog_set_screen_enabled(false);
     draw_desktop();
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing terminal");
-    terminal_init(desktop_width,desktop_height);
-    terminal_set_visible(true);
-
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
     userspace_set_mouse_debug(false);
@@ -461,9 +449,9 @@ void userspace_input_thread(void *arg){
     }
 }
 
-void userspace_terminal_thread(void *arg){
+void userspace_keyboard_thread(void *arg){
     (void)arg;
-    klog(KLOG_INFO, "sched: terminal thread started (file I/O + keyboard)");
+    klog(KLOG_INFO, "sched: desktop keyboard thread started");
     for(;;){
         if(external_program_has_input_focus()){
             scheduler_sleep(10);
@@ -471,9 +459,8 @@ void userspace_terminal_thread(void *arg){
         }
         char c;
         while(!external_program_has_input_focus() && keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c)
-               && !explorer_window_handle_key(c) && terminal_is_visible())
-                terminal_handle_key(c);
+            if(!desktop_apps_handle_key(c))
+                (void)explorer_window_handle_key(c);
         }
         // Yield so input thread can run even while terminal is idle
         scheduler_yield();
@@ -561,9 +548,8 @@ void userspace_run(void){
 
         char c;
         while(keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c)
-               && !explorer_window_handle_key(c) && terminal_is_visible())
-                terminal_handle_key(c);
+            if(!desktop_apps_handle_key(c))
+                (void)explorer_window_handle_key(c);
         }
         monitor_window_update();
         desktop_apps_update();
