@@ -1,7 +1,7 @@
 #include "nano.h"
 #include "../syscall.h"
 #include "../terminal/terminal.h"
-#include "../../fs/fat32.h"
+#include "../../fs/fs_types.h"
 #include "../../kernel/syscall.h"
 #include "../../lib/string.h"
 #include <stdint.h>

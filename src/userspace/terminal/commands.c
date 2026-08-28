@@ -11,7 +11,6 @@
 #include "../../drivers/storage/storage_types.h"
 #include "../../drivers/usb/xhci.h"
 #include "../../drivers/keyboard.h"
-#include "../../fs/fat32.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"

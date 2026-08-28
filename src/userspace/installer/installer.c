@@ -2,7 +2,7 @@
 #include "../terminal/terminal.h"
 #include "../../drivers/keyboard.h"
 #include "../../drivers/storage/storage_types.h"
-#include "../../fs/fat32.h"
+#include "../../fs/fs_types.h"
 #include "../../kernel/syscall.h"
 #include "../syscall.h"
 #include "../../lib/string.h"

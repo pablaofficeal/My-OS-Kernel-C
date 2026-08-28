@@ -754,7 +754,6 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     }
     struct fat32_handle *handle=&handles[index];
     if(handle->position>=handle->size){
-        handle->used=false;
         return 0;
     }
 
@@ -766,16 +765,14 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
         if((yield_counter++ & 0x3)==0) scheduler_yield();
         uint32_t cluster=handle->current_cluster;
         if(!valid_cluster(cluster)){
-            handle->used=false;
             return FS_ERROR_INVALID;
         }
         uint32_t target_cluster_index=handle->position/cluster_size;
         while(handle->cluster_index<target_cluster_index){
             uint32_t next;
             int32_t status=fat_next_cluster(cluster,&next);
-            if(status<0){ handle->used=false; return status; }
+            if(status<0) return status;
             if(!valid_cluster(next)){
-                handle->used=false;
                 return FS_ERROR_INVALID;
             }
             cluster=next;
@@ -787,7 +784,6 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
         uint32_t sector=offset_in_cluster/BLOCK_SECTOR_SIZE;
         uint32_t offset=offset_in_cluster%BLOCK_SECTOR_SIZE;
         if(!block_device_read(cluster_lba(cluster)+sector,sector_buffer)){
-            handle->used=false;
             return FS_ERROR_IO;
         }
 

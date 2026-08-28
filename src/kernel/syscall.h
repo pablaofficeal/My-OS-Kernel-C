@@ -15,8 +15,7 @@
 #define SYS_SCROLL_RECT_UP 106
 #define SYS_SET_FONT_FACE 107
 #define SYS_GET_FONT_FACE 108
-// FAT32 ABI: open/read/delete/rename/move plus directory, creation and
-// whole-file write operations used by the terminal tools.
+// VFS ABI: Linux-like descriptors start at 3; stdin/stdout/stderr are 0..2.
 #define SYS_FILE_OPEN   200
 #define SYS_FILE_READ   201
 #define SYS_FILE_DELETE 202
@@ -40,6 +39,13 @@
 #define SYS_BATTERY_INFO 220
 #define SYS_SCHED_YIELD 221
 #define SYS_FILE_CLOSE 222
+
+#define SYS_OPEN  SYS_FILE_OPEN
+#define SYS_READ  SYS_FILE_READ
+#define SYS_CLOSE SYS_FILE_CLOSE
+#define SYS_UNLINK SYS_FILE_DELETE
+#define SYS_RENAME SYS_FILE_RENAME
+#define SYS_MKDIR SYS_DIR_CREATE
 
 #define CPU_MONITOR_NAME_CAPACITY 49
 

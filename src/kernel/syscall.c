@@ -11,7 +11,7 @@
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
 #include "../drivers/timer.h"
-#include "../fs/fat32.h"
+#include "../fs/vfs.h"
 #include "system_info.h"
 #include "../lib/string.h"
 #include "../drivers/power.h"
@@ -126,59 +126,59 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_FILE_OPEN: {
             filesystem_syscall_lock();
-            int32_t result=fat32_open((const char*)(uintptr_t)a1);
+            int32_t result=vfs_open((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_READ: {
             filesystem_syscall_lock();
-            int32_t result=fat32_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
+            int32_t result=vfs_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_CLOSE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_close((int32_t)a1);
+            int32_t result=vfs_close((int32_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_DELETE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_delete((const char*)(uintptr_t)a1);
+            int32_t result=vfs_delete((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_RENAME: {
             filesystem_syscall_lock();
-            int32_t result=fat32_rename((const char*)(uintptr_t)a1,
-                                        (const char*)(uintptr_t)a2);
+            int32_t result=vfs_rename((const char*)(uintptr_t)a1,
+                                      (const char*)(uintptr_t)a2);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_MOVE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_move((const char*)(uintptr_t)a1,
-                                      (const char*)(uintptr_t)a2);
+            int32_t result=vfs_move((const char*)(uintptr_t)a1,
+                                    (const char*)(uintptr_t)a2);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_DIR_LIST: {
             filesystem_syscall_lock();
-            int32_t result=fat32_list((const char*)(uintptr_t)a1,
-                                      (struct fs_directory_entry*)(uintptr_t)a2,
-                                      (uint32_t)a3);
+            int32_t result=vfs_list((const char*)(uintptr_t)a1,
+                                    (struct fs_directory_entry*)(uintptr_t)a2,
+                                    (uint32_t)a3);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_CREATE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_create_file((const char*)(uintptr_t)a1);
+            int32_t result=vfs_create_file((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_DIR_CREATE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_create_directory((const char*)(uintptr_t)a1);
+            int32_t result=vfs_create_directory((const char*)(uintptr_t)a1);
             filesystem_syscall_unlock();
             return result;
         }
@@ -190,31 +190,31 @@ int64_t syscall_handler(struct syscall_regs *r){
                 (struct storage_controller_info*)(uintptr_t)a1,(uint32_t)a2);
         case SYS_FAT32_FORMAT: {
             filesystem_syscall_lock();
-            int32_t result=fat32_format_device((const char*)(uintptr_t)a1,
-                                               (const char*)(uintptr_t)a2,
-                                               (const char*)(uintptr_t)a3);
+            int32_t result=vfs_format_device((const char*)(uintptr_t)a1,
+                                             (const char*)(uintptr_t)a2,
+                                             (const char*)(uintptr_t)a3);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FAT32_FORMAT_FORCE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_format_device_force((const char*)(uintptr_t)a1,
-                                                     (const char*)(uintptr_t)a2);
+            int32_t result=vfs_format_device_force((const char*)(uintptr_t)a1,
+                                                   (const char*)(uintptr_t)a2);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FAT32_FORMAT_UEFI: {
             filesystem_syscall_lock();
-            int32_t result=fat32_format_uefi_device((const char*)(uintptr_t)a1,
-                                                    (const char*)(uintptr_t)a2);
+            int32_t result=vfs_format_uefi_device((const char*)(uintptr_t)a1,
+                                                  (const char*)(uintptr_t)a2);
             filesystem_syscall_unlock();
             return result;
         }
         case SYS_FILE_WRITE: {
             filesystem_syscall_lock();
-            int32_t result=fat32_write_file((const char*)(uintptr_t)a1,
-                                            (const void*)(uintptr_t)a2,
-                                            (uint32_t)a3);
+            int32_t result=vfs_write_file((const char*)(uintptr_t)a1,
+                                          (const void*)(uintptr_t)a2,
+                                          (uint32_t)a3);
             filesystem_syscall_unlock();
             return result;
         }
@@ -263,7 +263,7 @@ int64_t syscall_handler(struct syscall_regs *r){
                   ehci_stats.last_stage);
             if(count){
                 filesystem_syscall_lock();
-                if(!fat32_is_mounted()) (void)fat32_init();
+                if(!vfs_is_root_mounted()) (void)vfs_mount_root();
                 filesystem_syscall_unlock();
             }
             return count;
@@ -371,14 +371,15 @@ void syscall_init(void){
               ehci_stats.high_speed_ports,ehci_stats.mass_storage_devices,
               ehci_stats.failures,ehci_stats.last_stage);
         klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
-        if(fat32_init()){
-            klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
+        if(vfs_mount_root()){
+            klogf(KLOG_OK,"vfs: root mounted from %s",vfs_root_device_name());
             // Читаем конфиги созданные установщиком (если есть) – для проверки инсталла
             {
-                int32_t fd=fat32_open("/purec/install.cfg");
+                int32_t fd=vfs_open("/purec/install.cfg");
                 if(fd>=0){
                     char cfg_buf[512]={0};
-                    int32_t r=fat32_read(fd,cfg_buf,sizeof(cfg_buf)-1);
+                    int32_t r=vfs_read(fd,cfg_buf,sizeof(cfg_buf)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         // лог без экрана? показываем кратко
                         klogf(KLOG_INFO,"config: /purec/install.cfg (%d bytes)",r);
@@ -396,10 +397,11 @@ void syscall_init(void){
                         }
                     }
                 }
-                fd=fat32_open("/etc/hostname");
+                fd=vfs_open("/etc/hostname");
                 if(fd>=0){
                     char hn[64]={0};
-                    int32_t r=fat32_read(fd,hn,sizeof(hn)-1);
+                    int32_t r=vfs_read(fd,hn,sizeof(hn)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         hn[r]=0;
                         // trim newline
@@ -407,10 +409,11 @@ void syscall_init(void){
                         klogf(KLOG_INFO,"config: hostname='%s'",hn);
                     }
                 }
-                fd=fat32_open("/boot/loader.cfg");
+                fd=vfs_open("/boot/loader.cfg");
                 if(fd>=0){
                     char lb[256]={0};
-                    int32_t r=fat32_read(fd,lb,sizeof(lb)-1);
+                    int32_t r=vfs_read(fd,lb,sizeof(lb)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         lb[r]=0;
                         klogf(KLOG_DEBUG,"config: /boot/loader.cfg %d bytes",r);
@@ -418,7 +421,7 @@ void syscall_init(void){
                 }
             }
         } else {
-            klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found (use 'install' or 'mkfs.fat32' to create)");
+            klog(KLOG_WARN,"vfs: no PURECOS FAT32 root found (use 'install' or 'mkfs.fat32' to create)");
         }
         boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage and filesystem probe complete");
     }

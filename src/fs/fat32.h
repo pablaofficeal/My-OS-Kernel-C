@@ -4,20 +4,6 @@
 #include <stdint.h>
 #include "fs_types.h"
 
-#define FS_ERROR_IO          -1
-#define FS_ERROR_NOT_FOUND   -2
-#define FS_ERROR_INVALID     -3
-#define FS_ERROR_NO_SPACE    -4
-#define FS_ERROR_EXISTS      -5
-#define FS_ERROR_NOT_FILE    -6
-#define FS_ERROR_NOT_DIR     -7
-#define FS_ERROR_UNSUPPORTED -8
-#define FS_ERROR_BUSY        -9
-#define FS_ERROR_READ_ONLY  -10
-#define FS_ERROR_CONFIRMATION -11
-#define FS_ERROR_NOT_BLANK    -12
-#define FS_ERROR_TOO_SMALL    -13
-
 bool fat32_init(void);
 bool fat32_is_mounted(void);
 const char *fat32_device_name(void);

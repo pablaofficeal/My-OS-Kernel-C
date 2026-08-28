@@ -1,14 +1,12 @@
 #include "explorer.h"
 
 extern "C" {
-#include "../syscall.h"
 #include "../../drivers/mouse/ps2_mouse.h"
-#include "../../fs/fs_types.h"
-#include "../../kernel/syscall.h"
 #include "../../lib/string.h"
 }
 
 #include "../display.h"
+#include "../fs.h"
 
 namespace explorer {
 
@@ -158,10 +156,7 @@ bool ExplorerWindow::build_child_path(char output[PATH_CAPACITY],
 }
 
 void ExplorerWindow::refresh_entries() {
-    int64_t count = userspace_syscall(SYS_DIR_LIST,
-                                      reinterpret_cast<uint64_t>(current_path_),
-                                      reinterpret_cast<uint64_t>(entries_),
-                                      ENTRY_LIMIT);
+    int64_t count = fs_list(current_path_, entries_, ENTRY_LIMIT);
     if(count < 0) {
         entry_count_ = 0;
         selected_index_ = -1;
@@ -376,17 +371,14 @@ void ExplorerWindow::open_selected() {
             status_text_ = "Path is too long";
             return;
         }
-        int64_t descriptor = userspace_syscall(
-            SYS_FILE_OPEN, reinterpret_cast<uint64_t>(path), 0, 0);
+        int64_t descriptor = fs_open(path);
         if(descriptor < 0) {
             status_text_ = "Cannot open file";
             return;
         }
-        int64_t count = userspace_syscall(
-            SYS_FILE_READ, static_cast<uint64_t>(descriptor),
-            reinterpret_cast<uint64_t>(file_preview_), FILE_PREVIEW_CAPACITY);
-        (void)userspace_syscall(SYS_FILE_CLOSE,
-                                static_cast<uint64_t>(descriptor), 0, 0);
+        int64_t count = fs_read(static_cast<int32_t>(descriptor),
+                                file_preview_, FILE_PREVIEW_CAPACITY);
+        (void)fs_close(static_cast<int32_t>(descriptor));
         if(count < 0) {
             status_text_ = "Cannot read file";
             return;
@@ -451,8 +443,7 @@ void ExplorerWindow::delete_selected() {
         status_text_ = "Path is too long";
         return;
     }
-    int64_t result = userspace_syscall(
-        SYS_FILE_DELETE, reinterpret_cast<uint64_t>(path), 0, 0);
+    int64_t result = fs_delete(path);
     refresh_entries();
     status_text_ = result == 0 ? "Deleted" : "Delete failed (folder must be empty)";
 }
@@ -580,8 +571,7 @@ void ExplorerWindow::submit_edit() {
             return;
         }
         bool directory = edit_mode_ == EditMode::CreateDirectory;
-        result = userspace_syscall(directory ? SYS_DIR_CREATE : SYS_FILE_CREATE,
-                                   reinterpret_cast<uint64_t>(path), 0, 0);
+        result = directory ? fs_create_directory(path) : fs_create_file(path);
         success_text = directory ? "Directory created" : "File created";
         failure_text = "Create failed (8.3 names only)";
     } else {
@@ -592,9 +582,7 @@ void ExplorerWindow::submit_edit() {
             status_text_ = "Selected entry is unavailable";
             return;
         }
-        result = userspace_syscall(SYS_FILE_RENAME,
-                                   reinterpret_cast<uint64_t>(path),
-                                   reinterpret_cast<uint64_t>(edit_buffer_), 0);
+        result = fs_rename(path, edit_buffer_);
         success_text = "Entry renamed";
         failure_text = "Rename failed (8.3 names only)";
     }
