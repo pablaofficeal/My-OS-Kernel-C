@@ -49,6 +49,7 @@ static void draw_button(uint32_t x, uint32_t y, uint32_t width,
 }
 
 static void draw_disk_selection(void){
+    pc_display_begin_update();
     pc_display_clear(COLOR_BACKGROUND);
     uint32_t panel_x=display.width>820 ? (display.width-820)/2 : 20;
     uint32_t panel_width=display.width>860 ? 820 : display.width-40;
@@ -76,9 +77,11 @@ static void draw_disk_selection(void){
     uint32_t button_y=display.height-104;
     draw_button(panel_x+28,button_y,150,"Cancel",COLOR_DANGER);
     draw_button(panel_x+panel_width-218,button_y,190,"Install",COLOR_SUCCESS);
+    pc_display_end_update();
 }
 
 static void draw_progress(const struct install_status *status){
+    pc_display_begin_update();
     pc_display_clear(COLOR_BACKGROUND);
     uint32_t panel_x=display.width>760 ? (display.width-760)/2 : 20;
     uint32_t panel_width=display.width>800 ? 760 : display.width-40;
@@ -100,6 +103,7 @@ static void draw_progress(const struct install_status *status){
     pc_draw_text(panel_x+30,panel_y+198,
                  "Do not power off or remove the target disk.",
                  COLOR_MUTED,COLOR_PANEL);
+    pc_display_end_update();
 }
 
 static bool create_directory(const char *path){
@@ -121,31 +125,79 @@ static bool finish_configuration(void){
         && write_file("/README","PureC OS installation complete.\n");
 }
 
+static int wait_after_failure(const char *stage, int result){
+    struct install_status status={0};
+    status.state=3;
+    status.progress=100;
+    status.result=result;
+    pc_copy(status.stage,stage,sizeof(status.stage));
+    draw_progress(&status);
+
+    uint32_t panel_x=display.width>760 ? (display.width-760)/2 : 20;
+    uint32_t panel_width=display.width>800 ? 760 : display.width-40;
+    uint32_t panel_y=display.height>360 ? (display.height-360)/2 : 20;
+    pc_display_begin_update();
+    pc_draw_text(panel_x+30,panel_y+232,
+                 "Installation stopped. Press Esc, Enter, or click Close.",
+                 COLOR_DANGER,COLOR_PANEL);
+    uint32_t button_x=panel_x+panel_width-180;
+    uint32_t button_y=panel_y+262;
+    draw_button(button_x,button_y,150,"Close",COLOR_DANGER);
+    pc_display_end_update();
+
+    bool mouse_armed=false;
+    struct mouse_state previous={0};
+    for(;;){
+        int32_t key=pc_try_getchar();
+        if(key==27 || key=='\r' || key=='\n') return result;
+        struct mouse_state mouse;
+        if(pc_mouse_get(&mouse)){
+            bool button_down=(mouse.buttons&1)!=0;
+            if(!button_down) mouse_armed=true;
+            if(mouse_armed && button_down && !(previous.buttons&1)
+               && inside(mouse.x,mouse.y,button_x,button_y,150,40)){
+                return result;
+            }
+            previous=mouse;
+        }
+        pc_sleep(20);
+    }
+}
+
 static int run_installation(void){
     if(pc_install_start(disks[selected_disk].name,
-                        disks[selected_disk].serial)<0) return 4;
+                        disks[selected_disk].serial)<0){
+        return wait_after_failure("Cannot start installation",4);
+    }
     struct install_status status={0};
     uint32_t previous_progress=UINT32_MAX;
     for(;;){
-        if(!pc_install_status(&status)) return 5;
+        if(!pc_install_status(&status))
+            return wait_after_failure("Cannot read installation status",5);
         if(status.progress!=previous_progress){
             draw_progress(&status);
             previous_progress=status.progress;
         }
-        if(status.state==3) return status.result ? status.result : 6;
+        if(status.state==3)
+            return wait_after_failure(status.stage,
+                                      status.result ? status.result : 6);
         if(status.state==2) break;
         pc_sleep(30);
     }
     status.progress=96;
     pc_copy(status.stage,"Writing system configuration",sizeof(status.stage));
     draw_progress(&status);
-    if(!finish_configuration()) return 7;
+    if(!finish_configuration())
+        return wait_after_failure("Cannot write system configuration",7);
     status.progress=100;
     status.state=2;
     pc_copy(status.stage,"Installation complete",sizeof(status.stage));
     draw_progress(&status);
-    pc_draw_text((display.width-360)/2,display.height/2+110,
+    pc_display_begin_update();
+    uint32_t completion_x=display.width>360 ? (display.width-360)/2 : 20;
+    pc_draw_text(completion_x,display.height/2+110,
                  "Remove the ISO and reboot.",COLOR_SUCCESS,COLOR_PANEL);
+    pc_display_end_update();
     pc_sleep(1800);
     return 0;
 }
@@ -154,8 +206,10 @@ static int installer_main(void){
     if(!pc_display_get_info(&display) || !display.available) return 1;
     disk_count=pc_list_disks(disks,20);
     if(disk_count<=0){
+        pc_display_begin_update();
         pc_display_clear(COLOR_BACKGROUND);
         pc_draw_text(40,60,"No disks found",COLOR_DANGER,COLOR_BACKGROUND);
+        pc_display_end_update();
         pc_sleep(1500);
         return 2;
     }

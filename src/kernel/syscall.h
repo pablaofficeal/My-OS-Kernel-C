@@ -17,6 +17,8 @@
 #define SYS_SCROLL_RECT_UP 106
 #define SYS_SET_FONT_FACE 107
 #define SYS_GET_FONT_FACE 108
+#define SYS_FB_BEGIN_UPDATE 109
+#define SYS_FB_END_UPDATE 110
 // VFS ABI: Linux-like descriptors start at 3; stdin/stdout/stderr are 0..2.
 #define SYS_FILE_OPEN   200
 #define SYS_FILE_READ   201

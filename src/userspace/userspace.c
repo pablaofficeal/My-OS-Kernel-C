@@ -418,7 +418,7 @@ void userspace_input_thread(void *arg){
         keyboard_poll();
         userspace_audio_update();
         if(external_program_active){
-            scheduler_yield();
+            scheduler_sleep(10);
             continue;
         }
         if(handle_special_keyboard()) redraw_scene();
@@ -436,7 +436,7 @@ void userspace_terminal_thread(void *arg){
     klog(KLOG_INFO, "sched: terminal thread started (file I/O + keyboard)");
     for(;;){
         if(external_program_active){
-            scheduler_yield();
+            scheduler_sleep(10);
             continue;
         }
         char c;

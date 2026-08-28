@@ -24,6 +24,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define INSTALL_WORKER_PRIORITY 3
+
 static volatile bool filesystem_syscall_busy;
 static struct install_status install_job;
 static char install_device[STORAGE_DEVICE_NAME_CAPACITY];
@@ -160,6 +162,12 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_GET_FONT_FACE:
             return (int64_t)gop_get_font_face();
+        case SYS_FB_BEGIN_UPDATE:
+            mouse_begin_framebuffer_update();
+            return 0;
+        case SYS_FB_END_UPDATE:
+            mouse_end_framebuffer_update();
+            return 0;
         case SYS_GETPID:
             return process_current_pid();
         case SYS_EXEC:
@@ -473,7 +481,8 @@ int64_t syscall_handler(struct syscall_regs *r){
                     sizeof(install_serial)-1);
             install_job.state=1;
             install_progress(1,"Starting installer worker");
-            if(scheduler_create_thread(install_worker,0,"installer-io",1,-1)<0){
+            if(scheduler_create_thread(install_worker,0,"installer-io",
+                                       INSTALL_WORKER_PRIORITY,-1)<0){
                 install_job.state=3;
                 install_job.result=-1;
                 install_progress(100,"Cannot start installer worker");

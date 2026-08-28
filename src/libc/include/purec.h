@@ -31,6 +31,8 @@ int32_t pc_wait(int32_t pid, int32_t *status, bool nohang);
 int32_t pc_try_getchar(void);
 bool pc_file_exists(const char *path);
 bool pc_display_get_info(struct pc_display_info *info);
+void pc_display_begin_update(void);
+void pc_display_end_update(void);
 void pc_display_clear(uint32_t color);
 void pc_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color);

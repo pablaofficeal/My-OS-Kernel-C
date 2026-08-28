@@ -132,6 +132,14 @@ bool pc_display_get_info(struct pc_display_info *info){
     return true;
 }
 
+void pc_display_begin_update(void){
+    (void)pc_syscall(SYS_FB_BEGIN_UPDATE,0,0,0);
+}
+
+void pc_display_end_update(void){
+    (void)pc_syscall(SYS_FB_END_UPDATE,0,0,0);
+}
+
 void pc_display_clear(uint32_t color){
     (void)pc_syscall(SYS_CLEAR,color,0,0);
 }
