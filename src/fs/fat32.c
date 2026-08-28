@@ -1049,6 +1049,96 @@ int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
     return (int32_t)count;
 }
 
+int32_t fat32_append_file(const char *path, const void *buffer, uint32_t count){
+    if(!path || !path[0] || (!buffer && count) || count>0x7FFFFFFF) return FS_ERROR_INVALID;
+
+    struct fat32_entry_ref entry;
+    int32_t status=resolve_entry(path,&entry,0);
+    if(status==FS_ERROR_NOT_FOUND){
+        status=fat32_create_file(path);
+        if(status<0) return status;
+        status=resolve_entry(path,&entry,0);
+    }
+    if(status<0) return status;
+    if(entry.attributes&(FAT32_ATTRIBUTE_DIRECTORY|FAT32_ATTRIBUTE_VOLUME_ID)) return FS_ERROR_NOT_FILE;
+    if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
+    if(!count) return 0;
+    if((uint64_t)entry.size+count>0xFFFFFFFFULL) return FS_ERROR_NO_SPACE;
+    for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
+        if(entry.first_cluster && handles[index].used
+           && handles[index].first_cluster==entry.first_cluster) return FS_ERROR_BUSY;
+    }
+
+    uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
+    uint32_t old_clusters=(entry.size+cluster_size-1)/cluster_size;
+    uint32_t new_size=entry.size+count;
+    uint32_t required_clusters=(new_size+cluster_size-1)/cluster_size;
+    uint32_t cluster=entry.first_cluster;
+
+    if(old_clusters==0){
+        status=allocate_cluster(&cluster);
+        if(status<0) return status;
+        entry.first_cluster=cluster;
+    } else {
+        for(uint32_t index=1;index<old_clusters;index++){
+            uint32_t next;
+            status=fat_next_cluster(cluster,&next);
+            if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+            cluster=next;
+        }
+    }
+    for(uint32_t index=old_clusters;index<required_clusters;index++){
+        uint32_t next;
+        status=allocate_cluster(&next);
+        if(status<0) return status;
+        status=fat_write_entry(cluster,next);
+        if(status<0) return status;
+        cluster=next;
+    }
+
+    cluster=entry.first_cluster;
+    uint32_t target_index=entry.size/cluster_size;
+    for(uint32_t index=0;index<target_index;index++){
+        uint32_t next;
+        status=fat_next_cluster(cluster,&next);
+        if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+        cluster=next;
+    }
+
+    const uint8_t *data=(const uint8_t*)buffer;
+    uint32_t written=0;
+    uint32_t offset_in_cluster=entry.size%cluster_size;
+    while(written<count){
+        uint32_t sector=offset_in_cluster/BLOCK_SECTOR_SIZE;
+        uint32_t offset=offset_in_cluster%BLOCK_SECTOR_SIZE;
+        uint32_t amount=BLOCK_SECTOR_SIZE-offset;
+        if(amount>count-written) amount=count-written;
+        if(offset!=0 || amount<BLOCK_SECTOR_SIZE){
+            if(!block_device_read(cluster_lba(cluster)+sector,sector_buffer)) return FS_ERROR_IO;
+        } else {
+            memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        }
+        memcpy(&sector_buffer[offset],&data[written],amount);
+        if(!block_device_write(cluster_lba(cluster)+sector,sector_buffer)) return FS_ERROR_IO;
+        written+=amount;
+        offset_in_cluster+=amount;
+        if(offset_in_cluster==cluster_size && written<count){
+            uint32_t next;
+            status=fat_next_cluster(cluster,&next);
+            if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+            cluster=next;
+            offset_in_cluster=0;
+        }
+    }
+
+    if(!block_device_read(entry.sector_lba,sector_buffer)) return FS_ERROR_IO;
+    write_u16(&sector_buffer[entry.offset+20],(uint16_t)(entry.first_cluster>>16));
+    write_u16(&sector_buffer[entry.offset+26],(uint16_t)entry.first_cluster);
+    write_u32(&sector_buffer[entry.offset+28],new_size);
+    if(!block_device_write(entry.sector_lba,sector_buffer)) return FS_ERROR_IO;
+    return (int32_t)count;
+}
+
 int32_t fat32_create_directory(const char *path){
     uint32_t parent;
     uint8_t short_name[11];

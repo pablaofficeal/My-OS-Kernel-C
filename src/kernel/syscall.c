@@ -219,6 +219,14 @@ int64_t syscall_handler(struct syscall_regs *r){
             filesystem_syscall_unlock();
             return result;
         }
+        case SYS_FILE_APPEND: {
+            filesystem_syscall_lock();
+            int32_t result=vfs_append_file((const char*)(uintptr_t)a1,
+                                           (const void*)(uintptr_t)a2,
+                                           (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_USB_RESCAN: {
             uint32_t count=block_device_rescan_usb();
             struct xhci_probe_stats xhci_stats;

@@ -22,6 +22,7 @@ int32_t vfs_list(const char *path, struct fs_directory_entry *entries,
                  uint32_t capacity);
 int32_t vfs_create_file(const char *path);
 int32_t vfs_write_file(const char *path, const void *buffer, uint32_t count);
+int32_t vfs_append_file(const char *path, const void *buffer, uint32_t count);
 int32_t vfs_create_directory(const char *path);
 int32_t vfs_format_device(const char *device_name,
                           const char *serial_confirmation,

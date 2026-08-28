@@ -197,6 +197,11 @@ int32_t vfs_write_file(const char *path, const void *buffer, uint32_t count){
     return fat32_write_file(path,buffer,count);
 }
 
+int32_t vfs_append_file(const char *path, const void *buffer, uint32_t count){
+    if(find_kernel_file(path) || path_equals(path,"/kernel")) return FS_ERROR_READ_ONLY;
+    return fat32_append_file(path,buffer,count);
+}
+
 int32_t vfs_create_directory(const char *path){
     if(!path || path_equals(path,"/kernel")) return FS_ERROR_INVALID;
     if(find_kernel_file(path)) return FS_ERROR_READ_ONLY;

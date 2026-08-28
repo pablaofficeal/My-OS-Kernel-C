@@ -31,10 +31,20 @@ static inline void outb(uint16_t port, uint8_t value){
     __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
 }
 
-static char savelog_buf[256 * 1024];
+static char savelog_buf[4096];
 static uint32_t savelog_pos;
+static uint64_t savelog_total;
+static bool savelog_failed;
 static void savelog_cb(char c){
-    if(savelog_pos+1<sizeof(savelog_buf)) savelog_buf[savelog_pos++]=c;
+    if(savelog_failed) return;
+    savelog_buf[savelog_pos++]=c;
+    if(savelog_pos==sizeof(savelog_buf)){
+        int64_t result=userspace_syscall(SYS_FILE_APPEND,(uint64_t)"/dmesg.txt",
+                                          (uint64_t)savelog_buf,savelog_pos);
+        if(result<0) savelog_failed=true;
+        else savelog_total+=(uint32_t)result;
+        savelog_pos=0;
+    }
 }
 
 static bool is_space(char c){ return c==' ' || c=='\t'; }
@@ -902,13 +912,24 @@ void commands_execute(const char *line){
         terminal_write("\n--- end kernel log ---\n");
         terminal_write("Hint: run 'savelog' to save to /dmesg.txt for host mount\n");
     } else if(strcmp(command,"savelog")==0){
-        terminal_write("Saving dmesg to /dmesg.txt...\n");
+        terminal_write("Saving dmesg to /dmesg.txt without memory limit...\n");
         savelog_pos=0;
+        savelog_total=0;
+        savelog_failed=false;
+        int64_t clear_result=userspace_syscall(SYS_FILE_WRITE,(uint64_t)"/dmesg.txt",0,0);
+        if(clear_result<0){
+            terminal_printf("Failed to create /dmesg.txt (%d)\n",(int)clear_result);
+            return;
+        }
         klog_foreach(savelog_cb);
-        savelog_buf[savelog_pos]=0;
-        int64_t r=userspace_syscall(SYS_FILE_WRITE,(uint64_t)"/dmesg.txt",(uint64_t)savelog_buf,savelog_pos);
-        if(r>=0) terminal_printf("Saved %u bytes to /dmesg.txt (host: /home/pabla/VirtualBox VMs/test_kernel2/test_kernel2_1.vdi)\n",savelog_pos);
-        else terminal_printf("Failed to save (%d) - is FS mounted? try 'disks'\n",(int)r);
+        if(!savelog_failed && savelog_pos){
+            int64_t result=userspace_syscall(SYS_FILE_APPEND,(uint64_t)"/dmesg.txt",
+                                              (uint64_t)savelog_buf,savelog_pos);
+            if(result<0) savelog_failed=true;
+            else savelog_total+=(uint32_t)result;
+        }
+        if(!savelog_failed) terminal_printf("Saved %lu bytes to /dmesg.txt (streamed)\n",savelog_total);
+        else terminal_write("Log save stopped: disk append failed\n");
     } else if(strcmp(command,"uname")==0){
         terminal_write("PureC OS 0.1.0 x86_64\n");
     } else if(strcmp(command,"about")==0){
