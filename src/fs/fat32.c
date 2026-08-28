@@ -87,6 +87,8 @@ struct fat32_format_layout {
     uint8_t sectors_per_cluster;
 };
 
+static uint8_t lfn_checksum(const uint8_t short_name[11]);
+
 static struct fat32_volume volume;
 static struct fat32_handle handles[FAT32_MAX_OPEN_FILES];
 static uint8_t sector_buffer[BLOCK_SECTOR_SIZE] __attribute__((aligned(2)));
@@ -292,6 +294,79 @@ static int32_t find_entry(uint32_t directory_cluster, const uint8_t short_name[1
     return FS_ERROR_INVALID;
 }
 
+static bool lfn_entry_matches(const uint8_t *entry, const char *component){
+    static const uint8_t offsets[FAT32_LFN_CHARACTER_CAPACITY]={
+        1,3,5,7,9,14,16,18,20,22,24,28,30
+    };
+    if(entry[0]!=0x41 || entry[11]!=FAT32_ATTRIBUTE_LFN
+       || entry[12]!=0 || read_u16(&entry[26])!=0){
+        return false;
+    }
+    for(uint8_t index=0;index<FAT32_LFN_CHARACTER_CAPACITY;index++){
+        uint16_t character=read_u16(&entry[offsets[index]]);
+        if(character==0) return component[index]=='\0';
+        if(character==0xFFFF || component[index]=='\0'
+           || character!=(uint8_t)component[index]){
+            return false;
+        }
+    }
+    return component[FAT32_LFN_CHARACTER_CAPACITY]=='\0';
+}
+
+static int32_t find_lfn_entry(uint32_t directory_cluster, const char *component,
+                              struct fat32_entry_ref *result){
+    if(!valid_cluster(directory_cluster)) return FS_ERROR_NOT_DIR;
+    uint32_t cluster=directory_cluster;
+    bool pending_match=false;
+    uint8_t pending_checksum=0;
+
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            uint32_t lba=first_lba+sector;
+            if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+            for(uint16_t offset=0;offset<BLOCK_SECTOR_SIZE;offset+=32){
+                uint8_t first=sector_buffer[offset];
+                if(first==0) return FS_ERROR_NOT_FOUND;
+                if(first==FAT32_DELETED_ENTRY){
+                    pending_match=false;
+                    continue;
+                }
+                uint8_t attributes=sector_buffer[offset+11];
+                if(attributes==FAT32_ATTRIBUTE_LFN){
+                    pending_match=lfn_entry_matches(&sector_buffer[offset],component);
+                    pending_checksum=sector_buffer[offset+13];
+                    continue;
+                }
+                if(pending_match
+                   && pending_checksum==lfn_checksum(&sector_buffer[offset])){
+                    if(result){
+                        result->sector_lba=lba;
+                        result->offset=offset;
+                        result->attributes=attributes;
+                        result->first_cluster=
+                            ((uint32_t)read_u16(&sector_buffer[offset+20])<<16)
+                            |read_u16(&sector_buffer[offset+26]);
+                        result->size=read_u32(&sector_buffer[offset+28]);
+                        memcpy(result->short_name,&sector_buffer[offset],11);
+                        result->has_lfn=true;
+                    }
+                    return 0;
+                }
+                pending_match=false;
+            }
+        }
+
+        uint32_t next;
+        int32_t status=fat_next_cluster(cluster,&next);
+        if(status<0) return status;
+        if(next>=FAT32_END_OF_CHAIN) return FS_ERROR_NOT_FOUND;
+        if(!valid_cluster(next)) return FS_ERROR_INVALID;
+        cluster=next;
+    }
+    return FS_ERROR_INVALID;
+}
+
 static int32_t resolve_entry(const char *path, struct fat32_entry_ref *result,
                              uint32_t *parent_cluster){
     if(!volume.mounted || !path || !path[0]) return FS_ERROR_INVALID;
@@ -302,9 +377,10 @@ static int32_t resolve_entry(const char *path, struct fat32_entry_ref *result,
 
     while(next_component(&cursor,component,&has_more)){
         uint8_t short_name[11];
-        if(!make_short_name(component,short_name)) return FS_ERROR_UNSUPPORTED;
         struct fat32_entry_ref entry;
-        int32_t status=find_entry(directory,short_name,&entry);
+        int32_t status=make_short_name(component,short_name)
+            ? find_entry(directory,short_name,&entry)
+            : find_lfn_entry(directory,component,&entry);
         if(status<0) return status;
         if(!has_more){
             if(result) *result=entry;
@@ -1606,7 +1682,7 @@ static int32_t install_program_payload(void){
     }
     int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
     if(status<0) return status;
-    status=write_lfn_file("/bin","installer","/bin/install~1","install~1",
+    status=write_lfn_file("/bin","installer","/bin/instal~1","instal~1",
                           installer_image,(uint32_t)installer_size);
     if(status<0) return status;
     status=fat32_write_file("/bin/snake",snake_image,(uint32_t)snake_size);

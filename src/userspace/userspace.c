@@ -6,7 +6,6 @@
 #include "monitor/monitor.h"
 #include "syscall.h"
 #include "audio.h"
-#include "audio_overlay.h"
 #include "display.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
@@ -212,7 +211,6 @@ static void draw_desktop(void){
     display_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
     display_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
     audio_panel_draw(desktop_width);
-    audio_overlay_draw();
     draw_desktop_icons();
     draw_power_button();
 }
@@ -225,7 +223,6 @@ static void redraw_scene(void){
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
-    audio_overlay_draw();
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
@@ -245,7 +242,6 @@ static void redraw_icon_move(
     if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
-    audio_overlay_draw();
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
@@ -427,7 +423,7 @@ void userspace_init(void){
 
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
-    userspace_set_mouse_debug(true);
+    userspace_set_mouse_debug(false);
     audio_panel_init();
     desktop_apps_init();
     installer_icon_visible=!installation_present();
