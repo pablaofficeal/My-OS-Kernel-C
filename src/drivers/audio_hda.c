@@ -81,14 +81,20 @@ static uint32_t read32(uint32_t offset) {
 
 static void write16(uint32_t offset, uint16_t value) {
     *(volatile uint16_t *)(regs + offset) = value;
+    klogf(KLOG_DEBUG, "audio: HDA MMIO write16 off=0x%03x value=0x%04x",
+          offset, value);
 }
 
 static void write8(uint32_t offset, uint8_t value) {
     *(volatile uint8_t *)(regs + offset) = value;
+    klogf(KLOG_DEBUG, "audio: HDA MMIO write8 off=0x%03x value=0x%02x",
+          offset, value);
 }
 
 static void write32(uint32_t offset, uint32_t value) {
     *(volatile uint32_t *)(regs + offset) = value;
+    klogf(KLOG_DEBUG, "audio: HDA MMIO write32 off=0x%03x value=0x%08x",
+          offset, value);
 }
 
 static void trace_ring(const char *stage) {
@@ -104,12 +110,14 @@ static uint64_t physical_address(const void *pointer) {
 }
 
 static bool wait_reset_state(bool asserted) {
+    klogf(KLOG_DEBUG, "audio: HDA reset wait target=%u", asserted ? 1 : 0);
     for (uint32_t wait = 0; wait < HDA_TIMEOUT; wait++) {
         if (((read32(HDA_GCTL) & HDA_GCTL_RESET) != 0) == asserted) {
             return true;
         }
         __asm__ volatile("pause");
     }
+    klogf(KLOG_ERROR, "audio: HDA reset wait timeout target=%u", asserted ? 1 : 0);
     return false;
 }
 
@@ -133,6 +141,7 @@ static bool reset_controller(void) {
 }
 
 static bool setup_command_ring(void) {
+    klog(KLOG_DEBUG, "audio: HDA command ring setup begin");
     uint64_t corb_address = physical_address(corb);
     uint64_t rirb_address = physical_address(rirb);
     write8(HDA_CORBCTL, 0);
@@ -201,18 +210,23 @@ static bool send_verb(uint32_t verb, uint32_t *response) {
 }
 
 static bool codec_parameter(uint8_t node, uint8_t parameter, uint32_t *value) {
+    klogf(KLOG_DEBUG, "audio: codec%u GET_PARAMETER node=0x%02x parameter=0x%02x",
+          codec_address, node, parameter);
     return send_verb(((uint32_t)codec_address << 28)
                      | ((uint32_t)node << 20)
                      | ((HDA_VERB_GET_PARAMETER | parameter) << 8), value);
 }
 
 static bool codec_command(uint8_t node, uint16_t verb, uint16_t payload) {
+    klogf(KLOG_DEBUG, "audio: codec%u command node=0x%02x verb=0x%03x payload=0x%04x",
+          codec_address, node, verb, payload);
     return send_verb(((uint32_t)codec_address << 28)
                      | ((uint32_t)node << 20)
                      | ((uint32_t)verb << 8) | payload, 0);
 }
 
 static bool discover_codec(void) {
+    klogf(KLOG_INFO, "audio: codec%u discovery begin", codec_address);
     uint32_t subnodes;
     uint32_t function_group;
     if (!codec_parameter(0, HDA_PARAMETER_SUBNODES, &subnodes)) {
@@ -256,6 +270,8 @@ static bool discover_codec(void) {
             pin_node = node;
         }
     }
+    klogf(KLOG_INFO, "audio: codec%u discovery result dac=%u pin=%u",
+          codec_address, dac_node, pin_node);
     klogf(KLOG_INFO, "audio: HDA codec %u group=%u widgets=%u dac=%u pin=%u",
           codec_address, first_group, widget_count, dac_node, pin_node);
     return dac_node != 0 && pin_node != 0;
@@ -288,10 +304,14 @@ static bool configure_codec(void) {
 }
 
 static bool configure_stream(void) {
+    klog(KLOG_INFO, "audio: HDA PCM stream configuration begin");
     uint64_t bdl_address = physical_address(bdl);
     uint64_t pcm_address = physical_address(pcm_buffer);
     volatile uint8_t *stream = regs + HDA_STREAM_BASE;
     uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
+    klogf(KLOG_DEBUG, "audio: HDA stream before ctl=0x%08x sts=0x%02x lpib=0x%08x",
+          control, *(volatile uint8_t *)(stream + 0x03),
+          *(volatile uint32_t *)(stream + 0x04));
     *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control & ~HDA_STREAM_RUN;
     bdl[0].address = pcm_address;
     bdl[0].length = HDA_PCM_BYTES;
@@ -305,12 +325,14 @@ static bool configure_stream(void) {
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPL) = (uint32_t)bdl_address;
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPU) = (uint32_t)(bdl_address >> 32);
     *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = 0x00100002;
-    klogf(KLOG_DEBUG, "audio: HDA stream base=0x%x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
-          HDA_STREAM_BASE, HDA_PCM_BYTES * 2U, 1, HDA_PCM_FORMAT, bdl_address);
+    klogf(KLOG_DEBUG, "audio: HDA stream programmed base=0x%x ctl=0x%08x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
+          HDA_STREAM_BASE, *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          HDA_PCM_BYTES * 2U, 1, HDA_PCM_FORMAT, bdl_address);
     return true;
 }
 
 static bool setup_pcm(void) {
+    klog(KLOG_INFO, "audio: HDA PCM setup begin");
     if (!mapping_ready || !controller.mmio_ready || controller.output_streams == 0) {
         klog(KLOG_WARN, "audio: HDA PCM prerequisites unavailable");
         return false;
@@ -322,6 +344,8 @@ static bool setup_pcm(void) {
     uint16_t state = read16(HDA_STATESTS);
     klogf(KLOG_INFO, "audio: HDA codec presence STATESTS=0x%04x", state);
     for (uint8_t address = 0; address < 15; address++) {
+        klogf(KLOG_DEBUG, "audio: HDA checking codec address=%u present=%u",
+              address, (state & (1U << address)) != 0 ? 1 : 0);
         if ((state & (1U << address)) == 0) {
             continue;
         }
@@ -331,6 +355,8 @@ static bool setup_pcm(void) {
             klog(KLOG_OK, "audio: HDA PCM output stream configured at 44.1 kHz");
             return true;
         }
+        klogf(KLOG_WARN, "audio: codec%u setup attempt failed, trying next codec",
+              codec_address);
         dac_node = 0;
         pin_node = 0;
     }
@@ -344,6 +370,10 @@ static void inspect_audio_device(const struct pci_device_info *device, void *con
         || device->subclass != PCI_SUBCLASS_HDA) {
         return;
     }
+    klogf(KLOG_INFO, "audio: HDA PCI candidate %u:%u.%u id=%04x:%04x class=%02x/%02x prog=%02x",
+          device->bus, device->slot, device->function, device->vendor_id,
+          device->device_id, device->class_code, device->subclass,
+          device->programming_interface);
     memset(&controller, 0, sizeof(controller));
     controller.vendor_id = device->vendor_id;
     controller.device_id = device->device_id;
@@ -382,6 +412,7 @@ void hda_set_address_mapping(uint64_t physical_base, uint64_t virtual_base) {
 }
 
 void hda_init(void) {
+    klog(KLOG_INFO, "audio: HDA init begin");
     present = false;
     pcm_ready = false;
     regs = 0;
@@ -396,6 +427,8 @@ void hda_init(void) {
           controller.slot, controller.function, controller.output_streams,
           controller.input_streams);
     setup_pcm();
+    klogf(KLOG_INFO, "audio: HDA init complete present=%u pcm_ready=%u",
+          present ? 1 : 0, pcm_ready ? 1 : 0);
 }
 
 bool hda_is_present(void) {
@@ -411,6 +444,8 @@ bool hda_play_tone(uint16_t frequency_hz, uint8_t volume) {
         return false;
     }
     uint32_t amplitude = (32767U * volume) / 100U;
+    klogf(KLOG_DEBUG, "audio: HDA PCM fill begin freq=%u volume=%u amplitude=%u bytes=%u",
+          frequency_hz, volume, amplitude, HDA_PCM_BYTES * 2U);
     for (uint32_t frame = 0; frame < HDA_PCM_SAMPLES * 2U; frame++) {
         uint32_t phase = (frame * frequency_hz) % HDA_PCM_RATE;
         uint32_t half_period = HDA_PCM_RATE / (frequency_hz * 2U);
@@ -424,6 +459,10 @@ bool hda_play_tone(uint16_t frequency_hz, uint8_t volume) {
     volatile uint8_t *stream = regs + HDA_STREAM_BASE;
     uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
     *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control | HDA_STREAM_RUN;
+    klogf(KLOG_INFO, "audio: HDA PCM stream RUN ctl=0x%08x sts=0x%02x lpib=0x%08x",
+          *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          *(volatile uint8_t *)(stream + 0x03),
+          *(volatile uint32_t *)(stream + 0x04));
     return true;
 }
 
@@ -434,6 +473,9 @@ void hda_stop_tone(void) {
     volatile uint8_t *stream = regs + HDA_STREAM_BASE;
     uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
     *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control & ~HDA_STREAM_RUN;
+    klogf(KLOG_DEBUG, "audio: HDA PCM stream STOP ctl=0x%08x sts=0x%02x",
+          *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          *(volatile uint8_t *)(stream + 0x03));
 }
 
 bool hda_get_controller_info(struct hda_controller_info *out) {

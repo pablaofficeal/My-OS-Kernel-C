@@ -50,10 +50,13 @@ static uint8_t clamp_volume(uint8_t volume) {
 
 static void pc_speaker_off(void) {
     uint8_t state = inb(SPEAKER_PORT);
+    klogf(KLOG_DEBUG, "audio: PC speaker off port=0x61 before=0x%02x", state);
     outb(SPEAKER_PORT, state & (uint8_t)~0x03);
 }
 
 static void pc_speaker_tone(uint32_t frequency_hz) {
+    klogf(KLOG_DEBUG, "audio: PC speaker tone request freq=%u volume=%u mute=%u",
+          frequency_hz, master_bus.volume, master_bus.muted ? 1 : 0);
     if (frequency_hz == 0 || master_bus.muted || master_bus.volume == 0) {
         pc_speaker_off();
         return;
@@ -73,6 +76,8 @@ static void pc_speaker_tone(uint32_t frequency_hz) {
 }
 
 static void stop_test_sound(void) {
+    klogf(KLOG_DEBUG, "audio: test stop backend=%u step=%u",
+          master_bus.active_backend, master_bus.test_step);
     master_bus.test_active = false;
     master_bus.test_step = 0;
     master_bus.next_step_ms = 0;
@@ -81,6 +86,7 @@ static void stop_test_sound(void) {
 }
 
 static void start_pc_speaker_test(void) {
+    klog(KLOG_DEBUG, "audio: PC speaker test sequence begin");
     master_bus.test_active = true;
     master_bus.test_step = 0;
     master_bus.next_step_ms = system_info_uptime_ms() + test_durations_ms[0];
@@ -88,6 +94,7 @@ static void start_pc_speaker_test(void) {
 }
 
 void audio_init(void) {
+    klog(KLOG_INFO, "audio: init begin");
     master_bus.volume = AUDIO_DEFAULT_VOLUME;
     master_bus.muted = false;
     master_bus.active_backend = AUDIO_BACKEND_PC_SPEAKER;
@@ -102,6 +109,10 @@ void audio_init(void) {
         master_bus.available_backends |= AUDIO_BACKEND_HDA;
         master_bus.active_backend = AUDIO_BACKEND_HDA;
         master_bus.pcm_ready = hda_pcm_output_ready();
+        klogf(KLOG_INFO, "audio: HDA selected present=1 pcm_ready=%u",
+              master_bus.pcm_ready ? 1 : 0);
+    } else {
+        klog(KLOG_WARN, "audio: HDA unavailable, legacy backend selected");
     }
     klogf(KLOG_INFO, "audio: master bus volume=%u mute=%u backend=%u available=0x%x pcm=%u",
           master_bus.volume, master_bus.muted ? 1 : 0,
@@ -115,6 +126,10 @@ void audio_get_status(struct audio_status *status) {
     }
 
     audio_update();
+    klogf(KLOG_DEBUG, "audio: status volume=%u mute=%u backend=%u available=0x%x pcm=%u test=%u",
+          master_bus.volume, master_bus.muted ? 1 : 0, master_bus.active_backend,
+          master_bus.available_backends, master_bus.pcm_ready ? 1 : 0,
+          master_bus.test_active ? 1 : 0);
     status->volume = master_bus.volume;
     status->muted = master_bus.muted ? 1 : 0;
     status->backend = master_bus.active_backend;
@@ -138,6 +153,9 @@ void audio_set_volume(uint8_t volume) {
               master_bus.volume, next_volume);
     }
     master_bus.volume = next_volume;
+    klogf(KLOG_DEBUG, "audio: master state volume=%u mute=%u test=%u",
+          master_bus.volume, master_bus.muted ? 1 : 0,
+          master_bus.test_active ? 1 : 0);
     if (master_bus.volume > 0) {
         master_bus.muted = false;
     }
@@ -151,6 +169,9 @@ void audio_set_muted(bool muted) {
         klogf(KLOG_INFO, "audio: master mute=%u", muted ? 1 : 0);
     }
     master_bus.muted = muted;
+    klogf(KLOG_DEBUG, "audio: master state volume=%u mute=%u test=%u",
+          master_bus.volume, master_bus.muted ? 1 : 0,
+          master_bus.test_active ? 1 : 0);
     if (master_bus.muted) {
         stop_test_sound();
     }
@@ -170,6 +191,9 @@ void audio_adjust_volume(int8_t delta) {
 }
 
 void audio_play_test_sound(void) {
+    klogf(KLOG_INFO, "audio: test request mute=%u volume=%u backend=%u pcm=%u active=%u",
+          master_bus.muted ? 1 : 0, master_bus.volume, master_bus.active_backend,
+          master_bus.pcm_ready ? 1 : 0, master_bus.test_active ? 1 : 0);
     if (master_bus.muted || master_bus.volume == 0) {
         klog(KLOG_WARN, "audio: test sound ignored while master bus is muted or zero");
         return;
@@ -207,6 +231,7 @@ void audio_update(void) {
 
     master_bus.test_step++;
     if (master_bus.test_step >= sizeof(test_frequencies) / sizeof(test_frequencies[0])) {
+        klog(KLOG_INFO, "audio: test sequence complete");
         stop_test_sound();
         return;
     }
