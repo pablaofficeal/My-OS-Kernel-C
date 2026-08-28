@@ -1,4 +1,4 @@
-#include "purec.h"
+#include "../../libc/include/purec.h"
 
 #define CONSOLE_BACKGROUND 0x181824u
 #define MAX_INSTALL_DISKS 20
