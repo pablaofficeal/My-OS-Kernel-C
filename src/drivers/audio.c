@@ -107,8 +107,10 @@ void audio_init(void) {
     hda_init();
     if (hda_is_present()) {
         master_bus.available_backends |= AUDIO_BACKEND_HDA;
-        master_bus.active_backend = AUDIO_BACKEND_HDA;
         master_bus.pcm_ready = hda_pcm_output_ready();
+        if (master_bus.pcm_ready) {
+            master_bus.active_backend = AUDIO_BACKEND_HDA;
+        }
         klogf(KLOG_INFO, "audio: HDA selected present=1 pcm_ready=%u",
               master_bus.pcm_ready ? 1 : 0);
     } else {

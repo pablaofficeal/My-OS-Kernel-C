@@ -23,6 +23,7 @@
 #define HDA_RIRBCTL 0x5C
 #define HDA_RIRBSTS 0x5D
 #define HDA_STREAM_BASE 0x80
+#define HDA_STREAM_DESCRIPTOR_SIZE 0x20
 #define HDA_STREAM_CTL 0x00
 #define HDA_STREAM_CBL 0x08
 #define HDA_STREAM_LVI 0x0C
@@ -30,19 +31,26 @@
 #define HDA_STREAM_BDPL 0x18
 #define HDA_STREAM_BDPU 0x1C
 #define HDA_GCTL_RESET 0x01
+#define HDA_STREAM_RESET 0x01
 #define HDA_STREAM_RUN 0x02
 #define HDA_WIDGET_AUDIO_OUTPUT 0x00
 #define HDA_WIDGET_PIN 0x04
 #define HDA_PARAMETER_SUBNODES 0x04
+#define HDA_PARAMETER_FUNCTION_GROUP_TYPE 0x05
 #define HDA_PARAMETER_WIDGET_CAPS 0x09
+#define HDA_PARAMETER_PIN_CAPS 0x0C
 #define HDA_PARAMETER_CONNECTION_LIST_LENGTH 0x0E
+#define HDA_FUNCTION_GROUP_AUDIO 0x01
+#define HDA_PIN_CAP_OUTPUT 0x10
 #define HDA_VERB_GET_PARAMETER 0x0F00
 #define HDA_VERB_SET_CONNECTION_SELECT 0x701
 #define HDA_VERB_SET_STREAM_FORMAT 0x200
+#define HDA_VERB_SET_CONVERTER_STREAM_CHANNEL 0x706
 #define HDA_VERB_SET_PIN_WIDGET_CONTROL 0x707
 #define HDA_VERB_SET_EAPD_BTL 0x70C
 #define HDA_VERB_SET_AMP_GAIN_MUTE 0x300
-#define HDA_PCM_FORMAT 0x0011
+#define HDA_PCM_FORMAT 0x4011
+#define HDA_STREAM_TAG 1
 #define HDA_PCM_RATE 44100U
 #define HDA_PCM_SAMPLES 4096U
 #define HDA_PCM_BYTES (HDA_PCM_SAMPLES * 4U)
@@ -120,6 +128,48 @@ static bool wait_reset_state(bool asserted) {
     }
     klogf(KLOG_ERROR, "audio: HDA reset wait timeout target=%u", asserted ? 1 : 0);
     return false;
+}
+
+static uint32_t read_stream_control(volatile uint8_t *stream) {
+    uint32_t low = *(volatile uint16_t *)(stream + HDA_STREAM_CTL);
+    uint32_t high = *(volatile uint8_t *)(stream + HDA_STREAM_CTL + 2);
+    return low | (high << 16);
+}
+
+static void write_stream_control(volatile uint8_t *stream, uint32_t value) {
+    *(volatile uint16_t *)(stream + HDA_STREAM_CTL) = (uint16_t)value;
+    *(volatile uint8_t *)(stream + HDA_STREAM_CTL + 2) = (uint8_t)(value >> 16);
+}
+
+static bool wait_stream_control(volatile uint8_t *stream, uint32_t mask,
+                                bool asserted) {
+    for (uint32_t wait = 0; wait < HDA_TIMEOUT; wait++) {
+        if (((read_stream_control(stream) & mask) != 0) == asserted) {
+            return true;
+        }
+        __asm__ volatile("pause");
+    }
+    return false;
+}
+
+static bool reset_stream(volatile uint8_t *stream) {
+    uint32_t control = read_stream_control(stream) & ~HDA_STREAM_RUN;
+    write_stream_control(stream, control);
+    if (!wait_stream_control(stream, HDA_STREAM_RUN, false)) {
+        klog(KLOG_ERROR, "audio: HDA stream RUN clear timeout");
+        return false;
+    }
+    write_stream_control(stream, control | HDA_STREAM_RESET);
+    if (!wait_stream_control(stream, HDA_STREAM_RESET, true)) {
+        klog(KLOG_ERROR, "audio: HDA stream reset assert timeout");
+        return false;
+    }
+    write_stream_control(stream, control & ~HDA_STREAM_RESET);
+    if (!wait_stream_control(stream, HDA_STREAM_RESET, false)) {
+        klog(KLOG_ERROR, "audio: HDA stream reset deassert timeout");
+        return false;
+    }
+    return true;
 }
 
 static bool reset_controller(void) {
@@ -219,7 +269,8 @@ static bool codec_parameter(uint8_t node, uint8_t parameter, uint32_t *value) {
           codec_address, node, parameter);
     return send_verb(((uint32_t)codec_address << 28)
                      | ((uint32_t)node << 20)
-                     | ((HDA_VERB_GET_PARAMETER | parameter) << 8), value);
+                     | ((uint32_t)HDA_VERB_GET_PARAMETER << 8)
+                     | parameter, value);
 }
 
 static bool codec_command(uint8_t node, uint16_t verb, uint16_t payload) {
@@ -230,6 +281,32 @@ static bool codec_command(uint8_t node, uint16_t verb, uint16_t payload) {
                      | ((uint32_t)verb << 8) | payload, 0);
 }
 
+static uint8_t subnode_start(uint32_t value) {
+    return (uint8_t)(value >> 16);
+}
+
+static uint8_t subnode_count(uint32_t value) {
+    return (uint8_t)value;
+}
+
+static bool find_audio_function_group(uint32_t root_subnodes,
+                                      uint8_t *function_group) {
+    uint8_t first_group = subnode_start(root_subnodes);
+    uint8_t group_count = subnode_count(root_subnodes);
+    for (uint8_t index = 0; index < group_count; index++) {
+        uint8_t node = (uint8_t)(first_group + index);
+        uint32_t type;
+        if (!codec_parameter(node, HDA_PARAMETER_FUNCTION_GROUP_TYPE, &type)) {
+            continue;
+        }
+        if ((type & 0xFF) == HDA_FUNCTION_GROUP_AUDIO) {
+            *function_group = node;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool discover_codec(void) {
     klogf(KLOG_INFO, "audio: codec%u discovery begin", codec_address);
     uint32_t subnodes;
@@ -238,16 +315,16 @@ static bool discover_codec(void) {
         klogf(KLOG_ERROR, "audio: codec%u root subnode query failed", codec_address);
         return false;
     }
-    uint8_t first_group = (uint8_t)(subnodes & 0xFF);
-    uint8_t group_count = (uint8_t)(subnodes >> 16);
-    if (group_count == 0 || !codec_parameter(first_group, HDA_PARAMETER_SUBNODES,
-                                              &function_group)) {
+    uint8_t first_group = 0;
+    uint8_t group_count = subnode_count(subnodes);
+    if (group_count == 0 || !find_audio_function_group(subnodes, &first_group)
+        || !codec_parameter(first_group, HDA_PARAMETER_SUBNODES, &function_group)) {
         klogf(KLOG_ERROR, "audio: codec%u function group query failed first=%u count=%u",
               codec_address, first_group, group_count);
         return false;
     }
-    uint8_t first_widget = (uint8_t)(function_group & 0xFF);
-    uint8_t widget_count = (uint8_t)(function_group >> 16);
+    uint8_t first_widget = subnode_start(function_group);
+    uint8_t widget_count = subnode_count(function_group);
     uint32_t vendor_id = 0;
     uint32_t revision_id = 0;
     (void)codec_parameter(0, 0x00, &vendor_id);
@@ -271,8 +348,18 @@ static bool discover_codec(void) {
         if (type == HDA_WIDGET_AUDIO_OUTPUT && dac_node == 0) {
             dac_node = node;
         }
-        if (type == HDA_WIDGET_PIN && pin_node == 0) {
-            pin_node = node;
+        if (type == HDA_WIDGET_PIN) {
+            uint32_t pin_capabilities = 0;
+            if (codec_parameter(node, HDA_PARAMETER_PIN_CAPS,
+                                &pin_capabilities)) {
+                klogf(KLOG_DEBUG, "audio: codec%u node%u pin caps=0x%08x output=%u",
+                      codec_address, node, pin_capabilities,
+                      (pin_capabilities & HDA_PIN_CAP_OUTPUT) != 0 ? 1 : 0);
+                if ((pin_capabilities & HDA_PIN_CAP_OUTPUT) != 0
+                    && pin_node == 0) {
+                    pin_node = node;
+                }
+            }
         }
     }
     klogf(KLOG_INFO, "audio: codec%u discovery result dac=%u pin=%u",
@@ -297,6 +384,11 @@ static bool configure_codec(void) {
         klog(KLOG_ERROR, "audio: failed to select pin connection index 0");
         return false;
     }
+    if (!codec_command(dac_node, HDA_VERB_SET_CONVERTER_STREAM_CHANNEL,
+                       HDA_STREAM_TAG << 4)) {
+        klog(KLOG_ERROR, "audio: failed to bind DAC to output stream");
+        return false;
+    }
     if (!codec_command(dac_node, HDA_VERB_SET_STREAM_FORMAT, HDA_PCM_FORMAT)) {
         klog(KLOG_ERROR, "audio: failed to set DAC stream format");
         return false;
@@ -312,12 +404,16 @@ static bool configure_stream(void) {
     klog(KLOG_INFO, "audio: HDA PCM stream configuration begin");
     uint64_t bdl_address = physical_address(bdl);
     uint64_t pcm_address = physical_address(pcm_buffer);
-    volatile uint8_t *stream = regs + HDA_STREAM_BASE;
-    uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
+    uint32_t stream_offset = HDA_STREAM_BASE
+        + (uint32_t)controller.input_streams * HDA_STREAM_DESCRIPTOR_SIZE;
+    volatile uint8_t *stream = regs + stream_offset;
+    uint32_t control = read_stream_control(stream);
     klogf(KLOG_DEBUG, "audio: HDA stream before ctl=0x%08x sts=0x%02x lpib=0x%08x",
           control, *(volatile uint8_t *)(stream + 0x03),
           *(volatile uint32_t *)(stream + 0x04));
-    *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control & ~HDA_STREAM_RUN;
+    if (!reset_stream(stream)) {
+        return false;
+    }
     bdl[0].address = pcm_address;
     bdl[0].length = HDA_PCM_BYTES;
     bdl[0].flags = 1;
@@ -329,9 +425,9 @@ static bool configure_stream(void) {
     *(volatile uint16_t *)(stream + HDA_STREAM_FMT) = HDA_PCM_FORMAT;
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPL) = (uint32_t)bdl_address;
     *(volatile uint32_t *)(stream + HDA_STREAM_BDPU) = (uint32_t)(bdl_address >> 32);
-    *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = 0x00100002;
+    write_stream_control(stream, (uint32_t)HDA_STREAM_TAG << 20);
     klogf(KLOG_DEBUG, "audio: HDA stream programmed base=0x%x ctl=0x%08x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
-          HDA_STREAM_BASE, *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          stream_offset, read_stream_control(stream),
           HDA_PCM_BYTES * 2U, 1, HDA_PCM_FORMAT, bdl_address);
     return true;
 }
@@ -452,20 +548,21 @@ bool hda_play_tone(uint16_t frequency_hz, uint8_t volume) {
     klogf(KLOG_DEBUG, "audio: HDA PCM fill begin freq=%u volume=%u amplitude=%u bytes=%u",
           frequency_hz, volume, amplitude, HDA_PCM_BYTES * 2U);
     for (uint32_t frame = 0; frame < HDA_PCM_SAMPLES * 2U; frame++) {
-        uint32_t phase = (frame * frequency_hz) % HDA_PCM_RATE;
-        uint32_t half_period = HDA_PCM_RATE / (frequency_hz * 2U);
-        int16_t value = phase < half_period ? (int16_t)amplitude : (int16_t)-amplitude;
+        uint32_t phase = (uint32_t)(((uint64_t)frame * frequency_hz) % HDA_PCM_RATE);
+        int16_t value = phase < HDA_PCM_RATE / 2U
+            ? (int16_t)amplitude : (int16_t)-amplitude;
         uint32_t offset = frame * 4U;
         pcm_buffer[offset] = (uint8_t)value;
         pcm_buffer[offset + 1] = (uint8_t)(value >> 8);
         pcm_buffer[offset + 2] = (uint8_t)value;
         pcm_buffer[offset + 3] = (uint8_t)(value >> 8);
     }
-    volatile uint8_t *stream = regs + HDA_STREAM_BASE;
-    uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
-    *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control | HDA_STREAM_RUN;
+    volatile uint8_t *stream = regs + HDA_STREAM_BASE
+        + (uint32_t)controller.input_streams * HDA_STREAM_DESCRIPTOR_SIZE;
+    uint32_t control = read_stream_control(stream);
+    write_stream_control(stream, control | HDA_STREAM_RUN);
     klogf(KLOG_INFO, "audio: HDA PCM stream RUN ctl=0x%08x sts=0x%02x lpib=0x%08x",
-          *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          read_stream_control(stream),
           *(volatile uint8_t *)(stream + 0x03),
           *(volatile uint32_t *)(stream + 0x04));
     return true;
@@ -475,11 +572,12 @@ void hda_stop_tone(void) {
     if (!pcm_ready || !regs) {
         return;
     }
-    volatile uint8_t *stream = regs + HDA_STREAM_BASE;
-    uint32_t control = *(volatile uint32_t *)(stream + HDA_STREAM_CTL);
-    *(volatile uint32_t *)(stream + HDA_STREAM_CTL) = control & ~HDA_STREAM_RUN;
+    volatile uint8_t *stream = regs + HDA_STREAM_BASE
+        + (uint32_t)controller.input_streams * HDA_STREAM_DESCRIPTOR_SIZE;
+    uint32_t control = read_stream_control(stream);
+    write_stream_control(stream, control & ~HDA_STREAM_RUN);
     klogf(KLOG_DEBUG, "audio: HDA PCM stream STOP ctl=0x%08x sts=0x%02x",
-          *(volatile uint32_t *)(stream + HDA_STREAM_CTL),
+          read_stream_control(stream),
           *(volatile uint8_t *)(stream + 0x03));
 }
 
