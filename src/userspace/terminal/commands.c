@@ -31,7 +31,7 @@ static inline void outb(uint16_t port, uint8_t value){
     __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
 }
 
-static char savelog_buf[32768];
+static char savelog_buf[256 * 1024];
 static uint32_t savelog_pos;
 static void savelog_cb(char c){
     if(savelog_pos+1<sizeof(savelog_buf)) savelog_buf[savelog_pos++]=c;
