@@ -6,7 +6,7 @@ if [ -f kernel-limine.elf ]; then
   cp kernel-limine.elf "$FALLBACK_KERNEL_IMAGE"
 fi
 
-echo "🔨 Building Limine kernel (higher half, GOP)..."
+echo "Building Limine kernel (higher half, GOP)..."
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libc/runtime.c -o purec_runtime.o
 x86_64-elf-ar rcs libpurec.a purec_runtime.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/init/main.c -o init_program.o
@@ -89,7 +89,7 @@ x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limi
 if [ ! -f "$FALLBACK_KERNEL_IMAGE" ]; then
   cp kernel-limine.elf "$FALLBACK_KERNEL_IMAGE"
 fi
-echo "✅ kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
+echo "kernel-limine.elf: $(file kernel-limine.elf | cut -d: -f2)"
 x86_64-elf-readelf -l kernel-limine.elf | head -n12
 
 LIMINE_SHARE=""
@@ -97,7 +97,7 @@ for p in /usr/share/limine /tmp/limine-pkg/usr/share/limine; do
   [ -d "$p" ] && LIMINE_SHARE="$p" && break
 done
 if [ -z "$LIMINE_SHARE" ]; then
-  echo "❌ limine не найден. Установи: sudo pacman -S limine"
+  echo "limine не найден"
   echo "   или скачай: wget https://archlinux.org/packages/extra/x86_64/limine/download -O /tmp/limine.pkg.tar.zst && mkdir -p /tmp/limine-pkg && tar -I zstd -xf /tmp/limine.pkg.tar.zst -C /tmp/limine-pkg"
   exit 1
 fi
@@ -106,7 +106,7 @@ for p in /usr/bin/limine /tmp/limine-pkg/usr/bin/limine; do
   [ -f "$p" ] && LIMINE_BIN="$p" && break
 done
 
-echo "📦 Limine: $LIMINE_SHARE"
+echo "Limine: $LIMINE_SHARE"
 rm -rf iso_limine
 mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT iso_limine/bin/program iso_limine/lib
 
@@ -157,15 +157,15 @@ cp "$LIMINE_SHARE/BOOTIA32.EFI" iso_limine/EFI/BOOT/ 2>/dev/null || true
 cp "$LIMINE_SHARE/limine-bios.sys" iso_limine/ 2>/dev/null || true
 cp "$LIMINE_SHARE/limine-bios.sys" iso_limine/boot/ 2>/dev/null || true
 
-echo "📀 xorriso (BIOS+UEFI)..."
+echo "xorriso (BIOS+UEFI)..."
 xorriso -as mkisofs \
   -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
   --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label \
   iso_limine -o purec_limine.iso 2>&1 | tail -5
 
-echo "🔧 limine bios-install..."
+echo "limine bios-install..."
 chmod +x "$LIMINE_BIN" 2>/dev/null || true
 "$LIMINE_BIN" bios-install purec_limine.iso 2>&1 | tail -5
 
 ls -lh purec_limine.iso kernel-limine.elf init installer snake terminal nano system libpurec.a
-echo "✅ purec_limine.iso готов (higher half, no Lower half PHDR panic)"
+echo "purec_limine.iso"
