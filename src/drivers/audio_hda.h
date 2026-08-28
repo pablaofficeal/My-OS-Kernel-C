@@ -18,6 +18,10 @@ struct hda_controller_info {
 };
 
 void hda_init(void);
+void hda_set_address_mapping(uint64_t kernel_physical_base,
+                             uint64_t kernel_virtual_base);
 bool hda_is_present(void);
 bool hda_pcm_output_ready(void);
+bool hda_play_tone(uint16_t frequency_hz, uint8_t volume);
+void hda_stop_tone(void);
 bool hda_get_controller_info(struct hda_controller_info *out);

@@ -76,6 +76,7 @@ static void stop_test_sound(void) {
     master_bus.test_active = false;
     master_bus.test_step = 0;
     master_bus.next_step_ms = 0;
+    hda_stop_tone();
     pc_speaker_off();
 }
 
@@ -175,7 +176,14 @@ void audio_play_test_sound(void) {
     }
 
     if (master_bus.pcm_ready) {
-        klog(KLOG_WARN, "audio: PCM test path is not wired yet");
+        klog(KLOG_INFO, "audio: starting HDA PCM test path");
+        if (!hda_play_tone(test_frequencies[0], master_bus.volume)) {
+            klog(KLOG_WARN, "audio: HDA PCM test could not start");
+        } else {
+            master_bus.test_active = true;
+            master_bus.test_step = 0;
+            master_bus.next_step_ms = system_info_uptime_ms() + test_durations_ms[0];
+        }
         return;
     }
 
@@ -204,5 +212,12 @@ void audio_update(void) {
     }
 
     master_bus.next_step_ms = now + test_durations_ms[master_bus.test_step];
-    pc_speaker_tone(test_frequencies[master_bus.test_step]);
+    if (master_bus.pcm_ready) {
+        if (!hda_play_tone(test_frequencies[master_bus.test_step], master_bus.volume)) {
+            klog(KLOG_WARN, "audio: HDA PCM tone step failed");
+            stop_test_sound();
+        }
+    } else {
+        pc_speaker_tone(test_frequencies[master_bus.test_step]);
+    }
 }
