@@ -2,6 +2,7 @@
 
 #include "../drivers/storage/block_device.h"
 #include "../kernel/klog.h"
+#include "../kernel/scheduler.h"
 #include "../lib/string.h"
 #include <stddef.h>
 #include "../boot/install_source.h"
@@ -85,6 +86,8 @@ struct fat32_format_layout {
     uint32_t cluster_count;
     uint8_t sectors_per_cluster;
 };
+
+static uint8_t lfn_checksum(const uint8_t short_name[11]);
 
 static struct fat32_volume volume;
 static struct fat32_handle handles[FAT32_MAX_OPEN_FILES];
@@ -291,6 +294,79 @@ static int32_t find_entry(uint32_t directory_cluster, const uint8_t short_name[1
     return FS_ERROR_INVALID;
 }
 
+static bool lfn_entry_matches(const uint8_t *entry, const char *component){
+    static const uint8_t offsets[FAT32_LFN_CHARACTER_CAPACITY]={
+        1,3,5,7,9,14,16,18,20,22,24,28,30
+    };
+    if(entry[0]!=0x41 || entry[11]!=FAT32_ATTRIBUTE_LFN
+       || entry[12]!=0 || read_u16(&entry[26])!=0){
+        return false;
+    }
+    for(uint8_t index=0;index<FAT32_LFN_CHARACTER_CAPACITY;index++){
+        uint16_t character=read_u16(&entry[offsets[index]]);
+        if(character==0) return component[index]=='\0';
+        if(character==0xFFFF || component[index]=='\0'
+           || character!=(uint8_t)component[index]){
+            return false;
+        }
+    }
+    return component[FAT32_LFN_CHARACTER_CAPACITY]=='\0';
+}
+
+static int32_t find_lfn_entry(uint32_t directory_cluster, const char *component,
+                              struct fat32_entry_ref *result){
+    if(!valid_cluster(directory_cluster)) return FS_ERROR_NOT_DIR;
+    uint32_t cluster=directory_cluster;
+    bool pending_match=false;
+    uint8_t pending_checksum=0;
+
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t first_lba=cluster_lba(cluster);
+        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            uint32_t lba=first_lba+sector;
+            if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+            for(uint16_t offset=0;offset<BLOCK_SECTOR_SIZE;offset+=32){
+                uint8_t first=sector_buffer[offset];
+                if(first==0) return FS_ERROR_NOT_FOUND;
+                if(first==FAT32_DELETED_ENTRY){
+                    pending_match=false;
+                    continue;
+                }
+                uint8_t attributes=sector_buffer[offset+11];
+                if(attributes==FAT32_ATTRIBUTE_LFN){
+                    pending_match=lfn_entry_matches(&sector_buffer[offset],component);
+                    pending_checksum=sector_buffer[offset+13];
+                    continue;
+                }
+                if(pending_match
+                   && pending_checksum==lfn_checksum(&sector_buffer[offset])){
+                    if(result){
+                        result->sector_lba=lba;
+                        result->offset=offset;
+                        result->attributes=attributes;
+                        result->first_cluster=
+                            ((uint32_t)read_u16(&sector_buffer[offset+20])<<16)
+                            |read_u16(&sector_buffer[offset+26]);
+                        result->size=read_u32(&sector_buffer[offset+28]);
+                        memcpy(result->short_name,&sector_buffer[offset],11);
+                        result->has_lfn=true;
+                    }
+                    return 0;
+                }
+                pending_match=false;
+            }
+        }
+
+        uint32_t next;
+        int32_t status=fat_next_cluster(cluster,&next);
+        if(status<0) return status;
+        if(next>=FAT32_END_OF_CHAIN) return FS_ERROR_NOT_FOUND;
+        if(!valid_cluster(next)) return FS_ERROR_INVALID;
+        cluster=next;
+    }
+    return FS_ERROR_INVALID;
+}
+
 static int32_t resolve_entry(const char *path, struct fat32_entry_ref *result,
                              uint32_t *parent_cluster){
     if(!volume.mounted || !path || !path[0]) return FS_ERROR_INVALID;
@@ -301,9 +377,10 @@ static int32_t resolve_entry(const char *path, struct fat32_entry_ref *result,
 
     while(next_component(&cursor,component,&has_more)){
         uint8_t short_name[11];
-        if(!make_short_name(component,short_name)) return FS_ERROR_UNSUPPORTED;
         struct fat32_entry_ref entry;
-        int32_t status=find_entry(directory,short_name,&entry);
+        int32_t status=make_short_name(component,short_name)
+            ? find_entry(directory,short_name,&entry)
+            : find_lfn_entry(directory,component,&entry);
         if(status<0) return status;
         if(!has_more){
             if(result) *result=entry;
@@ -365,6 +442,7 @@ static int32_t resolve_creation_parent(const char *path, uint32_t *parent,
 static int32_t allocate_cluster(uint32_t *cluster_result){
     if(!cluster_result) return FS_ERROR_INVALID;
     for(uint32_t cluster=2;cluster<volume.cluster_count+2;cluster++){
+        if((cluster&0xFFU)==0) scheduler_yield();
         uint32_t value;
         int32_t status=fat_next_cluster(cluster,&value);
         if(status<0) return status;
@@ -752,26 +830,25 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     }
     struct fat32_handle *handle=&handles[index];
     if(handle->position>=handle->size){
-        handle->used=false;
         return 0;
     }
 
     uint8_t *output=(uint8_t*)buffer;
     uint32_t total_read=0;
     uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
+    uint32_t yield_counter=0;
     while(total_read<count && handle->position<handle->size){
+        if((yield_counter++ & 0x3)==0) scheduler_yield();
         uint32_t cluster=handle->current_cluster;
         if(!valid_cluster(cluster)){
-            handle->used=false;
             return FS_ERROR_INVALID;
         }
         uint32_t target_cluster_index=handle->position/cluster_size;
         while(handle->cluster_index<target_cluster_index){
             uint32_t next;
             int32_t status=fat_next_cluster(cluster,&next);
-            if(status<0){ handle->used=false; return status; }
+            if(status<0) return status;
             if(!valid_cluster(next)){
-                handle->used=false;
                 return FS_ERROR_INVALID;
             }
             cluster=next;
@@ -783,7 +860,6 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
         uint32_t sector=offset_in_cluster/BLOCK_SECTOR_SIZE;
         uint32_t offset=offset_in_cluster%BLOCK_SECTOR_SIZE;
         if(!block_device_read(cluster_lba(cluster)+sector,sector_buffer)){
-            handle->used=false;
             return FS_ERROR_IO;
         }
 
@@ -797,17 +873,31 @@ int32_t fat32_read(int32_t descriptor, void *buffer, uint32_t count){
     return (int32_t)total_read;
 }
 
+int32_t fat32_close(int32_t descriptor){
+    int32_t index=descriptor-FAT32_DESCRIPTOR_BASE;
+    if(index<0 || index>=FAT32_MAX_OPEN_FILES || !handles[index].used)
+        return FS_ERROR_INVALID;
+    handles[index].used=false;
+    return 0;
+}
+
 int32_t fat32_delete(const char *path){
     struct fat32_entry_ref entry;
     int32_t status=resolve_entry(path,&entry,0);
     if(status<0) return status;
-    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY) return FS_ERROR_NOT_FILE;
     if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
     if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
-    for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
-        if(entry.first_cluster!=0 && handles[index].used
-           && handles[index].first_cluster==entry.first_cluster){
-            return FS_ERROR_BUSY;
+    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY){
+        struct fs_directory_entry child;
+        status=fat32_list(path,&child,1);
+        if(status<0) return status;
+        if(status>0) return FS_ERROR_NOT_BLANK;
+    } else {
+        for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
+            if(entry.first_cluster!=0 && handles[index].used
+               && handles[index].first_cluster==entry.first_cluster){
+                return FS_ERROR_BUSY;
+            }
         }
     }
 
@@ -822,7 +912,6 @@ int32_t fat32_rename(const char *path, const char *new_name){
     uint32_t parent;
     int32_t status=resolve_entry(path,&entry,&parent);
     if(status<0) return status;
-    if(entry.attributes&FAT32_ATTRIBUTE_DIRECTORY) return FS_ERROR_NOT_FILE;
     if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
     if(entry.has_lfn) return FS_ERROR_UNSUPPORTED;
 
@@ -955,10 +1044,12 @@ static int32_t write_file_chain(uint32_t first_cluster, const uint8_t *data,
                                 uint32_t count){
     uint32_t cluster=first_cluster;
     uint32_t written=0;
+    uint32_t sectors_written=0;
     while(written<count){
         if(!valid_cluster(cluster)) return FS_ERROR_INVALID;
         uint32_t first_lba=cluster_lba(cluster);
         for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+            if((sectors_written++&0x0FU)==0) scheduler_yield();
             memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
             uint32_t amount=count-written;
             if(amount>BLOCK_SECTOR_SIZE) amount=BLOCK_SECTOR_SIZE;
@@ -1034,6 +1125,98 @@ int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
     return (int32_t)count;
 }
 
+int32_t fat32_append_file(const char *path, const void *buffer, uint32_t count){
+    if(!path || !path[0] || (!buffer && count) || count>0x7FFFFFFF) return FS_ERROR_INVALID;
+
+    struct fat32_entry_ref entry;
+    int32_t status=resolve_entry(path,&entry,0);
+    if(status==FS_ERROR_NOT_FOUND){
+        status=fat32_create_file(path);
+        if(status<0) return status;
+        status=resolve_entry(path,&entry,0);
+    }
+    if(status<0) return status;
+    if(entry.attributes&(FAT32_ATTRIBUTE_DIRECTORY|FAT32_ATTRIBUTE_VOLUME_ID)) return FS_ERROR_NOT_FILE;
+    if(entry.attributes&FAT32_ATTRIBUTE_READ_ONLY) return FS_ERROR_READ_ONLY;
+    if(!count) return 0;
+    if((uint64_t)entry.size+count>0xFFFFFFFFULL) return FS_ERROR_NO_SPACE;
+    for(uint8_t index=0;index<FAT32_MAX_OPEN_FILES;index++){
+        if(entry.first_cluster && handles[index].used
+           && handles[index].first_cluster==entry.first_cluster) return FS_ERROR_BUSY;
+    }
+
+    uint32_t cluster_size=(uint32_t)volume.sectors_per_cluster*BLOCK_SECTOR_SIZE;
+    uint32_t old_clusters=(uint32_t)(((uint64_t)entry.size+cluster_size-1)
+                                     /cluster_size);
+    uint32_t new_size=entry.size+count;
+    uint32_t required_clusters=(uint32_t)(((uint64_t)new_size+cluster_size-1)
+                                          /cluster_size);
+    uint32_t cluster=entry.first_cluster;
+
+    if(old_clusters==0){
+        status=allocate_cluster(&cluster);
+        if(status<0) return status;
+        entry.first_cluster=cluster;
+    } else {
+        for(uint32_t index=1;index<old_clusters;index++){
+            uint32_t next;
+            status=fat_next_cluster(cluster,&next);
+            if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+            cluster=next;
+        }
+    }
+    for(uint32_t index=old_clusters;index<required_clusters;index++){
+        uint32_t next;
+        status=allocate_cluster(&next);
+        if(status<0) return status;
+        status=fat_write_entry(cluster,next);
+        if(status<0) return status;
+        cluster=next;
+    }
+
+    cluster=entry.first_cluster;
+    uint32_t target_index=entry.size/cluster_size;
+    for(uint32_t index=0;index<target_index;index++){
+        uint32_t next;
+        status=fat_next_cluster(cluster,&next);
+        if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+        cluster=next;
+    }
+
+    const uint8_t *data=(const uint8_t*)buffer;
+    uint32_t written=0;
+    uint32_t offset_in_cluster=entry.size%cluster_size;
+    while(written<count){
+        uint32_t sector=offset_in_cluster/BLOCK_SECTOR_SIZE;
+        uint32_t offset=offset_in_cluster%BLOCK_SECTOR_SIZE;
+        uint32_t amount=BLOCK_SECTOR_SIZE-offset;
+        if(amount>count-written) amount=count-written;
+        if(offset!=0 || amount<BLOCK_SECTOR_SIZE){
+            if(!block_device_read(cluster_lba(cluster)+sector,sector_buffer)) return FS_ERROR_IO;
+        } else {
+            memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        }
+        memcpy(&sector_buffer[offset],&data[written],amount);
+        if(!block_device_write(cluster_lba(cluster)+sector,sector_buffer)) return FS_ERROR_IO;
+        written+=amount;
+        offset_in_cluster+=amount;
+        if(offset_in_cluster==cluster_size && written<count){
+            uint32_t next;
+            status=fat_next_cluster(cluster,&next);
+            if(status<0 || !valid_cluster(next)) return status<0 ? status : FS_ERROR_INVALID;
+            cluster=next;
+            offset_in_cluster=0;
+        }
+    }
+
+    if(!block_device_read(entry.sector_lba,sector_buffer)) return FS_ERROR_IO;
+    write_u16(&sector_buffer[entry.offset+20],(uint16_t)(entry.first_cluster>>16));
+    write_u16(&sector_buffer[entry.offset+26],(uint16_t)entry.first_cluster);
+    write_u32(&sector_buffer[entry.offset+28],new_size);
+    if(!block_device_write(entry.sector_lba,sector_buffer)) return FS_ERROR_IO;
+    return (int32_t)count;
+}
+
 int32_t fat32_create_directory(const char *path){
     uint32_t parent;
     uint8_t short_name[11];
@@ -1076,6 +1259,7 @@ static int32_t verify_blank_device(uint32_t total_sectors){
     uint32_t scan_count=total_sectors<FAT32_FORMAT_BLANK_SCAN
         ? total_sectors : FAT32_FORMAT_BLANK_SCAN;
     for(uint32_t lba=0;lba<scan_count;lba++){
+        if((lba&0x3FU)==0) scheduler_yield();
         if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
         if(!sector_is_zero(sector_buffer)) return FS_ERROR_NOT_BLANK;
     }
@@ -1123,6 +1307,7 @@ static bool calculate_format_layout(uint32_t total_sectors,
 static bool write_zero_range(uint32_t first_lba, uint32_t count){
     memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
     for(uint32_t index=0;index<count;index++){
+        if((index&0x3FU)==0) scheduler_yield();
         if(!block_device_write(first_lba+index,sector_buffer)) return false;
     }
     return true;
@@ -1459,10 +1644,29 @@ static int32_t create_directory_checked(const char *path){
 static const char uefi_limine_config[]=
     "timeout: 10\n"
     "verbose: yes\n"
-    "/PureC OS (UEFI)\n"
+    "/PureC OS (UEFI primary)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel.elf\n"
-    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n";
+    "    module_path: boot():/boot/kernel2.elf\n"
+    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
+    "    module_path: boot():/bin/init\n"
+    "    module_path: boot():/bin/installer\n"
+    "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/program/terminal\n"
+    "    module_path: boot():/bin/program/nano\n"
+    "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/lib/libpurec.a\n"
+    "/PureC OS (UEFI fallback previous image)\n"
+    "    protocol: limine\n"
+    "    kernel_path: boot():/boot/kernel2.elf\n"
+    "    module_path: boot():/EFI/BOOT/BOOTX64.EFI\n"
+    "    module_path: boot():/bin/init\n"
+    "    module_path: boot():/bin/installer\n"
+    "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/program/terminal\n"
+    "    module_path: boot():/bin/program/nano\n"
+    "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/lib/libpurec.a\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1477,9 +1681,98 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
     return entry.size==expected_size?0:FS_ERROR_IO;
 }
 
+static int32_t install_program_payload(void){
+    if(create_directory_checked("/bin")<0
+       || create_directory_checked("/bin/program")<0
+       || create_directory_checked("/game")<0
+       || create_directory_checked("/lib")<0) return FS_ERROR_IO;
+    const void *init_image,*installer_image,*snake_image,*terminal_image;
+    const void *nano_image,*system_image,*library_image;
+    uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t system_size;
+    uint64_t library_size;
+    if(!boot_get_module("/bin/init",&init_image,&init_size)){
+        klog(KLOG_ERROR,"install: missing /bin/init");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/installer",&installer_image,&installer_size)){
+        klog(KLOG_ERROR,"install: missing /bin/installer");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
+        klog(KLOG_ERROR,"install: missing /bin/snake");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/terminal");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/nano",&nano_image,&nano_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/nano");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/system",&system_image,&system_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/system");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
+        klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: module too large");
+        return FS_ERROR_NOT_FOUND;
+    }
+    int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write /bin/init %d",status);
+        return status;
+    }
+    status=write_lfn_file("/bin","installer","/bin/instal~1","instal~1",
+                          installer_image,(uint32_t)installer_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write installer %d",status);
+        return status;
+    }
+    status=fat32_write_file("/bin/snake",snake_image,(uint32_t)snake_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write snake %d",status);
+        return status;
+    }
+    status=fat32_write_file("/game/snake",snake_image,(uint32_t)snake_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write game/snake %d",status);
+        return status;
+    }
+    status=fat32_write_file("/bin/program/terminal",terminal_image,
+                            (uint32_t)terminal_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write terminal %d",status);
+        return status;
+    }
+    status=fat32_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write nano %d",status);
+        return status;
+    }
+    status=fat32_write_file("/bin/program/system",system_image,
+                            (uint32_t)system_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write system %d",status);
+        return status;
+    }
+    status=fat32_write_file("/lib/libpurec.a",library_image,
+                            (uint32_t)library_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write libpurec %d",status);
+    }
+    return status;
+}
+
 static int32_t install_uefi_payload(void){
     static const char *directories[]={
-        "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine"
+        "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine",
+        "/bin","/bin/program","/game","/lib"
     };
     for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
         int32_t status=create_directory_checked(directories[index]);
@@ -1487,23 +1780,100 @@ static int32_t install_uefi_payload(void){
     }
 
     const void *kernel_image;
+    const void *fallback_kernel_image;
     const void *efi_loader;
     uint32_t kernel_image_size;
+    uint64_t fallback_kernel_image_size;
     uint32_t efi_loader_size;
     if(!boot_get_kernel_image(&kernel_image,&kernel_image_size)){
+        klog(KLOG_ERROR,"install: missing kernel.elf");
         return FS_ERROR_NOT_FOUND;
     }
-    if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)
-       || ((const uint8_t*)efi_loader)[0]!=0x4D
-       || ((const uint8_t*)efi_loader)[1]!=0x5A){
+    if(!boot_get_module("/boot/kernel2.elf",&fallback_kernel_image,
+                        &fallback_kernel_image_size)){
+        if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
+                            &fallback_kernel_image_size)){
+            klog(KLOG_ERROR,"install: missing fallback");
+            return FS_ERROR_NOT_FOUND;
+        }
+    }
+    if(fallback_kernel_image_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: fallback too large");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_efi_loader(&efi_loader,&efi_loader_size)){
+        klog(KLOG_ERROR,"install: missing BOOTX64.EFI");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(((const uint8_t*)efi_loader)[0]!=0x4D || ((const uint8_t*)efi_loader)[1]!=0x5A){
+        klog(KLOG_ERROR,"install: BOOTX64.EFI bad MZ");
+        return FS_ERROR_NOT_FOUND;
+    }
+    const void *init_image;
+    const void *installer_image;
+    const void *snake_image;
+    const void *terminal_image;
+    const void *nano_image;
+    const void *system_image;
+    const void *library_image;
+    uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t system_size;
+    uint64_t library_size;
+    if(!boot_get_module("/bin/init",&init_image,&init_size)){
+        klog(KLOG_ERROR,"install: missing /bin/init uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/installer",&installer_image,&installer_size)){
+        klog(KLOG_ERROR,"install: missing /bin/installer uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
+        klog(KLOG_ERROR,"install: missing /bin/snake uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
+        klog(KLOG_ERROR,"install: missing terminal uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/nano",&nano_image,&nano_size)){
+        klog(KLOG_ERROR,"install: missing nano uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/program/system",&system_image,&system_size)){
+        klog(KLOG_ERROR,"install: missing system uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
+        klog(KLOG_ERROR,"install: missing libpurec uefi");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+        klog(KLOG_ERROR,"install: module too large uefi");
         return FS_ERROR_NOT_FOUND;
     }
 
     int32_t status=fat32_write_file("/EFI/BOOT/BOOTX64.EFI",
                                     efi_loader,efi_loader_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write BOOTX64 %d",status);
+        return status;
+    }
     status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
-    if(status<0) return status;
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write kernel %d",status);
+        return status;
+    }
+    status=fat32_write_file("/boot/kernel2.elf",fallback_kernel_image,
+                            (uint32_t)fallback_kernel_image_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write fallback %d",status);
+        return status;
+    }
+    status=install_program_payload();
+    if(status<0){
+        klogf(KLOG_ERROR,"install: program payload %d",status);
+        return status;
+    }
 
     static const struct {
         const char *directory;
@@ -1526,6 +1896,26 @@ static int32_t install_uefi_payload(void){
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
     if(status<0) return status;
+    status=verify_installed_file("/boot/kernel2.elf",
+                                 (uint32_t)fallback_kernel_image_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/init",(uint32_t)init_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/installer",(uint32_t)installer_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/snake",(uint32_t)snake_size);
+    if(status<0) return status;
+    status=verify_installed_file("/game/snake",(uint32_t)snake_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/terminal",
+                                 (uint32_t)terminal_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/nano",(uint32_t)nano_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/system",(uint32_t)system_size);
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpurec.a",(uint32_t)library_size);
+    if(status<0) return status;
     for(uint8_t index=0;index<sizeof(config_locations)/sizeof(config_locations[0]);index++){
         status=verify_installed_file(config_locations[index].alias_path,
                                      sizeof(uefi_limine_config)-1);
@@ -1535,7 +1925,10 @@ static int32_t install_uefi_payload(void){
 }
 
 // UEFI install: GPT, a 512 MiB ESP, and a separate system partition.
-int32_t fat32_format_uefi_device(const char *device_name, const char *serial_confirmation){
+int32_t fat32_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback){
+    if(callback) callback(2,"Validating target disk");
     if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
     int32_t idx=block_device_find(device_name);
     if(idx<0) return FS_ERROR_NOT_FOUND;
@@ -1563,12 +1956,14 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         return FS_ERROR_TOO_SMALL;
     }
     if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
+    if(callback) callback(8,"Writing GPT partition table");
     klogf(KLOG_INFO,"fat32_uefi: %s total %u ESP %u sectors data %u sectors",
           device_name,total_sectors,FAT32_ESP_SECTORS,data_sectors);
     if(!write_gpt_layout(total_sectors,info.serial)){
         klogf(KLOG_ERROR,"fat32_uefi: GPT write failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(18,"Formatting EFI system partition");
     if(!write_format_metadata_at(FAT32_ESP_START_LBA,&esp_layout,
                                  esp_volume_label)){
         klogf(KLOG_ERROR,"fat32_uefi: ESP format failed");
@@ -1580,12 +1975,14 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         klogf(KLOG_ERROR,"fat32_uefi: ESP mount failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(45,"Copying bootloader and kernel");
     int32_t status=install_uefi_payload();
     if(status<0){
         klogf(KLOG_ERROR,"fat32_uefi: boot payload failed %d",status);
         return status;
     }
 
+    if(callback) callback(70,"Formatting PureC system partition");
     if(!write_format_metadata_at(data_start,&data_layout,
                                  required_volume_label)){
         klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
@@ -1597,6 +1994,18 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
         klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
         return FS_ERROR_IO;
     }
+    if(callback) callback(88,"Copying programs to /bin and /game");
+    status=install_program_payload();
+    if(status<0){
+        klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
+        return status;
+    }
+    if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
+}
+
+int32_t fat32_format_uefi_device(const char *device_name,
+                                 const char *serial_confirmation){
+    return fat32_format_uefi_device_progress(device_name,serial_confirmation,0);
 }

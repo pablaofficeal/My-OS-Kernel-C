@@ -7,10 +7,14 @@
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
 #include "../arch/x86_64/mmio.h"
-#include "../userspace/userspace.h"
 #include "../lib/string.h"
-// Forward declaration of memmap response from boot.c
+#include "init.h"
+#include "process.h"
+#include "../mm/pmm.h"
+#include "../mm/vmm.h"
 extern struct limine_memmap_response *memmap_response_ptr;
+extern struct limine_smp_response *smp_response_ptr;
+extern uint64_t hhdm_offset_global;
 #include <stdint.h>
 
 static inline int64_t do_syscall(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5){
@@ -31,6 +35,12 @@ void kernel_main(struct limine_framebuffer *fb) {
     klogf(KLOG_OK, "CPU detected: %s", system_info_cpu_name());
     klogf(KLOG_OK, "Usable RAM: %lu MB", system_info_usable_ram_bytes() / (1024 * 1024));
     klogf(KLOG_INFO, "Framebuffer: %dx%d", gop_get_width(), gop_get_height());
+
+    boot_diag_checkpoint(BOOT_STAGE_SYSTEM_INFO,"initializing physical memory");
+    pmm_init(memmap_response_ptr,hhdm_offset_global);
+    if(!pmm_is_ready()) kernel_panic("physical memory manager initialization failed");
+    vmm_init();
+    process_init();
 
     // GDT/IDT уже настроены в boot.c, но проверяем инт3 как linux-like selftest
     klog(KLOG_INFO, "Testing IDT: int3 breakpoint...");
@@ -58,16 +68,5 @@ void kernel_main(struct limine_framebuffer *fb) {
 
     klog(KLOG_INFO, "Boot log complete");
     klogf(KLOG_DEBUG, "Verbose mode: %s (debug visible)", klog_is_verbose() ? "on" : "off");
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "about to call userspace_init");
-    klog(KLOG_OK, "Booting userspace initialization...");
-
-    // пауза чтобы увидеть boot log как в Linux (1 сек)
-    { volatile uint64_t dummy=0; for(uint64_t i=0;i<30000000ULL;i++){ __asm__ volatile("pause"); dummy+=i; } (void)dummy; }
-    serial_write_string("[USERSPACE] init\n");
-    userspace_init();
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN, "userspace_init returned; entering event loop");
-    serial_write_string("[USERSPACE] run\n");
-    userspace_run();
-
-    kernel_panic("userspace_run returned unexpectedly");
+    init_process_start(smp_response_ptr ? smp_response_ptr->cpu_count : 1);
 }

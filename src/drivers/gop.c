@@ -161,6 +161,7 @@ void gop_init_from_multiboot(void *mbi){
 bool gop_is_available(void){ return gop.available; }
 uint32_t gop_get_width(void){ return gop.width; }
 uint32_t gop_get_height(void){ return gop.height; }
+uint32_t gop_get_pitch(void){ return gop.pitch; }
 uint8_t gop_get_bpp(void){ return gop.bpp; }
 uint64_t gop_get_framebuffer_size_bytes(void){ return gop.framebuffer_bytes; }
 const char *gop_get_protocol_name(void){
@@ -310,6 +311,11 @@ static void draw_char_sized(char c, uint32_t x, uint32_t y, uint32_t size,
 
 void gop_putc(char c){
     if(!gop.available){ vga_putc(c); return; }
+    if(c=='\b'){
+        if(cur_x>12) cur_x-=8;
+        draw_char(' ',cur_x,cur_y);
+        return;
+    }
     if(c=='\n'){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); return; }
     if(c=='\r'){ cur_x=12; return; }
     if(cur_x+8 >= gop.width){ cur_x=12; cur_y+=10; if(cur_y+8 >= gop.height) gop_scroll(); }

@@ -45,7 +45,7 @@ struct tss_descriptor {
 } __attribute__((packed));
 
 struct gdt_table {
-    struct gdt_entry entries[3];
+    struct gdt_entry entries[5];
     struct tss_descriptor tss;
 } __attribute__((packed));
 
@@ -65,8 +65,11 @@ void gdt_init(void) {
     gdt.entries[0] = (struct gdt_entry){0,0,0,0,0,0};
     // code 64-bit: base=0 limit=0 access=0x9A flags=0xA0 (L=1)
     gdt.entries[1] = (struct gdt_entry){0,0,0,0x9A,0xA0,0};
-    // data: access=0x92 flags=0xA0
+    // kernel data
     gdt.entries[2] = (struct gdt_entry){0,0,0,0x92,0x00,0};
+    // ring-3 code and data. Selectors are 0x1B and 0x23.
+    gdt.entries[3] = (struct gdt_entry){0,0,0,0xFA,0xA0,0};
+    gdt.entries[4] = (struct gdt_entry){0,0,0,0xF2,0x00,0};
 
     tss.ist1=(uint64_t)(uintptr_t)&double_fault_stack[EMERGENCY_STACK_SIZE];
     tss.ist2=(uint64_t)(uintptr_t)&nmi_stack[EMERGENCY_STACK_SIZE];
@@ -88,5 +91,9 @@ void gdt_init(void) {
     gp.base  = (uint64_t)&gdt;
 
     gdt_flush((uint64_t)&gp);
-    __asm__ volatile("mov $0x18, %%ax; ltr %%ax" ::: "rax", "memory");
+    __asm__ volatile("mov $0x28, %%ax; ltr %%ax" ::: "rax", "memory");
+}
+
+void gdt_set_kernel_stack(uint64_t stack_top){
+    tss.rsp0=stack_top;
 }

@@ -55,6 +55,11 @@ sudo apt install build-essential nasm grub-common xorriso qemu-system-x86
 ### 🔍 Детальные инструкции
 
 #### Сборка ISO-образа
+
+Скрипт `build-limine.sh` отдельно создаёт ядро, `libpurec.a` и ring-3 программы
+`/bin/init`, `/bin/installer`, `/bin/snake`. Установщик и змейка не линкуются
+в образ ядра. При установке змейка также копируется в `/game/snake`.
+
 ```mermaid
 graph TD
   A[Исходный код] --> B[Компиляция ядра]
@@ -104,4 +109,3 @@ purec-os/
 ---
 
 ![Статистика](https://img.shields.io/github/repo-size/yourusername/purec-os?label=Размер%20репозитория&style=flat-square) ![Лицензия](https://img.shields.io/github/license/yourusername/purec-os?color=blue&style=flat-square)
-   

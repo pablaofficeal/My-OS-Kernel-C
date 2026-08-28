@@ -7,10 +7,10 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
-#define KLOG_RING_SIZE 32768
+#define KLOG_RING_SIZE (8 * 1024 * 1024)
 
 static char klog_ring[KLOG_RING_SIZE];
-static uint32_t klog_ring_pos = 0;
+static volatile uint64_t klog_ring_pos = 0;
 static bool klog_ring_wrapped = false;
 static bool klog_verbose = true;
 static bool klog_screen_enabled = true; // если false, логи идут только в serial+ring, не на экран (для userspace)
@@ -371,14 +371,41 @@ void klog_dump_to_screen(void){
 
 void klog_foreach(void (*cb)(char c)){
     if(!cb) return;
-    if(!klog_ring_wrapped){
-        for(uint32_t i=0;i<klog_ring_pos;i++) cb(klog_ring[i % KLOG_RING_SIZE]);
+    uint64_t snapshot_pos=klog_ring_pos;
+    bool snapshot_wrapped=klog_ring_wrapped;
+    if(!snapshot_wrapped){
+        for(uint64_t i=0;i<snapshot_pos;i++) cb(klog_ring[i % KLOG_RING_SIZE]);
     } else {
-        uint32_t start = klog_ring_pos % KLOG_RING_SIZE;
+        uint32_t start = (uint32_t)(snapshot_pos % KLOG_RING_SIZE);
         for(uint32_t i=0;i<KLOG_RING_SIZE;i++) cb(klog_ring[(start + i) % KLOG_RING_SIZE]);
     }
 }
 
 void klog_dump_with(void (*cb)(char c)){
     klog_foreach(cb);
+}
+
+uint32_t klog_read_since(uint64_t *cursor, char *buffer, uint32_t capacity,
+                         bool *data_lost){
+    if(data_lost) *data_lost=false;
+    if(!cursor || !buffer || capacity==0) return 0;
+    uint64_t snapshot_pos=klog_ring_pos;
+    uint64_t earliest=snapshot_pos>KLOG_RING_SIZE
+        ? snapshot_pos-KLOG_RING_SIZE : 0;
+    if(*cursor<earliest){
+        *cursor=earliest;
+        if(data_lost) *data_lost=true;
+    }
+    if(*cursor>snapshot_pos) *cursor=snapshot_pos;
+    uint64_t available=snapshot_pos-*cursor;
+    uint32_t amount=available<capacity ? (uint32_t)available : capacity;
+    for(uint32_t index=0;index<amount;index++){
+        buffer[index]=klog_ring[(*cursor+index)%KLOG_RING_SIZE];
+    }
+    *cursor+=amount;
+    return amount;
+}
+
+uint64_t klog_total_bytes(void){
+    return klog_ring_pos;
 }

@@ -9,6 +9,7 @@
 #include "../drivers/timer.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/storage/ahci.h"
+#include "../drivers/audio_hda.h"
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
 #include "../arch/x86_64/gdt.h"
@@ -18,6 +19,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "../lib/string.h"
 #include "install_source.h"
 
 __attribute__((used, section(".requests_start_marker")))
@@ -68,6 +70,18 @@ static volatile struct limine_module_request module_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST,
+    .revision = 0
+};
+
+__attribute__((used, section(".requests")))
+static volatile struct limine_smp_request smp_request = {
+    .id = LIMINE_SMP_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
@@ -75,6 +89,9 @@ static volatile LIMINE_REQUESTS_END_MARKER;
 struct limine_framebuffer *fb_ptr = 0;
 // export memmap request response for kernel use
 struct limine_memmap_response *memmap_response_ptr = 0;
+struct limine_rsdp_response *rsdp_response_ptr = 0;
+struct limine_smp_response *smp_response_ptr = 0;
+uint64_t hhdm_offset_global = 0;
 
 bool boot_get_kernel_image(const void **address, uint32_t *size){
     if(!address || !size || !kernel_file_request.response
@@ -90,18 +107,35 @@ bool boot_get_kernel_image(const void **address, uint32_t *size){
 }
 
 bool boot_get_efi_loader(const void **address, uint32_t *size){
-    if(!address || !size || !module_request.response
-       || module_request.response->module_count==0
-       || !module_request.response->modules
-       || !module_request.response->modules[0]
-       || !module_request.response->modules[0]->address
-       || module_request.response->modules[0]->size<2
-       || module_request.response->modules[0]->size>UINT32_MAX){
-        return false;
-    }
-    *address=module_request.response->modules[0]->address;
-    *size=(uint32_t)module_request.response->modules[0]->size;
+    uint64_t module_size;
+    if(!size || !boot_get_module("/EFI/BOOT/BOOTX64.EFI",address,
+                                 &module_size)
+       || module_size>UINT32_MAX) return false;
+    *size=(uint32_t)module_size;
     return true;
+}
+
+static bool module_path_matches(const char *actual, const char *expected){
+    if(!actual || !expected) return false;
+    if(strcmp(actual,expected)==0) return true;
+    size_t actual_length=strlen(actual);
+    size_t expected_length=strlen(expected);
+    return actual_length>=expected_length
+        && strcmp(actual+actual_length-expected_length,expected)==0;
+}
+
+bool boot_get_module(const char *path, const void **address, uint64_t *size){
+    if(!path || !address || !size || !module_request.response
+       || !module_request.response->modules) return false;
+    for(uint64_t index=0;index<module_request.response->module_count;index++){
+        struct limine_file *module=module_request.response->modules[index];
+        if(!module || !module->address || module->size<2
+           || !module_path_matches(module->path,path)) continue;
+        *address=module->address;
+        *size=module->size;
+        return true;
+    }
+    return false;
 }
 
 void _start(void) {
@@ -130,9 +164,14 @@ void _start(void) {
         serial_write_string("[EARLY WARN] framebuffer bpp !=32, trying to continue\n");
     }
     memmap_response_ptr = memmap_request.response;
+    rsdp_response_ptr = rsdp_request.response;
+    smp_response_ptr = smp_request.response;
 
     // HHDM для VGA 0xB8000 в higher half (иначе #PF и ребут)
-    if(hhdm_request.response) vga_set_hhdm(hhdm_request.response->offset);
+    if(hhdm_request.response){
+        hhdm_offset_global=hhdm_request.response->offset;
+        vga_set_hhdm(hhdm_offset_global);
+    }
     else vga_set_hhdm(0);
     if(hhdm_request.response && kernel_address_request.response){
         mmio_configure(hhdm_request.response->offset,
@@ -141,6 +180,8 @@ void _start(void) {
         ahci_set_address_mapping(hhdm_request.response->offset,
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);
+        hda_set_address_mapping(kernel_address_request.response->physical_base,
+                                kernel_address_request.response->virtual_base);
         xhci_set_address_mapping(hhdm_request.response->offset,
                                  kernel_address_request.response->physical_base,
                                  kernel_address_request.response->virtual_base);

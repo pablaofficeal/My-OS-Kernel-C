@@ -5,17 +5,99 @@
 #include "../drivers/gop.h"
 #include "../drivers/vga.h"
 #include "../drivers/mouse/ps2_mouse.h"
+#include "../drivers/mouse/usb_mouse.h"
 #include "../drivers/storage/block_device.h"
 #include "../drivers/storage/ahci.h"
 #include "../drivers/storage/storage_probe.h"
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
 #include "../drivers/timer.h"
-#include "../fs/fat32.h"
+#include "../drivers/audio.h"
+#include "../fs/vfs.h"
 #include "system_info.h"
 #include "../lib/string.h"
+#include "../drivers/power.h"
+#include "../drivers/keyboard.h"
+#include "../kernel/scheduler.h"
+#include "../kernel/process.h"
+#include "../mm/pmm.h"
 #include <stdint.h>
 #include <stdbool.h>
+
+#define INSTALL_WORKER_PRIORITY 3
+
+static volatile bool filesystem_syscall_busy;
+static struct install_status install_job;
+static struct install_log install_history;
+static char install_device[STORAGE_DEVICE_NAME_CAPACITY];
+static char install_serial[STORAGE_SERIAL_CAPACITY];
+
+static bool readable(const void *buffer, uint64_t size){
+    return process_user_buffer(buffer,size,false);
+}
+
+static bool writable(void *buffer, uint64_t size){
+    return process_user_buffer(buffer,size,true);
+}
+
+static bool readable_string(const char *text){
+    return process_user_string(text,4096);
+}
+
+static void filesystem_syscall_lock(void){
+    while(__atomic_test_and_set(&filesystem_syscall_busy,__ATOMIC_ACQUIRE))
+        scheduler_yield();
+}
+
+static void filesystem_syscall_unlock(void){
+    __atomic_clear(&filesystem_syscall_busy,__ATOMIC_RELEASE);
+}
+
+static void install_progress(uint32_t progress, const char *stage){
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
+    install_job.progress=progress;
+    if(stage) strncpy(install_job.stage,stage,sizeof(install_job.stage)-1);
+    install_job.stage[sizeof(install_job.stage)-1]='\0';
+    if(stage){
+        if(install_history.count==INSTALL_LOG_CAPACITY){
+            for(uint32_t index=1;index<INSTALL_LOG_CAPACITY;index++)
+                install_history.entries[index-1]=install_history.entries[index];
+            install_history.count--;
+        }
+        struct install_log_entry *entry=
+            &install_history.entries[install_history.count++];
+        entry->progress=progress;
+        strncpy(entry->stage,stage,sizeof(entry->stage)-1);
+        entry->stage[sizeof(entry->stage)-1]='\0';
+    }
+    if(flags&(1ULL<<9)) __asm__ volatile("sti":::"memory");
+}
+
+static void install_worker(void *argument){
+    (void)argument;
+    filesystem_syscall_lock();
+    int32_t result=vfs_format_uefi_device_progress(
+        install_device,install_serial,install_progress);
+    filesystem_syscall_unlock();
+    install_job.result=result;
+    if(result<0){
+        install_job.state=3;
+        install_progress(100,"Installation failed");
+    } else {
+        install_job.state=2;
+        install_progress(92,"Disk layout complete");
+    }
+}
+
+void install_report_ui_crash(int32_t status){
+    if(install_job.state!=0) return;
+    memset(&install_job,0,sizeof(install_job));
+    memset(&install_history,0,sizeof(install_history));
+    install_job.state=3;
+    install_job.result=status;
+    install_progress(0,"Installer UI crashed");
+}
 
 static void print_hex(uint64_t v){
     const char *h="0123456789ABCDEF";
@@ -36,7 +118,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             const char *s = (const char*)(uintptr_t)a1;
             uint64_t len = a2;
             // fd в a3 игнорируем, пишем в serial+gop
-            if(!s) return -1;
+            if(!readable(s,len)) return -1;
             for(uint64_t i=0;i<len;i++){ serial_putc(s[i]); gop_putc(s[i]); }
             return (int64_t)len;
         }
@@ -59,53 +141,265 @@ int64_t syscall_handler(struct syscall_regs *r){
             gop_draw_line(x0,y0,x1,y1,c);
             return 0;
         }
+        case SYS_FB_INFO: {
+            struct framebuffer_info *info=(struct framebuffer_info*)(uintptr_t)a1;
+            if(!writable(info,sizeof(*info))) return -1;
+            memset(info,0,sizeof(*info));
+            info->width=gop_get_width();
+            info->height=gop_get_height();
+            info->pitch=gop_get_pitch();
+            info->size_bytes=gop_get_framebuffer_size_bytes();
+            info->bpp=gop_get_bpp();
+            info->available=gop_is_available() ? 1 : 0;
+            strncpy(info->protocol_name,gop_get_protocol_name(),
+                    sizeof(info->protocol_name)-1);
+            return 0;
+        }
+        case SYS_DRAW_TEXT: {
+            struct framebuffer_text_request *request=
+                (struct framebuffer_text_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))
+               || !readable_string(request->text)) return -1;
+            gop_draw_text_at(request->x,request->y,request->text,
+                             request->fg,request->bg);
+            return 0;
+        }
+        case SYS_DRAW_TEXT_SIZED: {
+            struct framebuffer_text_request *request=
+                (struct framebuffer_text_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))
+               || !readable_string(request->text)) return -1;
+            gop_draw_text_sized_at(request->x,request->y,request->text,
+                                   request->fg,request->bg,request->size);
+            return 0;
+        }
+        case SYS_SCROLL_RECT_UP: {
+            struct framebuffer_scroll_request *request=
+                (struct framebuffer_scroll_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))) return -1;
+            gop_scroll_rect_up(request->x,request->y,request->w,request->h,
+                               request->amount,request->fill_color);
+            return 0;
+        }
+        case SYS_SET_FONT_FACE:
+            if(a1>GOP_FONT_BOLD) return -1;
+            gop_set_font_face((enum gop_font_face)a1);
+            return 0;
+        case SYS_GET_FONT_FACE:
+            return (int64_t)gop_get_font_face();
+        case SYS_FB_BEGIN_UPDATE:
+            mouse_begin_framebuffer_update();
+            return 0;
+        case SYS_FB_END_UPDATE:
+            mouse_end_framebuffer_update();
+            return 0;
         case SYS_GETPID:
-            return 42;
+            return process_current_pid();
+        case SYS_EXEC:
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || (a2 && !readable_string((const char*)(uintptr_t)a2)))
+                return -1;
+            if(a2 && strlen((const char*)(uintptr_t)a2)
+                     >=PROCESS_COMMAND_LINE_CAPACITY) return -1;
+            return process_spawn_module((const char*)(uintptr_t)a1,
+                                        (const char*)(uintptr_t)a2);
+        case SYS_GET_COMMAND_LINE:
+            if(a2>PROCESS_COMMAND_LINE_CAPACITY) return -1;
+            if(!writable((void*)(uintptr_t)a1,(uint32_t)a2)) return -1;
+            return process_command_line((char*)(uintptr_t)a1,(uint32_t)a2);
+        case SYS_GET_PROCESS_NAME:
+            if(a2>32 || !writable((void*)(uintptr_t)a1,(uint32_t)a2)) return -1;
+            return process_name((char*)(uintptr_t)a1,(uint32_t)a2);
+        case SYS_ENV_GET:
+            if(a3>PROCESS_ENVIRONMENT_VALUE_CAPACITY) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !writable((void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            return process_environment_get((const char*)(uintptr_t)a1,
+                                           (char*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_ENV_SET:
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            return process_environment_set((const char*)(uintptr_t)a1,
+                                           (const char*)(uintptr_t)a2);
+        case SYS_ENV_UNSET:
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            return process_environment_unset((const char*)(uintptr_t)a1);
+        case SYS_ENV_LIST: {
+            if(a2>PROCESS_ENVIRONMENT_LIMIT) return -1;
+            struct process_environment_variable *variables=
+                (struct process_environment_variable*)(uintptr_t)a1;
+            if(a2 && !writable(variables,a2*sizeof(*variables))) return -1;
+            struct process_environment_entry entries[PROCESS_ENVIRONMENT_LIMIT];
+            int32_t count=process_environment_list(entries,(uint32_t)a2);
+            if(count<0) return count;
+            uint32_t copied=(uint32_t)count<(uint32_t)a2
+                ? (uint32_t)count : (uint32_t)a2;
+            for(uint32_t index=0;index<copied;index++){
+                variables[index].used=entries[index].used ? 1 : 0;
+                strncpy(variables[index].name,entries[index].name,
+                        sizeof(variables[index].name)-1);
+                variables[index].name[sizeof(variables[index].name)-1]='\0';
+                strncpy(variables[index].value,entries[index].value,
+                        sizeof(variables[index].value)-1);
+                variables[index].value[sizeof(variables[index].value)-1]='\0';
+            }
+            return count;
+        }
         case SYS_GET_MOUSE: {
             struct mouse_state *out = (struct mouse_state*)(uintptr_t)a1;
-            if(!out) return -1;
+            if(!writable(out,sizeof(*out))) return -1;
+            ps2_mouse_poll();
+            usb_mouse_poll();
             *out = mouse_get_state();
             return 0;
         }
-        case SYS_FILE_OPEN:
-            return fat32_open((const char*)(uintptr_t)a1);
-        case SYS_FILE_READ:
-            return fat32_read((int32_t)a1,(void*)(uintptr_t)a2,(uint32_t)a3);
-        case SYS_FILE_DELETE:
-            return fat32_delete((const char*)(uintptr_t)a1);
-        case SYS_FILE_RENAME:
-            return fat32_rename((const char*)(uintptr_t)a1,
-                                (const char*)(uintptr_t)a2);
-        case SYS_FILE_MOVE:
-            return fat32_move((const char*)(uintptr_t)a1,
-                              (const char*)(uintptr_t)a2);
-        case SYS_DIR_LIST:
-            return fat32_list((const char*)(uintptr_t)a1,
-                              (struct fs_directory_entry*)(uintptr_t)a2,
-                              (uint32_t)a3);
-        case SYS_FILE_CREATE:
-            return fat32_create_file((const char*)(uintptr_t)a1);
-        case SYS_DIR_CREATE:
-            return fat32_create_directory((const char*)(uintptr_t)a1);
+        case SYS_MOUSE_DEBUG_GET:
+            return mouse_get_debug_overlay() ? 1 : 0;
+        case SYS_MOUSE_DEBUG_SET:
+            mouse_set_debug_overlay(a1!=0);
+            return 0;
+        case SYS_FILE_OPEN: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_open((const char*)(uintptr_t)a1);
+            if(result>=0){
+                int32_t descriptor=process_fd_install(result);
+                if(descriptor<0) (void)vfs_close(result);
+                result=descriptor;
+            }
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_READ: {
+            if(!writable((void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            int32_t descriptor=process_fd_resolve((int32_t)a1);
+            if(descriptor<0) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_read(descriptor,(void*)(uintptr_t)a2,(uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_CLOSE: {
+            filesystem_syscall_lock();
+            int32_t result=process_fd_close((int32_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_DELETE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_delete((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_RENAME: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_rename((const char*)(uintptr_t)a1,
+                                      (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_MOVE: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_move((const char*)(uintptr_t)a1,
+                                    (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_DIR_LIST: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !writable((void*)(uintptr_t)a2,
+                            (uint64_t)(uint32_t)a3
+                                *sizeof(struct fs_directory_entry))) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_list((const char*)(uintptr_t)a1,
+                                    (struct fs_directory_entry*)(uintptr_t)a2,
+                                    (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_CREATE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_create_file((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_DIR_CREATE: {
+            if(!readable_string((const char*)(uintptr_t)a1)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_create_directory((const char*)(uintptr_t)a1);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_DISK_LIST:
+            if(!writable((void*)(uintptr_t)a1,
+                         (uint64_t)(uint32_t)a2
+                             *sizeof(struct storage_device_info))) return -1;
             return block_device_list((struct storage_device_info*)(uintptr_t)a1,
                                      (uint32_t)a2);
         case SYS_STORAGE_CONTROLLERS:
+            if(!writable((void*)(uintptr_t)a1,
+                         (uint64_t)(uint32_t)a2
+                             *sizeof(struct storage_controller_info))) return -1;
             return storage_controller_list(
                 (struct storage_controller_info*)(uintptr_t)a1,(uint32_t)a2);
-        case SYS_FAT32_FORMAT:
-            return fat32_format_device((const char*)(uintptr_t)a1,
-                                       (const char*)(uintptr_t)a2,
-                                       (const char*)(uintptr_t)a3);
-        case SYS_FAT32_FORMAT_FORCE:
-            return fat32_format_device_force((const char*)(uintptr_t)a1,
-                                             (const char*)(uintptr_t)a2);
-        case SYS_FAT32_FORMAT_UEFI:
-            return fat32_format_uefi_device((const char*)(uintptr_t)a1,
-                                            (const char*)(uintptr_t)a2);
-        case SYS_FILE_WRITE:
-            return fat32_write_file((const char*)(uintptr_t)a1,
-                                    (const void*)(uintptr_t)a2,(uint32_t)a3);
+        case SYS_FAT32_FORMAT: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)
+               || (a3 && !readable_string((const char*)(uintptr_t)a3))) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_format_device((const char*)(uintptr_t)a1,
+                                             (const char*)(uintptr_t)a2,
+                                             (const char*)(uintptr_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FAT32_FORMAT_FORCE: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_format_device_force((const char*)(uintptr_t)a1,
+                                                   (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FAT32_FORMAT_UEFI: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_format_uefi_device((const char*)(uintptr_t)a1,
+                                                  (const char*)(uintptr_t)a2);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_WRITE: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable((const void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_write_file((const char*)(uintptr_t)a1,
+                                          (const void*)(uintptr_t)a2,
+                                          (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
+        case SYS_FILE_APPEND: {
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable((const void*)(uintptr_t)a2,(uint32_t)a3)) return -1;
+            filesystem_syscall_lock();
+            int32_t result=vfs_append_file((const char*)(uintptr_t)a1,
+                                           (const void*)(uintptr_t)a2,
+                                           (uint32_t)a3);
+            filesystem_syscall_unlock();
+            return result;
+        }
         case SYS_USB_RESCAN: {
             uint32_t count=block_device_rescan_usb();
             struct xhci_probe_stats xhci_stats;
@@ -113,6 +407,7 @@ int64_t syscall_handler(struct syscall_regs *r){
             xhci_get_probe_stats(&xhci_stats);
             ehci_get_probe_stats(&ehci_stats);
             struct usb_scan_status *status=(struct usb_scan_status*)(uintptr_t)a1;
+            if(status && !writable(status,sizeof(*status))) return -1;
             if(status){
                 status->xhci_controllers=xhci_stats.controllers;
                 status->xhci_connected_ports=xhci_stats.connected_ports;
@@ -149,12 +444,16 @@ int64_t syscall_handler(struct syscall_regs *r){
                   ehci_stats.connected_ports,ehci_stats.high_speed_ports,
                   ehci_stats.mass_storage_devices,ehci_stats.failures,
                   ehci_stats.last_stage);
-            if(count && !fat32_is_mounted()) (void)fat32_init();
+            if(count){
+                filesystem_syscall_lock();
+                if(!vfs_is_root_mounted()) (void)vfs_mount_root();
+                filesystem_syscall_unlock();
+            }
             return count;
         }
         case SYS_CPU_INFO: {
             struct cpu_monitor_info *info=(struct cpu_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             memset(info,0,sizeof(*info));
             strncpy(info->name,system_info_cpu_name(),sizeof(info->name)-1);
             info->logical_processors=system_info_logical_processors();
@@ -165,9 +464,9 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_MEMORY_INFO: {
             struct memory_monitor_info *info=(struct memory_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             info->total_bytes=system_info_total_ram_bytes();
-            info->available_bytes=system_info_usable_ram_bytes();
+            info->available_bytes=pmm_free_bytes();
             info->used_bytes=info->total_bytes>info->available_bytes
                 ? info->total_bytes-info->available_bytes : 0;
             info->framebuffer_bytes=gop_get_framebuffer_size_bytes();
@@ -175,7 +474,7 @@ int64_t syscall_handler(struct syscall_regs *r){
         }
         case SYS_DISK_STATS: {
             struct disk_monitor_info *info=(struct disk_monitor_info*)(uintptr_t)a1;
-            if(!info) return -1;
+            if(!writable(info,sizeof(*info))) return -1;
             memset(info,0,sizeof(*info));
             info->device_count=block_device_count();
             for(uint32_t index=0;index<info->device_count;index++){
@@ -187,16 +486,94 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         }
         case SYS_EXIT:
-            serial_write_string("[SYSCALL] exit\n");
-            gop_write("[SYSCALL] exit\n");
-            for(;;) __asm__ volatile("cli; hlt");
+            process_exit_current((int32_t)a1);
+        case SYS_WAIT:
+            if(a2 && !writable((void*)(uintptr_t)a2,sizeof(int32_t))) return -1;
+            return process_wait((uint32_t)a1,(int32_t*)(uintptr_t)a2,a3!=0);
         case SYS_SLEEP:
             if(a1>UINT32_MAX) return -1;
-            // Real HW: PIT IRQ may not arrive via APIC – используем busy-wait чтобы не виснуть на hlt.
-            // 1ms ~ 1e6 nop+pause, калибровка грубая но не требует timer_tick.
-            for(volatile uint64_t wait=0;wait<a1*1000000ULL;wait++){
-                __asm__ volatile("pause");
+            scheduler_sleep((uint32_t)a1);
+            return 0;
+        case SYS_REBOOT:
+            power_reboot();
+            return 0;
+        case SYS_SHUTDOWN:
+            power_shutdown();
+            return 0;
+        case SYS_BATTERY_INFO: {
+            struct battery_info *out=(struct battery_info*)(uintptr_t)a1;
+            if(!writable(out,sizeof(*out))) return -1;
+            return power_battery_get(out) ? 0 : -1;
+        }
+        case SYS_AUDIO_GET_STATUS: {
+            struct audio_status *out=(struct audio_status*)(uintptr_t)a1;
+            if(!writable(out,sizeof(*out))) return -1;
+            audio_get_status(out);
+            return 0;
+        }
+        case SYS_AUDIO_GET_VOLUME:
+            audio_update();
+            return audio_get_volume();
+        case SYS_AUDIO_SET_VOLUME:
+            if(a1>100) return -1;
+            audio_set_volume((uint8_t)a1);
+            return 0;
+        case SYS_AUDIO_IS_MUTED:
+            audio_update();
+            return audio_is_muted() ? 1 : 0;
+        case SYS_AUDIO_SET_MUTED:
+            audio_set_muted(a1!=0);
+            return 0;
+        case SYS_AUDIO_ADJUST_VOLUME:
+            audio_adjust_volume((int8_t)(int64_t)a1);
+            return 0;
+        case SYS_AUDIO_PLAY_TEST_SOUND:
+            audio_play_test_sound();
+            return 0;
+        case SYS_AUDIO_UPDATE:
+            audio_update();
+            return 0;
+        case SYS_AUDIO_SELECT_OUTPUT_DEVICE:
+            klogf(KLOG_INFO, "audio: syscall select output device index=%u",
+                  (uint32_t)a1);
+            return audio_select_output_device((uint32_t)a1) ? 0 : -1;
+        case SYS_SCHED_YIELD:
+            scheduler_yield();
+            return 0;
+        case SYS_GETCHAR:
+            return (uint8_t)keyboard_getc();
+        case SYS_TRY_GETCHAR: {
+            char character;
+            return keyboard_try_getc(&character) ? (uint8_t)character : -1;
+        }
+        case SYS_INSTALL_START:
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -10;
+            if(!readable_string((const char*)(uintptr_t)a1)
+               || !readable_string((const char*)(uintptr_t)a2)) return -11;
+            if(install_job.state==1) return -12;
+            memset(&install_job,0,sizeof(install_job));
+            memset(&install_history,0,sizeof(install_history));
+            strncpy(install_device,(const char*)(uintptr_t)a1,
+                    sizeof(install_device)-1);
+            strncpy(install_serial,(const char*)(uintptr_t)a2,
+                    sizeof(install_serial)-1);
+            install_job.state=1;
+            install_progress(1,"Starting installer worker");
+            if(scheduler_create_thread(install_worker,0,"installer-io",
+                                       INSTALL_WORKER_PRIORITY,-1)<0){
+                install_job.state=3;
+                install_job.result=-1;
+                install_progress(100,"Cannot start installer worker");
+                return -1;
             }
+            return 0;
+        case SYS_INSTALL_STATUS:
+            if(!writable((void*)(uintptr_t)a1,sizeof(install_job))) return -1;
+            *(struct install_status*)(uintptr_t)a1=install_job;
+            return 0;
+        case SYS_INSTALL_LOG:
+            if(!writable((void*)(uintptr_t)a1,sizeof(install_history))) return -1;
+            *(struct install_log*)(uintptr_t)a1=install_history;
             return 0;
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
@@ -206,11 +583,20 @@ int64_t syscall_handler(struct syscall_regs *r){
 
 void syscall_init(void){
     static bool filesystem_checked;
+    static bool audio_checked;
     // IDT 0x80 уже настроен в idt_init с DPL3 (0xEE)
     // используем klog если уже инициализирован, иначе fallback на serial
     // klog_inited проверяется через verbose флаг (если false после init, всё равно работает)
     // просто пишем DEBUG чтобы не спамить primary screen дважды (boot.c уже логирует)
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
+    if(!audio_checked){
+        audio_checked=true;
+        bool screen_logging = klog_is_screen_enabled();
+        klog_set_screen_enabled(false);
+        audio_init();
+        klog_set_screen_enabled(screen_logging);
+        klog(KLOG_INFO, "audio: PC speaker backend ready");
+    }
     if(!filesystem_checked){
         filesystem_checked=true;
         boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage: scanning PCI controllers");
@@ -239,14 +625,15 @@ void syscall_init(void){
               ehci_stats.high_speed_ports,ehci_stats.mass_storage_devices,
               ehci_stats.failures,ehci_stats.last_stage);
         klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
-        if(fat32_init()){
-            klogf(KLOG_OK,"fat32: mounted from %s",fat32_device_name());
+        if(vfs_mount_root()){
+            klogf(KLOG_OK,"vfs: root mounted from %s",vfs_root_device_name());
             // Читаем конфиги созданные установщиком (если есть) – для проверки инсталла
             {
-                int32_t fd=fat32_open("/purec/install.cfg");
+                int32_t fd=vfs_open("/purec/install.cfg");
                 if(fd>=0){
                     char cfg_buf[512]={0};
-                    int32_t r=fat32_read(fd,cfg_buf,sizeof(cfg_buf)-1);
+                    int32_t r=vfs_read(fd,cfg_buf,sizeof(cfg_buf)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         // лог без экрана? показываем кратко
                         klogf(KLOG_INFO,"config: /purec/install.cfg (%d bytes)",r);
@@ -264,10 +651,11 @@ void syscall_init(void){
                         }
                     }
                 }
-                fd=fat32_open("/etc/hostname");
+                fd=vfs_open("/etc/hostname");
                 if(fd>=0){
                     char hn[64]={0};
-                    int32_t r=fat32_read(fd,hn,sizeof(hn)-1);
+                    int32_t r=vfs_read(fd,hn,sizeof(hn)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         hn[r]=0;
                         // trim newline
@@ -275,10 +663,11 @@ void syscall_init(void){
                         klogf(KLOG_INFO,"config: hostname='%s'",hn);
                     }
                 }
-                fd=fat32_open("/boot/loader.cfg");
+                fd=vfs_open("/boot/loader.cfg");
                 if(fd>=0){
                     char lb[256]={0};
-                    int32_t r=fat32_read(fd,lb,sizeof(lb)-1);
+                    int32_t r=vfs_read(fd,lb,sizeof(lb)-1);
+                    (void)vfs_close(fd);
                     if(r>0){
                         lb[r]=0;
                         klogf(KLOG_DEBUG,"config: /boot/loader.cfg %d bytes",r);
@@ -286,7 +675,7 @@ void syscall_init(void){
                 }
             }
         } else {
-            klog(KLOG_WARN,"fat32: no PURECOS FAT32 volume found (use 'install' or 'mkfs.fat32' to create)");
+            klog(KLOG_WARN,"vfs: no PURECOS FAT32 root found (use 'install' or 'mkfs.fat32' to create)");
         }
         boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "storage and filesystem probe complete");
     }

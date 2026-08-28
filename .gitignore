@@ -13,3 +13,12 @@ iso_limine/boot/limine/limine-bios.sys
 *.log
 *.elf
 *repair-backups/
+init
+installer
+libpurec.a
+snake
+nano
+terminal
+iso_limine/bin/program/nano
+iso_limine/bin/program/terminal
+system

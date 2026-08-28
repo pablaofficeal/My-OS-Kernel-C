@@ -1,7 +1,11 @@
 #include "userspace.h"
-#include "terminal/terminal.h"
+#include "apps/desktop_apps.h"
+#include "apps/audio_panel.h"
+#include "explorer/explorer.h"
 #include "monitor/monitor.h"
-#include "../drivers/gop.h"
+#include "syscall.h"
+#include "audio.h"
+#include "display.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/mouse/usb_mouse.h"
@@ -9,6 +13,8 @@
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "../kernel/scheduler.h"
+#include "../kernel/syscall.h"
 #include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -26,12 +32,42 @@
 #define ICON_Y           48
 #define ICON_W           58
 #define ICON_H           72
+#define ICON_DIRTY_W     72
+#define ICON_DIRTY_H     72
+#define PERSISTENT_LOG_CHUNK (64 * 1024)
+#define PERSISTENT_LOG_MAX_BYTES 0xFFFFFFFFULL
+#define PERSISTENT_LOG_PATH "/kernel.log"
 
 static uint32_t desktop_width;
 static uint32_t desktop_height;
+static uint32_t explorer_icon_x=348;
 static uint32_t htop_icon_x=420;
 static uint32_t terminal_icon_x=500;
+static uint32_t explorer_icon_y=ICON_Y;
+static uint32_t htop_icon_y=ICON_Y;
+static uint32_t terminal_icon_y=ICON_Y;
+static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
+static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
+static uint32_t installer_icon_x=256,installer_icon_y=ICON_Y;
+static bool installer_icon_visible=true;
+static bool external_program_active;
 static uint8_t previous_mouse_buttons;
+static bool power_menu_visible;
+static int8_t dragged_icon=-1;
+static int32_t icon_drag_offset_x;
+static int32_t icon_drag_offset_y;
+static bool icon_drag_moved;
+static bool icon_layout_ready;
+static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
+static void redraw_scene(void);
+
+static bool external_program_has_input_focus(void){
+    return __atomic_load_n(&external_program_active,__ATOMIC_ACQUIRE);
+}
+
+static void set_external_program_input_focus(bool active){
+    __atomic_store_n(&external_program_active,active,__ATOMIC_RELEASE);
+}
 
 static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
                          uint32_t width, uint32_t height){
@@ -40,49 +76,178 @@ static bool point_inside(int32_t x, int32_t y, uint32_t left, uint32_t top,
 }
 
 static void draw_htop_icon(void){
-    gop_draw_rect(htop_icon_x,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(htop_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_line(htop_icon_x+11,ICON_Y+31,htop_icon_x+19,ICON_Y+21,0x89B4FA);
-    gop_draw_line(htop_icon_x+19,ICON_Y+21,htop_icon_x+28,ICON_Y+27,0x89B4FA);
-    gop_draw_line(htop_icon_x+28,ICON_Y+27,htop_icon_x+39,ICON_Y+14,0xA6E3A1);
-    gop_draw_line(htop_icon_x+39,ICON_Y+14,htop_icon_x+47,ICON_Y+19,0xA6E3A1);
-    gop_draw_text_at(htop_icon_x+9,ICON_Y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
+    uint32_t y=htop_icon_y;
+    display_draw_rect(htop_icon_x,y,ICON_W,50,0x313244);
+    display_draw_rect(htop_icon_x+7,y+8,44,30,0x1E1E2E);
+    display_draw_line(htop_icon_x+11,y+31,htop_icon_x+19,y+21,0x89B4FA);
+    display_draw_line(htop_icon_x+19,y+21,htop_icon_x+28,y+27,0x89B4FA);
+    display_draw_line(htop_icon_x+28,y+27,htop_icon_x+39,y+14,0xA6E3A1);
+    display_draw_line(htop_icon_x+39,y+14,htop_icon_x+47,y+19,0xA6E3A1);
+    display_draw_text_at(htop_icon_x+9,y+55,"HTOP",TOPBAR_FG,DESKTOP_BG);
+}
+
+static void draw_explorer_icon(void){
+    uint32_t y=explorer_icon_y;
+    display_draw_rect(explorer_icon_x,y,ICON_W,50,0x313244);
+    display_draw_rect(explorer_icon_x+7,y+13,44,27,0xF9E2AF);
+    display_draw_rect(explorer_icon_x+10,y+9,20,8,0xF9E2AF);
+    display_draw_rect(explorer_icon_x+10,y+18,38,4,0xFAB387);
+    display_draw_text_at(explorer_icon_x+7,y+55,"Files",TOPBAR_FG,DESKTOP_BG);
 }
 
 static void draw_terminal_icon(void){
-    gop_draw_rect(terminal_icon_x,ICON_Y,ICON_W,50,0x313244);
-    gop_draw_rect(terminal_icon_x+7,ICON_Y+8,44,30,0x1E1E2E);
-    gop_draw_text_at(terminal_icon_x+13,ICON_Y+18,">_",0xA6E3A1,0x1E1E2E);
-    gop_draw_text_at(terminal_icon_x,ICON_Y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
+    uint32_t y=terminal_icon_y;
+    display_draw_rect(terminal_icon_x,y,ICON_W,50,0x313244);
+    display_draw_rect(terminal_icon_x+7,y+8,44,30,0x1E1E2E);
+    display_draw_text_at(terminal_icon_x+13,y+18,">_",0xA6E3A1,0x1E1E2E);
+    display_draw_text_at(terminal_icon_x,y+55,"Terminal",TOPBAR_FG,DESKTOP_BG);
+}
+
+static void draw_app_icon(
+    uint32_t ix,
+    uint32_t iy,
+    const char *symbol,
+    const char *label,
+    uint32_t color
+){
+    display_draw_rect(ix,iy,ICON_W,50,0x313244);
+    display_draw_rect(ix+8,iy+7,42,34,color);
+    display_draw_text_sized_at(ix+17,iy+17,symbol,0x1E1E2E,color,12);
+    display_draw_text_at(ix+4,iy+55,label,TOPBAR_FG,DESKTOP_BG);
+}
+
+static void draw_desktop_icons(void){
+    draw_explorer_icon();
+    draw_htop_icon();
+    draw_terminal_icon();
+    draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
+    draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
+    draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
+    if(installer_icon_visible)
+        draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
+}
+
+static bool installation_present(void){
+    int64_t descriptor=userspace_syscall(
+        SYS_OPEN,(uint64_t)"/purec/install.cfg",0,0);
+    if(descriptor<0) return false;
+    (void)userspace_syscall(SYS_CLOSE,(uint64_t)descriptor,0,0);
+    return true;
+}
+
+static void launch_installer(void){
+    (void)userspace_run_program("/bin/installer");
+    installer_icon_visible=!installation_present();
+}
+
+static bool installer_requires_restart(int32_t status){
+    if(status>=128) return true;
+    struct install_status install={0};
+    return userspace_syscall(SYS_INSTALL_STATUS,
+                             (uint64_t)&install,0,0)>=0
+        && install.state!=0;
+}
+
+int32_t userspace_run_program(const char *path){
+    if(!path || external_program_has_input_focus()) return -1;
+    set_external_program_input_focus(true);
+    bool supervise_installer=strcmp(path,"/bin/installer")==0;
+    bool installer_pinned=false;
+    int32_t status=-1;
+    for(;;){
+        int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        if(pid<0){
+            if(supervise_installer
+               && (installer_pinned || installer_requires_restart(-1))){
+                scheduler_sleep(20);
+                continue;
+            }
+            break;
+        }
+        status=0;
+        (void)userspace_syscall(SYS_WAIT,(uint64_t)pid,
+                                (uint64_t)&status,0);
+        if(supervise_installer && status>=128)
+            install_report_ui_crash(status);
+        if(!supervise_installer || !installer_requires_restart(status)) break;
+        installer_pinned=true;
+        klogf(KLOG_ERROR,
+              "installer: process crashed status=%d; restarting without desktop redraw",
+              status);
+        scheduler_sleep(20);
+    }
+    set_external_program_input_focus(false);
+    redraw_scene();
+    return status;
+}
+
+static void draw_power_button(void){
+    uint32_t x=desktop_width-38;
+    display_draw_rect(x,3,30,22,0x45475A);
+    display_draw_text_at(x+7,9,"PWR",TOPBAR_FG,0x45475A);
+}
+
+static void draw_power_menu(void){
+    if(!power_menu_visible) return;
+    uint32_t x=desktop_width-158;
+    display_draw_rect(x,28,150,62,0x45475A);
+    display_draw_rect(x+2,30,146,28,0x1E1E2E);
+    display_draw_rect(x+2,60,146,28,0x1E1E2E);
+    display_draw_text_at(x+12,39,"Restart",TOPBAR_FG,0x1E1E2E);
+    display_draw_text_at(x+12,69,"Power off",0xF38BA8,0x1E1E2E);
 }
 
 static void draw_desktop(void){
-    desktop_width=gop_get_width();
-    desktop_height=gop_get_height();
+    desktop_width=display_get_width();
+    desktop_height=display_get_height();
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
-    htop_icon_x=desktop_width>560 ? 420 : desktop_width-140;
-    terminal_icon_x=htop_icon_x+72;
+    if(!icon_layout_ready){
+        explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
+        htop_icon_x=explorer_icon_x+72;
+        terminal_icon_x=htop_icon_x+72;
+        if(desktop_width<=560){
+            clock_icon_y=130;
+            calculator_icon_y=130;
+            calendar_icon_y=130;
+        }
+        icon_layout_ready=true;
+    }
 
-    gop_clear(DESKTOP_BG);
-    gop_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
-    gop_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
-    gop_draw_text_at(120,8,"Userspace 0.2.0",TOPBAR_FG,TOPBAR_BG);
-
-    const char *status="desktop: icons  |  drag title bars  |  help";
-    uint32_t status_width=(uint32_t)strlen(status)*8;
-    uint32_t status_x=desktop_width>status_width+12
-        ? desktop_width-status_width-12 : 220;
-    gop_draw_text_at(status_x,8,status,TOPBAR_MUTED,TOPBAR_BG);
-    draw_htop_icon();
-    draw_terminal_icon();
+    display_clear(DESKTOP_BG);
+    display_draw_rect(0,0,desktop_width,TOPBAR_HEIGHT,TOPBAR_BG);
+    display_draw_text_at(12,8,"PureC OS",TOPBAR_ACCENT,TOPBAR_BG);
+    audio_panel_draw(desktop_width);
+    draw_desktop_icons();
+    draw_power_button();
 }
 
 static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
-    if(terminal_is_visible()) terminal_redraw();
     if(monitor_window_is_visible()) monitor_window_draw();
+    if(explorer_window_is_visible()) explorer_window_draw();
+    if(desktop_apps_is_visible()) desktop_apps_draw();
+    audio_panel_draw(desktop_width);
+    draw_power_menu();
+    mouse_end_framebuffer_update();
+}
+
+static void redraw_icon_move(
+    uint32_t old_x,
+    uint32_t old_y,
+    uint32_t new_x,
+    uint32_t new_y
+){
+    mouse_begin_framebuffer_update();
+    display_draw_rect(old_x,old_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
+    display_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
+    draw_desktop_icons();
+    if(monitor_window_is_visible()) monitor_window_draw();
+    if(explorer_window_is_visible()) explorer_window_draw();
+    if(desktop_apps_is_visible()) desktop_apps_draw();
+    audio_panel_draw(desktop_width);
+    draw_power_menu();
     mouse_end_framebuffer_update();
 }
 
@@ -93,30 +258,139 @@ static void handle_desktop_mouse(void){
     bool redraw=false;
     bool consumed=false;
 
-    if(monitor_window_is_visible()){
+    if(pressed && point_inside(mouse.x,mouse.y,desktop_width-38,3,30,22)){
+        power_menu_visible=!power_menu_visible;
+        consumed=true;
+        redraw=true;
+    }
+    if(!consumed){
+        bool audio_redraw=false;
+        consumed=audio_panel_handle_mouse(
+            mouse.x,mouse.y,mouse.buttons,pressed,released,
+            desktop_width,&audio_redraw
+        );
+        redraw=redraw || audio_redraw;
+    }
+    if(!consumed && pressed && power_menu_visible){
+        uint32_t menu_x=desktop_width-158;
+        if(point_inside(mouse.x,mouse.y,menu_x,28,150,30)){
+            desktop_apps_save_time();
+            (void)userspace_syscall(SYS_REBOOT,0,0,0);
+            consumed=true;
+        } else if(point_inside(mouse.x,mouse.y,menu_x,58,150,32)){
+            desktop_apps_save_time();
+            (void)userspace_syscall(SYS_SHUTDOWN,0,0,0);
+            consumed=true;
+        } else {
+            power_menu_visible=false;
+            redraw=true;
+        }
+    }
+
+    if(!consumed && desktop_apps_is_visible()){
+        bool app_redraw=false;
+        consumed=desktop_apps_handle_mouse(
+            mouse.x,mouse.y,mouse.buttons,pressed,released,
+            desktop_width,desktop_height,&app_redraw
+        );
+        redraw=redraw || app_redraw;
+    }
+    if(!consumed && explorer_window_is_visible()){
+        consumed=explorer_window_contains_point(mouse.x,mouse.y);
+        redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
+                                             pressed,released,
+                                             desktop_width,desktop_height);
+    }
+    if(!consumed && monitor_window_is_visible()){
         consumed=monitor_window_contains_point(mouse.x,mouse.y);
         redraw=monitor_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
                                             pressed,released,
-                                            desktop_width,desktop_height);
+                                            desktop_width,desktop_height)
+            || redraw;
     }
-    if(!consumed && terminal_is_visible()){
-        consumed=terminal_contains_point(mouse.x,mouse.y);
-        redraw=terminal_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                      pressed,released,
-                                      desktop_width,desktop_height) || redraw;
+    uint32_t *icon_positions[7]={
+        &explorer_icon_x,
+        &htop_icon_x,
+        &terminal_icon_x,
+        &clock_icon_x,
+        &calculator_icon_x,
+        &calendar_icon_x,
+        &installer_icon_x
+    };
+    uint32_t *icon_y_positions[7]={
+        &explorer_icon_y,
+        &htop_icon_y,
+        &terminal_icon_y,
+        &clock_icon_y,
+        &calculator_icon_y,
+        &calendar_icon_y,
+        &installer_icon_y
+    };
+    if(pressed && !consumed){
+        for(int8_t index=0;index<7;index++){
+            if(index==6 && !installer_icon_visible) continue;
+            if(point_inside(
+                    mouse.x,mouse.y,
+                    *icon_positions[index],*icon_y_positions[index],
+                    ICON_W,ICON_H
+                )){
+                dragged_icon=index;
+                icon_drag_offset_x=mouse.x-(int32_t)*icon_positions[index];
+                icon_drag_offset_y=mouse.y-(int32_t)*icon_y_positions[index];
+                icon_drag_moved=false;
+                consumed=true;
+                break;
+            }
+        }
     }
-    if(pressed && !consumed
-       && point_inside(mouse.x,mouse.y,htop_icon_x,ICON_Y,ICON_W,ICON_H)){
-        monitor_run();
-        redraw=true;
-    } else if(pressed && !consumed
-              && point_inside(mouse.x,mouse.y,terminal_icon_x,ICON_Y,
-                              ICON_W,ICON_H)){
-        terminal_set_visible(true);
-        redraw=true;
+    if(dragged_icon>=0 && (mouse.buttons&1)){
+        uint32_t old_x=*icon_positions[dragged_icon];
+        uint32_t old_y=*icon_y_positions[dragged_icon];
+        int32_t next_x=mouse.x-icon_drag_offset_x;
+        int32_t next_y=mouse.y-icon_drag_offset_y;
+        if(next_x<0) next_x=0;
+        if(next_x>(int32_t)desktop_width-ICON_W) next_x=(int32_t)desktop_width-ICON_W;
+        if(next_y<TOPBAR_HEIGHT) next_y=TOPBAR_HEIGHT;
+        if(next_y>(int32_t)desktop_height-ICON_H) next_y=(int32_t)desktop_height-ICON_H;
+        if((uint32_t)next_x!=*icon_positions[dragged_icon]
+           || (uint32_t)next_y!=*icon_y_positions[dragged_icon]) icon_drag_moved=true;
+        *icon_positions[dragged_icon]=(uint32_t)next_x;
+        *icon_y_positions[dragged_icon]=(uint32_t)next_y;
+        if(old_x!=*icon_positions[dragged_icon]
+           || old_y!=*icon_y_positions[dragged_icon]){
+            redraw_icon_move(
+                old_x,old_y,
+                *icon_positions[dragged_icon],
+                *icon_y_positions[dragged_icon]
+            );
+        }
+    }
+    if(released && dragged_icon>=0){
+        int8_t icon=dragged_icon;
+        dragged_icon=-1;
+        if(!icon_drag_moved){
+            if(icon==0) explorer_open(desktop_width,desktop_height);
+            else if(icon==1) monitor_run();
+            else if(icon==2)
+                (void)userspace_run_program("/bin/program/terminal");
+            else if(icon==6) launch_installer();
+            else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
+        }
+        if(!icon_drag_moved) redraw=true;
     }
     previous_mouse_buttons=mouse.buttons;
     if(redraw) redraw_scene();
+}
+
+static bool handle_special_keyboard(void){
+    uint8_t key;
+    bool handled=false;
+
+    while(keyboard_try_get_special(&key)){
+        if(audio_panel_handle_special_key(key)) handled=true;
+    }
+
+    return handled;
 }
 
 uint32_t userspace_get_width(void){ return desktop_width; }
@@ -125,15 +399,15 @@ uint32_t userspace_get_height(void){ return desktop_height; }
 void userspace_set_mouse_debug(bool enabled){
     mouse_set_debug_overlay(enabled);
     if(!enabled){
-        gop_draw_rect(MOUSE_DEBUG_X,MOUSE_DEBUG_Y,MOUSE_DEBUG_W,MOUSE_DEBUG_H,DESKTOP_BG);
+        display_draw_rect(MOUSE_DEBUG_X,MOUSE_DEBUG_Y,MOUSE_DEBUG_W,MOUSE_DEBUG_H,DESKTOP_BG);
     }
     mouse_redraw();
 }
 
 void userspace_init(void){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: validating framebuffer");
-    if(!gop_is_available()) kernel_panic("userspace requires an active framebuffer");
-    if(gop_get_width() < 320 || gop_get_height() < 240)
+    if(!display_is_available()) kernel_panic("userspace requires an active framebuffer");
+    if(display_get_width() < 320 || display_get_height() < 240)
         kernel_panic("framebuffer is too small for userspace");
 
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing keyboard");
@@ -143,29 +417,142 @@ void userspace_init(void){
     // ring and serial, while panic forcibly restores a visible panic screen.
     klog_set_screen_enabled(false);
     draw_desktop();
-    boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initializing terminal");
-    terminal_init(desktop_width,desktop_height);
-    terminal_set_visible(true);
-
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: configuring mouse bounds");
     mouse_set_bounds((int32_t)desktop_width,(int32_t)desktop_height);
-    userspace_set_mouse_debug(true);
+    userspace_set_mouse_debug(false);
+    audio_panel_init();
+    desktop_apps_init();
+    installer_icon_visible=!installation_present();
     klog_set_screen_enabled(false);
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_INIT, "userspace: initialization complete");
 }
 
-void userspace_run(void){
+void userspace_input_thread(void *arg){
+    (void)arg;
+    klog(KLOG_INFO, "sched: input thread started (mouse polling + desktop)");
     for(;;){
         ps2_mouse_poll();
         usb_mouse_poll();
         keyboard_poll();
+        userspace_audio_update();
+        if(external_program_has_input_focus()){
+            scheduler_sleep(10);
+            continue;
+        }
+        if(handle_special_keyboard()) redraw_scene();
+        handle_desktop_mouse();
+        monitor_window_update();
+        desktop_apps_update();
+        scheduler_yield();
+        // Small pause to avoid 100% busy
+        __asm__ volatile("pause");
+    }
+}
+
+void userspace_keyboard_thread(void *arg){
+    (void)arg;
+    klog(KLOG_INFO, "sched: desktop keyboard thread started");
+    for(;;){
+        if(external_program_has_input_focus()){
+            scheduler_sleep(10);
+            continue;
+        }
+        char c;
+        while(!external_program_has_input_focus() && keyboard_try_getc(&c)){
+            if(!desktop_apps_handle_key(c))
+                (void)explorer_window_handle_key(c);
+        }
+        // Yield so input thread can run even while terminal is idle
+        scheduler_yield();
+        for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
+    }
+}
+
+void userspace_log_thread(void *arg){
+    (void)arg;
+    uint64_t cursor=0;
+    uint64_t file_size=0;
+    uint32_t pending=0;
+    uint64_t last_flush_tick=timer_ticks();
+    int64_t clear_result=userspace_syscall(
+        SYS_FILE_WRITE,(uint64_t)PERSISTENT_LOG_PATH,0,0);
+    if(clear_result<0){
+        klogf(KLOG_ERROR,
+              "klog-disk: cannot create %s status=%d; persistent logging disabled",
+              PERSISTENT_LOG_PATH,(int)clear_result);
+        scheduler_exit();
+        return;
+    }
+    klogf(KLOG_OK,
+          "klog-disk: streaming enabled path=%s chunk=%u max_bytes=%llu ram_ring=%u",
+          PERSISTENT_LOG_PATH,PERSISTENT_LOG_CHUNK,
+          PERSISTENT_LOG_MAX_BYTES,8U*1024U*1024U);
+    for(;;){
+        bool data_lost=false;
+        uint32_t amount=klog_read_since(
+            &cursor,persistent_log_buffer+pending,
+            sizeof(persistent_log_buffer)-pending,
+            &data_lost);
+        pending+=amount;
+        if(data_lost){
+            klogf(KLOG_ERROR,
+                  "klog-disk: RAM ring overrun cursor advanced to=%llu total=%llu",
+                  cursor,klog_total_bytes());
+        }
+        uint64_t now=timer_ticks();
+        if(pending==0 || (pending<sizeof(persistent_log_buffer)
+                          && now-last_flush_tick<1000)){
+            scheduler_yield();
+            continue;
+        }
+        uint64_t remaining=PERSISTENT_LOG_MAX_BYTES-file_size;
+        amount=pending;
+        if(amount>remaining) amount=(uint32_t)remaining;
+        if(amount==0){
+            klogf(KLOG_WARN,
+                  "klog-disk: file reached FAT32 limit bytes=%llu path=%s",
+                  file_size,PERSISTENT_LOG_PATH);
+            scheduler_exit();
+            return;
+        }
+        int64_t result=userspace_syscall(
+            SYS_FILE_APPEND,(uint64_t)PERSISTENT_LOG_PATH,
+            (uint64_t)persistent_log_buffer,amount);
+        if(result<0 || (uint32_t)result!=amount){
+            klogf(KLOG_ERROR,
+                  "klog-disk: append failed status=%d requested=%u written=%u file_size=%llu",
+                  (int)result,amount,result>0 ? (uint32_t)result : 0,file_size);
+            scheduler_exit();
+            return;
+        }
+        file_size+=(uint32_t)result;
+        pending=0;
+        last_flush_tick=now;
+        scheduler_yield();
+    }
+}
+
+void userspace_run(void){
+    // Fallback single-threaded loop (when scheduler not available)
+    for(;;){
+        ps2_mouse_poll();
+        usb_mouse_poll();
+        keyboard_poll();
+        userspace_audio_update();
+        if(external_program_has_input_focus()){
+            scheduler_yield();
+            continue;
+        }
+        if(handle_special_keyboard()) redraw_scene();
         handle_desktop_mouse();
 
         char c;
         while(keyboard_try_getc(&c)){
-            if(terminal_is_visible()) terminal_handle_key(c);
+            if(!desktop_apps_handle_key(c))
+                (void)explorer_window_handle_key(c);
         }
         monitor_window_update();
+        desktop_apps_update();
 
         __asm__ volatile("pause");
         for(volatile uint32_t wait=0;wait<10000;wait++){
