@@ -21,13 +21,20 @@ must reference present ring-3 pages and output buffers must also be writable.
 ## Processes
 
 - `SYS_GETPID`: returns the current PID; kernel threads receive PID 0.
-- `SYS_EXEC`: starts a trusted ELF64 Limine module by path and returns its PID.
+- `SYS_EXEC`: starts a trusted ELF64 Limine module by path and returns its PID;
+  `a2` optionally points to a command-line string copied into the child.
 - `SYS_WAIT`: waits for a PID and optionally writes its exit status.
 - `SYS_EXIT`: terminates only the calling process or kernel thread.
 - `SYS_SCHED_YIELD`: voluntarily gives up the current time slice.
 - `SYS_SLEEP`: blocks the calling thread until its timer deadline.
 - `SYS_GETCHAR`: returns one keyboard character to a foreground program.
 - `SYS_TRY_GETCHAR`: returns a character or `-1` without blocking.
+- `SYS_GET_COMMAND_LINE`: copies the current process command line to `a1`;
+  `a2` is the destination capacity.
+- `SYS_ENV_GET`, `SYS_ENV_SET`, `SYS_ENV_UNSET`: access the current process
+  environment. Names are limited to 31 characters and values to 127.
+- `SYS_ENV_LIST`: copies a bounded list of environment entries. A child gets a
+  private copy of its parent's environment during `SYS_EXEC`.
 - `SYS_INSTALL_START`: starts the privileged asynchronous UEFI install worker.
 - `SYS_INSTALL_STATUS`: returns the real install stage, progress and result.
 - `SYS_INSTALL_LOG`: returns the bounded history of install stages and their
@@ -38,7 +45,9 @@ of the address space remains supervisor-only. The installer module receives
 the storage-administration capability; ordinary processes cannot format disks.
 
 `/bin/init` is mandatory and must receive PID 1. Boot-media applications are
-addressed as `/bin/installer` and `/bin/snake`.
+addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal` and
+`/bin/program/nano`. The minimal shell does not search `PATH`; executable names
+must be absolute.
 
 ## File Descriptors
 VFS descriptors follow the Linux shape:
