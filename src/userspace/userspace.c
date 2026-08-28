@@ -134,16 +134,40 @@ static void launch_installer(void){
     installer_icon_visible=!installation_present();
 }
 
+static bool installer_requires_restart(int32_t status){
+    if(status>=128) return true;
+    struct install_status install={0};
+    return userspace_syscall(SYS_INSTALL_STATUS,
+                             (uint64_t)&install,0,0)>=0
+        && install.state!=0;
+}
+
 int32_t userspace_run_program(const char *path){
     if(!path || external_program_active) return -1;
     external_program_active=true;
-    int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
-    if(pid<0){
-        external_program_active=false;
-        return -1;
+    bool supervise_installer=strcmp(path,"/bin/installer")==0;
+    bool installer_pinned=false;
+    int32_t status=-1;
+    for(;;){
+        int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        if(pid<0){
+            if(supervise_installer
+               && (installer_pinned || installer_requires_restart(-1))){
+                scheduler_sleep(20);
+                continue;
+            }
+            break;
+        }
+        status=0;
+        (void)userspace_syscall(SYS_WAIT,(uint64_t)pid,
+                                (uint64_t)&status,0);
+        if(!supervise_installer || !installer_requires_restart(status)) break;
+        installer_pinned=true;
+        klogf(KLOG_ERROR,
+              "installer: process crashed status=%d; restarting without desktop redraw",
+              status);
+        scheduler_sleep(20);
     }
-    int32_t status=0;
-    (void)userspace_syscall(SYS_WAIT,(uint64_t)pid,(uint64_t)&status,0);
     external_program_active=false;
     redraw_scene();
     return status;

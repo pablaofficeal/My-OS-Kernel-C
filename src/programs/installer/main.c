@@ -225,15 +225,20 @@ static void wait_after_success(const struct install_status *status){
     }
 }
 
-static void run_installation(void){
+static void run_installation(bool start_job){
     struct install_status status={0};
-    status.state=1;
-    status.progress=1;
-    pc_copy(status.stage,"Preparing installation",sizeof(status.stage));
-    draw_progress(&status);
-    if(pc_install_start(disks[selected_disk].name,
-                        disks[selected_disk].serial)<0){
-        wait_after_failure("Cannot start installation",4);
+    if(start_job){
+        status.state=1;
+        status.progress=1;
+        pc_copy(status.stage,"Preparing installation",sizeof(status.stage));
+        draw_progress(&status);
+        if(pc_install_start(disks[selected_disk].name,
+                            disks[selected_disk].serial)<0){
+            wait_after_failure("Cannot start installation",4);
+            return;
+        }
+    } else if(!pc_install_status(&status)){
+        wait_after_failure("Cannot resume installation",5);
         return;
     }
     uint32_t previous_progress=UINT32_MAX;
@@ -280,6 +285,11 @@ static int installer_main(void){
         return 2;
     }
     selected_disk=0;
+    struct install_status existing_status={0};
+    if(pc_install_status(&existing_status) && existing_status.state!=0){
+        installation_committed=true;
+        run_installation(false);
+    }
     draw_disk_selection();
     struct mouse_state previous={0};
     bool mouse_armed=false;
@@ -295,7 +305,7 @@ static int installer_main(void){
             draw_disk_selection();
         } else if(key=='\r' || key=='\n'){
             installation_committed=true;
-            run_installation();
+            run_installation(true);
             draw_disk_selection();
             previous=(struct mouse_state){0};
             mouse_armed=false;
@@ -323,7 +333,7 @@ static int installer_main(void){
                && inside(mouse.x,mouse.y,panel_x+28,button_y,150,40)) return 0;
             if(inside(mouse.x,mouse.y,panel_x+panel_width-218,button_y,190,40)){
                 installation_committed=true;
-                run_installation();
+                run_installation(true);
                 draw_disk_selection();
                 previous=(struct mouse_state){0};
                 mouse_armed=false;
