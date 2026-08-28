@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
-#define KLOG_RING_SIZE (256 * 1024)
+#define KLOG_RING_SIZE (8 * 1024 * 1024)
 
 static char klog_ring[KLOG_RING_SIZE];
 static uint32_t klog_ring_pos = 0;

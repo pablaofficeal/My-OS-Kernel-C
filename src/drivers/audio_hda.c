@@ -25,6 +25,7 @@
 #define HDA_STREAM_BASE 0x80
 #define HDA_STREAM_DESCRIPTOR_SIZE 0x20
 #define HDA_STREAM_CTL 0x00
+#define HDA_STREAM_STS 0x03
 #define HDA_STREAM_CBL 0x08
 #define HDA_STREAM_LVI 0x0C
 #define HDA_STREAM_FMT 0x12
@@ -39,12 +40,17 @@
 #define HDA_PARAMETER_FUNCTION_GROUP_TYPE 0x05
 #define HDA_PARAMETER_WIDGET_CAPS 0x09
 #define HDA_PARAMETER_PIN_CAPS 0x0C
+#define HDA_PARAMETER_INPUT_AMP_CAPS 0x0D
 #define HDA_PARAMETER_CONNECTION_LIST_LENGTH 0x0E
+#define HDA_PARAMETER_OUTPUT_AMP_CAPS 0x12
 #define HDA_FUNCTION_GROUP_AUDIO 0x01
 #define HDA_PIN_CAP_OUTPUT 0x10
 #define HDA_VERB_GET_PARAMETER 0x0F00
 #define HDA_VERB_GET_CONFIG_DEFAULT 0xF1C
+#define HDA_VERB_GET_CONNECTION_LIST_ENTRY 0xF02
+#define HDA_VERB_GET_POWER_STATE 0xF05
 #define HDA_VERB_SET_CONNECTION_SELECT 0x701
+#define HDA_VERB_SET_POWER_STATE 0x705
 #define HDA_VERB_SET_STREAM_FORMAT 0x200
 #define HDA_VERB_SET_CONVERTER_STREAM_CHANNEL 0x706
 #define HDA_VERB_SET_PIN_WIDGET_CONTROL 0x707
@@ -57,6 +63,11 @@
 #define HDA_PCM_BYTES (HDA_PCM_SAMPLES * 4U)
 #define HDA_MAX_OUTPUT_DEVICES 16U
 #define HDA_NO_OUTPUT_DEVICE UINT32_MAX
+#define HDA_MAX_CODEC_NODES 128U
+#define HDA_WIDGET_CAP_INPUT_AMP 0x00000002U
+#define HDA_WIDGET_CAP_OUTPUT_AMP 0x00000004U
+#define HDA_WIDGET_CAP_AMP_OVERRIDE 0x00000008U
+#define HDA_PIN_CAP_EAPD 0x00010000U
 
 struct hda_bdl_entry {
     uint64_t address;
@@ -78,6 +89,10 @@ static uint8_t function_group_node;
 static struct hda_output_device_info output_devices[HDA_MAX_OUTPUT_DEVICES];
 static uint32_t output_device_count;
 static uint32_t selected_output_index;
+static uint8_t widget_types[HDA_MAX_CODEC_NODES];
+static uint32_t widget_capabilities[HDA_MAX_CODEC_NODES];
+static uint32_t widget_connections[HDA_MAX_CODEC_NODES];
+static bool widget_present[HDA_MAX_CODEC_NODES];
 static uint32_t corb[256] __attribute__((aligned(4096)));
 static uint64_t rirb[256] __attribute__((aligned(4096)));
 static struct hda_bdl_entry bdl[2] __attribute__((aligned(128)));
@@ -347,7 +362,10 @@ static bool find_audio_function_group(uint32_t root_subnodes,
 
 static bool register_output_device(uint8_t group, uint8_t dac, uint8_t pin,
                                    uint32_t pin_capabilities,
-                                   uint32_t default_configuration) {
+                                   uint32_t default_configuration,
+                                   const uint8_t *route_nodes,
+                                   const uint8_t *route_connections,
+                                   uint8_t route_length) {
     if (output_device_count >= HDA_MAX_OUTPUT_DEVICES) {
         klogf(KLOG_WARN,
               "audio: HDA output ignored reason=DEVICE_TABLE_FULL codec=%u dac=%u pin=%u limit=%u",
@@ -361,13 +379,130 @@ static bool register_output_device(uint8_t group, uint8_t dac, uint8_t pin,
     output_devices[index].pin_node = pin;
     output_devices[index].pin_capabilities = pin_capabilities;
     output_devices[index].default_configuration = default_configuration;
+    output_devices[index].route_length = route_length;
+    for (uint8_t route_index = 0; route_index < route_length; route_index++) {
+        output_devices[index].route_nodes[route_index] = route_nodes[route_index];
+        output_devices[index].route_connections[route_index] =
+            route_connections[route_index];
+    }
     klogf(KLOG_INFO,
-          "audio: HDA output registered index=%u codec=%u group=%u dac=%u pin=%u pin_caps=0x%08x config=0x%08x device_type=%u connectivity=%u association=%u sequence=%u",
-          index, codec_address, group, dac, pin, pin_capabilities,
+          "audio: HDA output registered index=%u codec=%u group=%u dac=%u pin=%u route_length=%u pin_caps=0x%08x config=0x%08x device_type=%u connectivity=%u association=%u sequence=%u",
+          index, codec_address, group, dac, pin, route_length, pin_capabilities,
           default_configuration, (default_configuration >> 20) & 0x0F,
           default_configuration >> 30, (default_configuration >> 4) & 0x0F,
           default_configuration & 0x0F);
+    for (uint8_t route_index = 0; route_index < route_length; route_index++) {
+        klogf(KLOG_INFO,
+              "audio: HDA output index=%u route[%u] node=%u connection=%u next=%u",
+              index, route_index, route_nodes[route_index],
+              route_connections[route_index],
+              route_index + 1U < route_length ? route_nodes[route_index + 1U] : dac);
+    }
     return true;
+}
+
+static uint8_t connection_count(uint32_t parameter) {
+    return (uint8_t)(parameter & 0x7F);
+}
+
+static bool read_connection_nid(uint8_t node, uint8_t index, uint8_t *nid) {
+    uint32_t parameter = widget_connections[node];
+    bool long_form = (parameter & 0x80) != 0;
+    uint8_t entries_per_response = long_form ? 2 : 4;
+    uint8_t request_index = (uint8_t)(index
+        - index % entries_per_response);
+    uint32_t response = 0;
+    if (!codec_read_command(node, HDA_VERB_GET_CONNECTION_LIST_ENTRY,
+                            request_index, &response)) {
+        klogf(KLOG_WARN,
+              "audio: codec%u node=%u connection read failed index=%u request=%u long=%u",
+              codec_address, node, index, request_index, long_form ? 1 : 0);
+        return false;
+    }
+    uint8_t slot = (uint8_t)(index - request_index);
+    uint32_t encoded;
+    bool range;
+    if (long_form) {
+        encoded = (response >> (slot * 16U)) & 0xFFFF;
+        range = (encoded & 0x8000) != 0;
+        *nid = (uint8_t)(encoded & 0x7FFF);
+    } else {
+        encoded = (response >> (slot * 8U)) & 0xFF;
+        range = (encoded & 0x80) != 0;
+        *nid = (uint8_t)(encoded & 0x7F);
+    }
+    klogf(KLOG_DEBUG,
+          "audio: codec%u node=%u connection index=%u request=%u response=0x%08x encoded=0x%x nid=%u range=%u long=%u",
+          codec_address, node, index, request_index, response, encoded, *nid,
+          range ? 1 : 0, long_form ? 1 : 0);
+    if (range) {
+        klogf(KLOG_WARN,
+              "audio: codec%u node=%u connection index=%u uses range encoding; endpoint nid=%u",
+              codec_address, node, index, *nid);
+    }
+    return true;
+}
+
+static uint32_t discover_routes_from_node(
+    uint8_t group,
+    uint8_t pin,
+    uint32_t pin_capabilities,
+    uint32_t default_configuration,
+    uint8_t node,
+    uint8_t depth,
+    uint8_t *route_nodes,
+    uint8_t *route_connections,
+    bool *visited
+) {
+    if (depth >= HDA_MAX_ROUTE_NODES) {
+        klogf(KLOG_WARN,
+              "audio: codec%u route from pin=%u stopped reason=DEPTH_LIMIT node=%u depth=%u",
+              codec_address, pin, node, depth);
+        return 0;
+    }
+    uint8_t count = connection_count(widget_connections[node]);
+    klogf(KLOG_DEBUG,
+          "audio: codec%u route walk pin=%u node=%u type=%u depth=%u connections=%u",
+          codec_address, pin, node, widget_types[node], depth, count);
+    uint32_t found = 0;
+    for (uint8_t index = 0; index < count; index++) {
+        uint8_t next = 0;
+        if (!read_connection_nid(node, index, &next)) {
+            continue;
+        }
+        if (next >= HDA_MAX_CODEC_NODES || !widget_present[next]) {
+            klogf(KLOG_WARN,
+                  "audio: codec%u route pin=%u node=%u connection=%u rejected next=%u reason=UNKNOWN_WIDGET",
+                  codec_address, pin, node, index, next);
+            continue;
+        }
+        route_nodes[depth] = node;
+        route_connections[depth] = index;
+        if (widget_types[next] == HDA_WIDGET_AUDIO_OUTPUT) {
+            klogf(KLOG_OK,
+                  "audio: codec%u route found pin=%u dac=%u depth=%u via_node=%u connection=%u",
+                  codec_address, pin, next, depth + 1U, node, index);
+            if (register_output_device(group, next, pin, pin_capabilities,
+                                       default_configuration, route_nodes,
+                                       route_connections,
+                                       (uint8_t)(depth + 1U))) {
+                found++;
+            }
+            continue;
+        }
+        if (visited[next]) {
+            klogf(KLOG_WARN,
+                  "audio: codec%u route pin=%u cycle avoided current=%u next=%u",
+                  codec_address, pin, node, next);
+            continue;
+        }
+        visited[next] = true;
+        found += discover_routes_from_node(
+            group, pin, pin_capabilities, default_configuration, next,
+            (uint8_t)(depth + 1U), route_nodes, route_connections, visited);
+        visited[next] = false;
+    }
+    return found;
 }
 
 static bool discover_codec(void) {
@@ -398,7 +533,10 @@ static bool discover_codec(void) {
     klogf(KLOG_INFO,
           "audio: codec%u widget enumeration start=%u count=%u output_table_before=%u",
           codec_address, first_widget, widget_count, output_device_count);
-    uint8_t output_dacs[HDA_MAX_OUTPUT_DEVICES];
+    memset(widget_types, 0, sizeof(widget_types));
+    memset(widget_capabilities, 0, sizeof(widget_capabilities));
+    memset(widget_connections, 0, sizeof(widget_connections));
+    memset(widget_present, 0, sizeof(widget_present));
     uint32_t output_dac_count = 0;
     uint8_t output_pins[HDA_MAX_OUTPUT_DEVICES];
     uint32_t output_pin_caps[HDA_MAX_OUTPUT_DEVICES];
@@ -418,23 +556,22 @@ static bool discover_codec(void) {
             node, HDA_PARAMETER_CONNECTION_LIST_LENGTH, &connection_length);
         klogf(KLOG_DEBUG, "audio: codec%u node%u caps=0x%08x type=0x%x connections=0x%08x",
               codec_address, node, capabilities, type, connection_length);
+        if (node < HDA_MAX_CODEC_NODES) {
+            widget_present[node] = true;
+            widget_types[node] = type;
+            widget_capabilities[node] = capabilities;
+            widget_connections[node] = connection_length;
+        }
         if (!connection_query) {
             klogf(KLOG_WARN,
                   "audio: codec%u node%u connection list length query failed",
                   codec_address, node);
         }
         if (type == HDA_WIDGET_AUDIO_OUTPUT) {
-            if (output_dac_count < HDA_MAX_OUTPUT_DEVICES) {
-                output_dacs[output_dac_count] = node;
-                klogf(KLOG_INFO,
-                      "audio: codec%u DAC candidate local_index=%u node=%u",
-                      codec_address, output_dac_count, node);
-                output_dac_count++;
-            } else {
-                klogf(KLOG_WARN,
-                      "audio: codec%u DAC ignored node=%u reason=LOCAL_TABLE_FULL",
-                      codec_address, node);
-            }
+            klogf(KLOG_INFO,
+                  "audio: codec%u DAC candidate local_index=%u node=%u",
+                  codec_address, output_dac_count, node);
+            output_dac_count++;
         }
         if (type == HDA_WIDGET_PIN) {
             uint32_t pin_capabilities = 0;
@@ -495,14 +632,23 @@ static bool discover_codec(void) {
     }
     uint32_t registered_before = output_device_count;
     for (uint32_t pin_index = 0; pin_index < output_pin_count; pin_index++) {
-        for (uint32_t dac_index = 0; dac_index < output_dac_count; dac_index++) {
-            klogf(KLOG_DEBUG,
-                  "audio: codec%u route candidate dac_index=%u dac=%u pin_index=%u pin=%u",
-                  codec_address, dac_index, output_dacs[dac_index], pin_index,
-                  output_pins[pin_index]);
-            (void)register_output_device(
-                first_group, output_dacs[dac_index], output_pins[pin_index],
-                output_pin_caps[pin_index], output_pin_configs[pin_index]);
+        uint8_t route_nodes[HDA_MAX_ROUTE_NODES] = {0};
+        uint8_t route_connections[HDA_MAX_ROUTE_NODES] = {0};
+        bool visited[HDA_MAX_CODEC_NODES] = {false};
+        uint8_t pin = output_pins[pin_index];
+        visited[pin] = true;
+        uint32_t routes = discover_routes_from_node(
+            first_group, pin, output_pin_caps[pin_index],
+            output_pin_configs[pin_index], pin, 0, route_nodes,
+            route_connections, visited);
+        if (routes == 0) {
+            klogf(KLOG_WARN,
+                  "audio: codec%u output pin=%u rejected reason=NO_PATH_TO_DAC",
+                  codec_address, pin);
+        } else {
+            klogf(KLOG_OK,
+                  "audio: codec%u output pin=%u topology routes=%u",
+                  codec_address, pin, routes);
         }
     }
     klogf(KLOG_OK,
@@ -512,28 +658,160 @@ static bool discover_codec(void) {
     return output_device_count > registered_before;
 }
 
-static bool configure_codec(void) {
+static bool set_widget_power_d0(uint8_t node) {
+    if (!codec_command(node, HDA_VERB_SET_POWER_STATE, 0)) {
+        klogf(KLOG_ERROR,
+              "audio: codec%u power D0 set failed node=%u",
+              codec_address, node);
+        return false;
+    }
+    uint32_t state = 0;
+    if (!codec_read_command(node, HDA_VERB_GET_POWER_STATE, 0, &state)) {
+        klogf(KLOG_WARN,
+              "audio: codec%u power state readback failed node=%u",
+              codec_address, node);
+        return true;
+    }
+    klogf((state & 0x0F) == 0 ? KLOG_DEBUG : KLOG_WARN,
+          "audio: codec%u power node=%u requested=D0 actual=%u raw=0x%08x",
+          codec_address, node, state & 0x0F, state);
+    return true;
+}
+
+static uint8_t amp_zero_db_gain(uint8_t node, uint8_t parameter,
+                                uint32_t widget_caps) {
+    uint8_t capability_node =
+        (widget_caps & HDA_WIDGET_CAP_AMP_OVERRIDE) != 0
+            ? node : function_group_node;
+    uint32_t capabilities = 0;
+    if (!codec_parameter(capability_node, parameter, &capabilities)) {
+        klogf(KLOG_WARN,
+              "audio: codec%u amp caps query failed widget=%u capability_node=%u parameter=0x%02x using_gain=0",
+              codec_address, node, capability_node, parameter);
+        return 0;
+    }
+    uint8_t gain = (uint8_t)(capabilities & 0x7F);
+    klogf(KLOG_DEBUG,
+          "audio: codec%u amp caps widget=%u capability_node=%u parameter=0x%02x raw=0x%08x zero_db_gain=%u steps=%u step_size=%u mute=%u",
+          codec_address, node, capability_node, parameter, capabilities, gain,
+          (capabilities >> 8) & 0x7F, (capabilities >> 16) & 0x7F,
+          capabilities >> 31);
+    return gain;
+}
+
+static bool unmute_route_widget(uint8_t node, uint8_t connection,
+                                uint32_t capabilities) {
+    bool ready = true;
+    if ((capabilities & HDA_WIDGET_CAP_INPUT_AMP) != 0) {
+        uint8_t gain = amp_zero_db_gain(
+            node, HDA_PARAMETER_INPUT_AMP_CAPS, capabilities);
+        uint16_t payload = (uint16_t)(0x7000
+            | ((uint16_t)connection << 8) | gain);
+        if (!codec_command(node, HDA_VERB_SET_AMP_GAIN_MUTE, payload)) {
+            klogf(KLOG_ERROR,
+                  "audio: codec%u input amp unmute failed node=%u connection=%u payload=0x%04x",
+                  codec_address, node, connection, payload);
+            ready = false;
+        } else {
+            klogf(KLOG_DEBUG,
+                  "audio: codec%u input amp unmuted node=%u connection=%u payload=0x%04x",
+                  codec_address, node, connection, payload);
+        }
+    } else {
+        klogf(KLOG_DEBUG,
+              "audio: codec%u node=%u has no input amp",
+              codec_address, node);
+    }
+    if ((capabilities & HDA_WIDGET_CAP_OUTPUT_AMP) != 0) {
+        uint8_t gain = amp_zero_db_gain(
+            node, HDA_PARAMETER_OUTPUT_AMP_CAPS, capabilities);
+        uint16_t payload = (uint16_t)(0xB000 | gain);
+        if (!codec_command(node, HDA_VERB_SET_AMP_GAIN_MUTE, payload)) {
+            klogf(KLOG_ERROR,
+                  "audio: codec%u output amp unmute failed node=%u",
+                  codec_address, node);
+            ready = false;
+        } else {
+            klogf(KLOG_DEBUG,
+                  "audio: codec%u output amp unmuted node=%u payload=0x%04x",
+                  codec_address, node, payload);
+        }
+    } else {
+        klogf(KLOG_DEBUG,
+              "audio: codec%u node=%u has no output amp",
+              codec_address, node);
+    }
+    return ready;
+}
+
+static bool configure_codec(const struct hda_output_device_info *device) {
     klogf(KLOG_INFO, "audio: configuring codec%u pin=%u dac=%u format=0x%04x",
           codec_address, pin_node, dac_node, HDA_PCM_FORMAT);
+    if (!set_widget_power_d0(function_group_node)) {
+        return false;
+    }
+    if (!set_widget_power_d0(dac_node)) {
+        return false;
+    }
+    for (uint8_t index = device->route_length; index > 0; index--) {
+        uint8_t route_index = (uint8_t)(index - 1U);
+        uint8_t node = device->route_nodes[route_index];
+        uint8_t connection = device->route_connections[route_index];
+        uint32_t capabilities = 0;
+        uint32_t connections = 0;
+        if (!codec_parameter(node, HDA_PARAMETER_WIDGET_CAPS, &capabilities)
+            || !codec_parameter(node, HDA_PARAMETER_CONNECTION_LIST_LENGTH,
+                                &connections)) {
+            klogf(KLOG_ERROR,
+                  "audio: route metadata refresh failed node=%u route_index=%u",
+                  node, route_index);
+            return false;
+        }
+        klogf(KLOG_INFO,
+              "audio: configuring route index=%u node=%u connection=%u type=%u caps=0x%08x",
+              route_index, node, connection,
+              (capabilities >> 20) & 0x0F, capabilities);
+        if (!set_widget_power_d0(node)) {
+            return false;
+        }
+        if (connection_count(connections) > 1) {
+            if (!codec_command(node, HDA_VERB_SET_CONNECTION_SELECT,
+                               connection)) {
+                klogf(KLOG_ERROR,
+                      "audio: route connection select failed node=%u index=%u",
+                      node, connection);
+                return false;
+            }
+            klogf(KLOG_DEBUG,
+                  "audio: route connection selected node=%u index=%u",
+                  node, connection);
+        } else {
+            klogf(KLOG_DEBUG,
+                  "audio: route node=%u has a single connection index=%u",
+                  node, connection);
+        }
+        if (!unmute_route_widget(node, connection, capabilities)) {
+            return false;
+        }
+    }
     if (!codec_command(pin_node, HDA_VERB_SET_PIN_WIDGET_CONTROL, 0x40)) {
         klog(KLOG_ERROR, "audio: failed to enable output pin");
         return false;
     }
     klogf(KLOG_DEBUG, "audio: route stage=PIN_OUTPUT_ENABLE result=OK pin=%u",
           pin_node);
-    if (!codec_command(pin_node, HDA_VERB_SET_EAPD_BTL, 0x02)) {
-        klog(KLOG_ERROR, "audio: failed to enable codec amplifier");
-        return false;
+    if ((device->pin_capabilities & HDA_PIN_CAP_EAPD) != 0) {
+        if (!codec_command(pin_node, HDA_VERB_SET_EAPD_BTL, 0x02)) {
+            klog(KLOG_ERROR, "audio: failed to enable codec amplifier");
+            return false;
+        }
+        klogf(KLOG_DEBUG, "audio: route stage=EAPD_ENABLE result=OK pin=%u",
+              pin_node);
+    } else {
+        klogf(KLOG_DEBUG,
+              "audio: route stage=EAPD_ENABLE skipped pin=%u reason=NOT_SUPPORTED",
+              pin_node);
     }
-    klogf(KLOG_DEBUG, "audio: route stage=EAPD_ENABLE result=OK pin=%u",
-          pin_node);
-    if (!codec_command(pin_node, HDA_VERB_SET_CONNECTION_SELECT, 0)) {
-        klog(KLOG_ERROR, "audio: failed to select pin connection index 0");
-        return false;
-    }
-    klogf(KLOG_DEBUG,
-          "audio: route stage=CONNECTION_SELECT result=OK pin=%u index=0",
-          pin_node);
     if (!codec_command(dac_node, HDA_VERB_SET_CONVERTER_STREAM_CHANNEL,
                        HDA_STREAM_TAG << 4)) {
         klog(KLOG_ERROR, "audio: failed to bind DAC to output stream");
@@ -549,9 +827,23 @@ static bool configure_codec(void) {
     klogf(KLOG_DEBUG,
           "audio: route stage=FORMAT result=OK dac=%u format=0x%04x",
           dac_node, HDA_PCM_FORMAT);
-    if (!codec_command(dac_node, HDA_VERB_SET_AMP_GAIN_MUTE, 0xB07F)) {
-        klog(KLOG_ERROR, "audio: failed to set DAC amplifier gain");
+    uint32_t dac_capabilities = 0;
+    if (!codec_parameter(dac_node, HDA_PARAMETER_WIDGET_CAPS,
+                         &dac_capabilities)) {
+        klog(KLOG_ERROR, "audio: failed to query DAC widget capabilities");
         return false;
+    }
+    if ((dac_capabilities & HDA_WIDGET_CAP_OUTPUT_AMP) != 0) {
+        uint8_t gain = amp_zero_db_gain(
+            dac_node, HDA_PARAMETER_OUTPUT_AMP_CAPS, dac_capabilities);
+        if (!codec_command(dac_node, HDA_VERB_SET_AMP_GAIN_MUTE,
+                           (uint16_t)(0xB000 | gain))) {
+            klog(KLOG_ERROR, "audio: failed to set DAC amplifier gain");
+            return false;
+        }
+    } else {
+        klogf(KLOG_DEBUG, "audio: DAC node=%u has no output amplifier",
+              dac_node);
     }
     klogf(KLOG_OK,
           "audio: codec route configured codec=%u group=%u dac=%u pin=%u",
@@ -583,10 +875,10 @@ static bool configure_stream(void) {
     }
     bdl[0].address = pcm_address;
     bdl[0].length = HDA_PCM_BYTES;
-    bdl[0].flags = 1;
+    bdl[0].flags = 0;
     bdl[1].address = pcm_address + HDA_PCM_BYTES;
     bdl[1].length = HDA_PCM_BYTES;
-    bdl[1].flags = 1;
+    bdl[1].flags = 0;
     klogf(KLOG_DEBUG,
           "audio: HDA BDL[0] addr=0x%llx length=%u flags=0x%x BDL[1] addr=0x%llx length=%u flags=0x%x",
           bdl[0].address, bdl[0].length, bdl[0].flags, bdl[1].address,
@@ -609,6 +901,9 @@ static bool configure_stream(void) {
     klogf(KLOG_DEBUG, "audio: HDA stream BDPU write=0x%08x readback=0x%08x",
           (uint32_t)(bdl_address >> 32),
           *(volatile uint32_t *)(stream + HDA_STREAM_BDPU));
+    *(volatile uint8_t *)(stream + HDA_STREAM_STS) = 0x1C;
+    klogf(KLOG_DEBUG, "audio: HDA stream status cleared readback=0x%02x",
+          *(volatile uint8_t *)(stream + HDA_STREAM_STS));
     write_stream_control(stream, (uint32_t)HDA_STREAM_TAG << 20);
     klogf(KLOG_DEBUG, "audio: HDA stream programmed base=0x%x ctl=0x%08x cbl=%u lvi=%u fmt=0x%04x bdl=0x%llx",
           stream_offset, read_stream_control(stream),
@@ -667,7 +962,7 @@ static bool configure_output_device(uint32_t index) {
           "audio: HDA configure output begin index=%u codec=%u group=%u dac=%u pin=%u config=0x%08x",
           index, codec_address, function_group_node, dac_node, pin_node,
           device->default_configuration);
-    if (!configure_codec()) {
+    if (!configure_codec(device)) {
         klogf(KLOG_ERROR,
               "audio: HDA configure output failed index=%u stage=CODEC_ROUTE",
               index);

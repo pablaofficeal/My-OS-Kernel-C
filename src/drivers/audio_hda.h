@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define HDA_MAX_ROUTE_NODES 16
+
 struct hda_controller_info {
     uint16_t vendor_id;
     uint16_t device_id;
@@ -24,6 +26,9 @@ struct hda_output_device_info {
     uint8_t pin_node;
     uint32_t pin_capabilities;
     uint32_t default_configuration;
+    uint8_t route_length;
+    uint8_t route_nodes[HDA_MAX_ROUTE_NODES];
+    uint8_t route_connections[HDA_MAX_ROUTE_NODES];
 };
 
 void hda_init(void);
