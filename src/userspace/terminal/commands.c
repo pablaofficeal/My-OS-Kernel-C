@@ -580,165 +580,30 @@ static void run_installer(const char *args){
         return;
     }
     terminal_printf("Installer process exited status=%d\n",status);
-    return;
-#if 0
-    terminal_write("\n=== PureC Installer 0.1 (archinstall-like) ===\n");
-    static struct storage_device_info devs[20];
-    int64_t cnt=userspace_syscall(SYS_DISK_LIST,(uint64_t)devs,20,0);
-    if(cnt<=0){
-        terminal_write("No disks found. Run 'disks' to diagnose.\n");
-        return;
-    }
-    terminal_write("Available disks:\n");
-    for(int64_t i=0;i<cnt;i++){
-        uint32_t mb=(uint32_t)(devs[i].sector_count/2048);
-        terminal_printf("  [%d] %s  %u MB  %s  serial=%s  %s  %s\n",
-                        (int)i,devs[i].name,mb,devs[i].model,devs[i].serial,
-                        devs[i].operational?"op":"offline",
-                        devs[i].writable?"rw":"ro");
-        const char *tr=devs[i].transport==STORAGE_TRANSPORT_USB_MSC?"USB-xHCI":
-                       devs[i].transport==STORAGE_TRANSPORT_USB_EHCI?"USB-EHCI":
-                       devs[i].transport==STORAGE_TRANSPORT_AHCI?"AHCI":"ATA";
-        terminal_printf("       transport=%s ctrl=%u port=%u\n",tr,devs[i].controller,devs[i].port);
-    }
-    char arg_dev[STORAGE_DEVICE_NAME_CAPACITY]={0};
-    const char *rem;
-    split_command(args,arg_dev,sizeof(arg_dev),&rem);
-    char devname[STORAGE_DEVICE_NAME_CAPACITY]={0};
-    if(arg_dev[0]){
-        bool ok=false;
-        for(int64_t i=0;i<cnt;i++) if(strcmp(devs[i].name,arg_dev)==0) ok=true;
-        if(!ok){
-            terminal_printf("Device %s not found\n",arg_dev);
-            return;
+}
+
+static void prompt_read_line(const char *prompt, char *out, uint32_t capacity){
+    terminal_write(prompt);
+    uint32_t length=0;
+    memset(out,0,capacity);
+    for(;;){
+        char character=keyboard_getc();
+        if(character=='\r' || character=='\n'){
+            terminal_putc('\n');
+            break;
         }
-        strcpy(devname,arg_dev);
-        terminal_printf("Selected %s from argument\n",devname);
-    } else {
-        char sel[16]={0};
-        prompt_read_line("Select disk number [0]: ",sel,sizeof(sel));
-        if(!sel[0]) strcpy(sel,"0");
-        int idx=sel[0]-'0';
-        // allow multi-digit
-        idx=0;
-        for(uint32_t i=0;sel[i]>='0'&&sel[i]<='9';i++) idx=idx*10+(sel[i]-'0');
-        if(idx<0 || idx>=cnt){
-            terminal_write("Invalid selection\n");
-            return;
+        if((character=='\b' || character==127) && length){
+            length--;
+            terminal_putc('\b');
+            continue;
         }
-        strcpy(devname,devs[idx].name);
-    }
-    char serial[STORAGE_SERIAL_CAPACITY]={0};
-    char model[STORAGE_MODEL_CAPACITY]={0};
-    uint64_t sectors=0;
-    for(int64_t i=0;i<cnt;i++) if(strcmp(devs[i].name,devname)==0){
-        strcpy(serial,devs[i].serial);
-        strcpy(model,devs[i].model);
-        sectors=devs[i].sector_count;
-        if(!devs[i].writable){
-            terminal_printf("Device %s is read-only, cannot install\n",devname);
-            return;
-        }
-        if(!devs[i].operational){
-            terminal_printf("Device %s not operational (check dmesg)\n",devname);
-            return;
-        }
-        break;
-    }
-    terminal_printf("Target: %s  %s  %u MB  serial=%s\n",devname,model,(uint32_t)(sectors/2048),serial);
-    char is_uefi_ans[8]={0};
-    prompt_read_line("UEFI system? [Y/n]: ",is_uefi_ans,sizeof(is_uefi_ans));
-    bool is_uefi = !(is_uefi_ans[0]=='n' || is_uefi_ans[0]=='N');
-    terminal_printf("Mode: %s\n",is_uefi?"UEFI (GPT+ESP)":"BIOS (MBR)");
-    char hostname[32]={0};
-    prompt_read_line("Hostname [purec-os]: ",hostname,sizeof(hostname));
-    if(!hostname[0]) strcpy(hostname,"purec-os");
-    char username[32]={0};
-    prompt_read_line("Username [purec]: ",username,sizeof(username));
-    if(!username[0]) strcpy(username,"purec");
-    terminal_write("\nSummary:\n");
-    terminal_printf("  Device   : %s\n  Hostname : %s\n  User     : %s\n  Mode     : %s\n",devname,hostname,username,is_uefi?"UEFI":"BIOS");
-    terminal_write("This will ERASE all data on the target disk!\n");
-    char confirm[16]={0};
-    prompt_read_line("Type YES to continue: ",confirm,sizeof(confirm));
-    bool is_yes = (strcmp(confirm,"YES")==0 || strcmp(confirm,"yes")==0 || strcmp(confirm,"Yes")==0 || strcmp(confirm,"YES\n")==0 || strcmp(confirm,"y")==0 || strcmp(confirm,"Y")==0);
-    if(!is_yes){
-        terminal_write("Aborted (need YES/yes).\n");
-        return;
-    }
-    int64_t fmt;
-    if(is_uefi){
-        terminal_printf("Formatting %s as UEFI ESP (FAT32 + EFI)...\n",devname);
-        fmt=userspace_syscall(214,(uint64_t)devname,(uint64_t)serial,0);
-    } else {
-        terminal_printf("Formatting %s as PURECOS FAT32...\n",devname);
-        fmt=userspace_syscall(SYS_FAT32_FORMAT,(uint64_t)devname,(uint64_t)serial,(uint64_t)"ERASE");
-        if(fmt==FS_ERROR_NOT_BLANK || fmt==FS_ERROR_BUSY){
-            if(fmt==FS_ERROR_BUSY) terminal_write("Volume busy (mounted), forcing...\n");
-            else terminal_write("Disk not blank, retrying with --force...\n");
-            fmt=userspace_syscall(213,(uint64_t)devname,(uint64_t)serial,0);
+        if(character<' ' || character>'~') continue;
+        if(length+1<capacity){
+            out[length++]=character;
+            terminal_putc(character);
         }
     }
-    if(fmt<0){
-        print_mkfs_error(fmt,devname);
-        terminal_write("Install failed at format\n");
-        terminal_write("Hint: run 'disks' to see mounted device, or reboot and run install on empty disk\n");
-        return;
-    }
-    terminal_write("Creating filesystem structure...\n");
-    installer_create_dir("/boot");
-    installer_create_dir("/etc");
-    installer_create_dir("/home");
-    installer_create_dir("/purec");
-    static char cfg[1024];
-    // /purec/install.cfg
-    memset(cfg,0,sizeof(cfg));
-    strcpy(cfg,"# PureC OS Install Config\n");
-    strcat(cfg,"hostname=");
-    strcat(cfg,hostname);
-    strcat(cfg,"\ndevice=");
-    strcat(cfg,devname);
-    strcat(cfg,"\nserial=");
-    strcat(cfg,serial);
-    strcat(cfg,"\nuser=");
-    strcat(cfg,username);
-    strcat(cfg,"\nversion=0.1.0\ninstalled=1\n");
-    if(!installer_write_file("/purec/install.cfg",cfg)){
-        terminal_write("Warning: failed to write /purec/install.cfg\n");
-    }
-    memset(cfg,0,sizeof(cfg));
-    strcpy(cfg,hostname);
-    strcat(cfg,"\n");
-    installer_write_file("/etc/hostname",cfg);
-    memset(cfg,0,sizeof(cfg));
-    strcpy(cfg,"timeout=3\ndefault=purec\n");
-    strcat(cfg,"hostname=");
-    strcat(cfg,hostname);
-    strcat(cfg,"\n");
-    installer_write_file("/boot/loader.cfg",cfg);
-    char home_path[64]={0};
-    strcpy(home_path,"/home/");
-    strcat(home_path,username);
-    installer_create_dir(home_path);
-    char readme_path[80]={0};
-    strcpy(readme_path,home_path);
-    strcat(readme_path,"/README");
-    memset(cfg,0,sizeof(cfg));
-    strcpy(cfg,"Welcome ");
-    strcat(cfg,username);
-    strcat(cfg, "!\nPureC OS installed.\nHostname: ");
-    strcat(cfg,hostname);
-    strcat(cfg,"\nDevice: ");
-    strcat(cfg,devname);
-    strcat(cfg,"\n");
-    installer_write_file(readme_path,cfg);
-    installer_write_file("/README","PureC OS - see /purec/install.cfg\n");
-    terminal_write("\nInstall complete!\n");
-    terminal_printf("  Config: /purec/install.cfg  Host: %s  User: %s\n",hostname,username);
-    terminal_write("  Files: /etc/hostname /boot/loader.cfg\n");
-    terminal_write("Run 'ls /purec' and 'cat /purec/install.cfg' to verify.\n");
-    terminal_write("Reboot to test auto-mount.\n");
-#endif
+    out[length]='\0';
 }
 
 static void show_help(void){
