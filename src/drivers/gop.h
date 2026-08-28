@@ -25,6 +25,7 @@ void gop_init_from_multiboot(void *mbi); // парсит multiboot2 info
 bool gop_is_available(void);
 uint32_t gop_get_width(void);
 uint32_t gop_get_height(void);
+uint32_t gop_get_pitch(void);
 uint8_t gop_get_bpp(void);
 uint64_t gop_get_framebuffer_size_bytes(void);
 const char *gop_get_protocol_name(void);

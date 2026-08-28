@@ -2,7 +2,7 @@
 #include "commands.h"
 #include "shell_path.h"
 #include "../editor/nano.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 #include "../../lib/string.h"
 #include <stdarg.h>
 #include <stdint.h>
@@ -44,7 +44,7 @@ static uint32_t line_height(void){ return glyph_size+3; }
 static void terminal_scroll(void){
     uint32_t height=line_height();
     if(text_h<=height) return;
-    gop_scroll_rect_up(text_x,text_y,text_w,text_h,height,TERM_BG);
+    display_scroll_rect_up(text_x,text_y,text_w,text_h,height,TERM_BG);
     if(cursor_y>=text_y+height) cursor_y-=height;
     else cursor_y=text_y;
 }
@@ -67,7 +67,7 @@ static void putc_colored(char c, uint32_t color){
     if(c=='\b'){
         if(cursor_x>text_x){
             cursor_x-=glyph_size;
-            gop_draw_rect(cursor_x,cursor_y,glyph_size,glyph_size,TERM_BG);
+            display_draw_rect(cursor_x,cursor_y,glyph_size,glyph_size,TERM_BG);
         }
         return;
     }
@@ -81,7 +81,7 @@ static void putc_colored(char c, uint32_t color){
         ensure_cursor_visible();
     }
     char glyph[2]={c,0};
-    gop_draw_text_sized_at(cursor_x,cursor_y,glyph,color,TERM_BG,glyph_size);
+    display_draw_text_sized_at(cursor_x,cursor_y,glyph,color,TERM_BG,glyph_size);
     cursor_x+=glyph_size;
 }
 
@@ -108,23 +108,23 @@ static void write_signed(int64_t value){
 
 static void draw_window(void){
     if(!window_visible) return;
-    gop_draw_rect(window_x+5,window_y+5,window_w,window_h,WINDOW_SHADOW);
-    gop_draw_rect(window_x,window_y,window_w,window_h,WINDOW_BORDER);
-    gop_draw_rect(window_x+1,window_y+1,window_w-2,window_h-2,WINDOW_BG);
-    gop_draw_rect(window_x+1,window_y+1,window_w-2,TITLE_HEIGHT,TITLE_BG);
-    gop_draw_text_sized_at(window_x+14,window_y+11,"Terminal - purec@os",
+    display_draw_rect(window_x+5,window_y+5,window_w,window_h,WINDOW_SHADOW);
+    display_draw_rect(window_x,window_y,window_w,window_h,WINDOW_BORDER);
+    display_draw_rect(window_x+1,window_y+1,window_w-2,window_h-2,WINDOW_BG);
+    display_draw_rect(window_x+1,window_y+1,window_w-2,TITLE_HEIGHT,TITLE_BG);
+    display_draw_text_sized_at(window_x+14,window_y+11,"Terminal - purec@os",
                            TITLE_FG,TITLE_BG,10);
 
-    gop_draw_rect(window_x+window_w-58,window_y+8,18,18,CLOSE_BG);
-    gop_draw_rect(window_x+window_w-34,window_y+8,18,18,MINIMIZE_BG);
-    gop_draw_text_sized_at(window_x+window_w-54,window_y+12,"x",TITLE_FG,CLOSE_BG,10);
-    gop_draw_text_sized_at(window_x+window_w-30,window_y+12,"-",TITLE_FG,MINIMIZE_BG,10);
+    display_draw_rect(window_x+window_w-58,window_y+8,18,18,CLOSE_BG);
+    display_draw_rect(window_x+window_w-34,window_y+8,18,18,MINIMIZE_BG);
+    display_draw_text_sized_at(window_x+window_w-54,window_y+12,"x",TITLE_FG,CLOSE_BG,10);
+    display_draw_text_sized_at(window_x+window_w-30,window_y+12,"-",TITLE_FG,MINIMIZE_BG,10);
 
     text_x=window_x+16;
     text_y=window_y+TITLE_HEIGHT+14;
     text_w=window_w-32;
     text_h=window_h-TITLE_HEIGHT-28;
-    gop_draw_rect(text_x,text_y,text_w,text_h,TERM_BG);
+    display_draw_rect(text_x,text_y,text_w,text_h,TERM_BG);
     cursor_x=text_x;
     cursor_y=text_y;
 }
@@ -225,7 +225,7 @@ void terminal_printf(const char *format, ...){
 }
 
 void terminal_clear(void){
-    gop_draw_rect(text_x,text_y,text_w,text_h,TERM_BG);
+    display_draw_rect(text_x,text_y,text_w,text_h,TERM_BG);
     cursor_x=text_x;
     cursor_y=text_y;
 }
@@ -248,22 +248,22 @@ uint32_t terminal_get_font_size(void){ return glyph_size; }
 
 bool terminal_set_font_face(const char *name){
     if(!name) return false;
-    enum gop_font_face face;
-    if(strcmp(name,"classic")==0) face=GOP_FONT_CLASSIC;
-    else if(strcmp(name,"clean")==0) face=GOP_FONT_CLEAN;
-    else if(strcmp(name,"bold")==0) face=GOP_FONT_BOLD;
+    enum display_font_face face;
+    if(strcmp(name,"classic")==0) face=DISPLAY_FONT_CLASSIC;
+    else if(strcmp(name,"clean")==0) face=DISPLAY_FONT_CLEAN;
+    else if(strcmp(name,"bold")==0) face=DISPLAY_FONT_BOLD;
     else return false;
 
-    gop_set_font_face(face);
+    display_set_font_face(face);
     input_length=0;
     draw_window();
     return true;
 }
 
 const char *terminal_get_font_face(void){
-    enum gop_font_face face=gop_get_font_face();
-    if(face==GOP_FONT_CLEAN) return "clean";
-    if(face==GOP_FONT_BOLD) return "bold";
+    enum display_font_face face=display_get_font_face();
+    if(face==DISPLAY_FONT_CLEAN) return "clean";
+    if(face==DISPLAY_FONT_BOLD) return "bold";
     return "classic";
 }
 

@@ -72,6 +72,50 @@ int64_t syscall_handler(struct syscall_regs *r){
             gop_draw_line(x0,y0,x1,y1,c);
             return 0;
         }
+        case SYS_FB_INFO: {
+            struct framebuffer_info *info=(struct framebuffer_info*)(uintptr_t)a1;
+            if(!info) return -1;
+            memset(info,0,sizeof(*info));
+            info->width=gop_get_width();
+            info->height=gop_get_height();
+            info->pitch=gop_get_pitch();
+            info->size_bytes=gop_get_framebuffer_size_bytes();
+            info->bpp=gop_get_bpp();
+            info->available=gop_is_available() ? 1 : 0;
+            strncpy(info->protocol_name,gop_get_protocol_name(),
+                    sizeof(info->protocol_name)-1);
+            return 0;
+        }
+        case SYS_DRAW_TEXT: {
+            struct framebuffer_text_request *request=
+                (struct framebuffer_text_request*)(uintptr_t)a1;
+            if(!request || !request->text) return -1;
+            gop_draw_text_at(request->x,request->y,request->text,
+                             request->fg,request->bg);
+            return 0;
+        }
+        case SYS_DRAW_TEXT_SIZED: {
+            struct framebuffer_text_request *request=
+                (struct framebuffer_text_request*)(uintptr_t)a1;
+            if(!request || !request->text) return -1;
+            gop_draw_text_sized_at(request->x,request->y,request->text,
+                                   request->fg,request->bg,request->size);
+            return 0;
+        }
+        case SYS_SCROLL_RECT_UP: {
+            struct framebuffer_scroll_request *request=
+                (struct framebuffer_scroll_request*)(uintptr_t)a1;
+            if(!request) return -1;
+            gop_scroll_rect_up(request->x,request->y,request->w,request->h,
+                               request->amount,request->fill_color);
+            return 0;
+        }
+        case SYS_SET_FONT_FACE:
+            if(a1>GOP_FONT_BOLD) return -1;
+            gop_set_font_face((enum gop_font_face)a1);
+            return 0;
+        case SYS_GET_FONT_FACE:
+            return (int64_t)gop_get_font_face();
         case SYS_GETPID:
             return 42;
         case SYS_GET_MOUSE: {

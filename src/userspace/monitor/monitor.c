@@ -1,7 +1,7 @@
 #include "monitor.h"
 
 #include "../syscall.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
 #include "../../kernel/syscall.h"
@@ -69,9 +69,9 @@ static char *append_u64(char *output, uint64_t value){
 static void draw_bar(uint32_t x, uint32_t y, uint32_t width,
                      uint32_t percent, uint32_t color){
     if(percent>100) percent=100;
-    gop_draw_rect(x,y,width,14,0x313244);
+    display_draw_rect(x,y,width,14,0x313244);
     uint32_t filled=(width*percent)/100;
-    if(filled) gop_draw_rect(x,y,filled,14,color);
+    if(filled) display_draw_rect(x,y,filled,14,color);
 }
 
 static void draw_line(uint32_t y, const char *label, uint64_t value,
@@ -80,7 +80,7 @@ static void draw_line(uint32_t y, const char *label, uint64_t value,
     char *position=append_text(line,label);
     position=append_u64(position,value);
     (void)append_text(position,suffix);
-    gop_draw_text_sized_at(window_x+22,y,line,COLOR_TEXT,COLOR_WINDOW,9);
+    display_draw_text_sized_at(window_x+22,y,line,COLOR_TEXT,COLOR_WINDOW,9);
 }
 
 static void draw_contents(void){
@@ -95,16 +95,16 @@ static void draw_contents(void){
                                          (uint64_t)disk_devices,
                                          MONITOR_DISK_LIMIT,0);
     uint32_t content_y=window_y+TITLE_HEIGHT+12;
-    gop_draw_rect(window_x+1,window_y+TITLE_HEIGHT+1,
+    display_draw_rect(window_x+1,window_y+TITLE_HEIGHT+1,
                   window_width-2,window_height-TITLE_HEIGHT-2,COLOR_WINDOW);
     if(!available){
-        gop_draw_text_sized_at(window_x+22,content_y,"Statistics unavailable",
+        display_draw_text_sized_at(window_x+22,content_y,"Statistics unavailable",
                                COLOR_CLOSE,COLOR_WINDOW,9);
         return;
     }
     if(cpu.frequency_hz) refresh_interval_tsc=cpu.frequency_hz/2;
 
-    gop_draw_text_sized_at(window_x+22,content_y,cpu.name,
+    display_draw_text_sized_at(window_x+22,content_y,cpu.name,
                            COLOR_TEXT,COLOR_WINDOW,9);
     content_y+=24;
     uint32_t bar_width=window_width>434 ? 390 : window_width-44;
@@ -131,10 +131,10 @@ static void draw_contents(void){
             if(index) position=append_text(position,", ");
             position=append_text(position,disk_devices[index].name);
         }
-        gop_draw_text_sized_at(window_x+22,content_y+36,line,
+        display_draw_text_sized_at(window_x+22,content_y+36,line,
                                COLOR_MUTED,COLOR_WINDOW,9);
     } else {
-        gop_draw_text_sized_at(window_x+22,content_y+36,"Devices: none",
+        display_draw_text_sized_at(window_x+22,content_y+36,"Devices: none",
                                COLOR_MUTED,COLOR_WINDOW,9);
     }
 }
@@ -142,13 +142,13 @@ static void draw_contents(void){
 void monitor_window_draw(void){
     if(!visible) return;
     mouse_begin_framebuffer_update();
-    gop_draw_rect(window_x+5,window_y+5,window_width,window_height,0x11111B);
-    gop_draw_rect(window_x,window_y,window_width,window_height,COLOR_BORDER);
-    gop_draw_rect(window_x+1,window_y+1,window_width-2,TITLE_HEIGHT,COLOR_TITLE);
-    gop_draw_text_sized_at(window_x+14,window_y+11,"System Monitor",
+    display_draw_rect(window_x+5,window_y+5,window_width,window_height,0x11111B);
+    display_draw_rect(window_x,window_y,window_width,window_height,COLOR_BORDER);
+    display_draw_rect(window_x+1,window_y+1,window_width-2,TITLE_HEIGHT,COLOR_TITLE);
+    display_draw_text_sized_at(window_x+14,window_y+11,"System Monitor",
                            COLOR_WINDOW,COLOR_TITLE,10);
-    gop_draw_rect(window_x+window_width-28,window_y+8,18,18,COLOR_CLOSE);
-    gop_draw_text_sized_at(window_x+window_width-24,window_y+12,"x",
+    display_draw_rect(window_x+window_width-28,window_y+8,18,18,COLOR_CLOSE);
+    display_draw_text_sized_at(window_x+window_width-24,window_y+12,"x",
                            COLOR_WINDOW,COLOR_CLOSE,10);
     draw_contents();
     mouse_end_framebuffer_update();
@@ -156,8 +156,8 @@ void monitor_window_draw(void){
 }
 
 void monitor_run(void){
-    uint32_t screen_width=gop_get_width();
-    uint32_t screen_height=gop_get_height();
+    uint32_t screen_width=display_get_width();
+    uint32_t screen_height=display_get_height();
     window_width=screen_width>WINDOW_WIDTH+20 ? WINDOW_WIDTH : screen_width-20;
     window_height=screen_height>WINDOW_HEIGHT+40 ? WINDOW_HEIGHT : screen_height-40;
     if(window_x+window_width>screen_width) window_x=10;

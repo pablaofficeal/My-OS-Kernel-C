@@ -1,6 +1,6 @@
 #include "calendar_app.h"
 #include "datetime_service.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 
 static const char *month_names[] = {
     "January",
@@ -36,7 +36,7 @@ static void draw_text(
     uint32_t color,
     uint32_t size
 ) {
-    gop_draw_text_sized_at(
+    display_draw_text_sized_at(
         window_x + offset_x,
         window_y + offset_y,
         text,
@@ -158,7 +158,7 @@ void calendar_app_draw(uint32_t window_x, uint32_t window_y) {
     );
 
     if (editing) {
-        gop_draw_rect(window_x + 15, window_y + 204, 330, 28, 0x313244);
+        display_draw_rect(window_x + 15, window_y + 204, 330, 28, 0x313244);
         draw_text(window_x, window_y, 22, 213, input, 0xCDD6F4, 8);
     }
     draw_text(window_x, window_y, 18, 244, message, 0xA6E3A1, 8);

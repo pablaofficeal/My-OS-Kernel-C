@@ -3,8 +3,8 @@
 #include "../../drivers/keyboard.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../kernel/syscall.h"
-#include "../../kernel/system_info.h"
 #include "../syscall.h"
+#include "../system.h"
 #include "../terminal/terminal.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -180,7 +180,8 @@ void snake_run(void){
     struct snake_game game;
     initialize_game(&game);
 
-    uint64_t tick_interval=system_info_tsc_frequency_hz()/SNAKE_SPEED_HZ;
+    uint64_t tick_interval=system_tsc_frequency_hz()/SNAKE_SPEED_HZ;
+    if(!tick_interval) tick_interval=100000000ULL/SNAKE_SPEED_HZ;
     uint64_t next_tick=read_tsc()+tick_interval;
     draw_game(&game);
 

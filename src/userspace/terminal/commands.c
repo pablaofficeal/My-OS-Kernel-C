@@ -4,7 +4,8 @@
 #include "../editor/nano.h"
 #include "../syscall.h"
 #include "../userspace.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
+#include "../system.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/mouse/usb_mouse.h"
 #include "../../drivers/storage/storage_types.h"
@@ -14,7 +15,6 @@
 #include "../../fs/fs_types.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/syscall.h"
-#include "../../kernel/system_info.h"
 #include "../../lib/string.h"
 #include "../games/snake.h"
 #include "../installer/installer.h"
@@ -54,16 +54,20 @@ static void split_command(const char *line, char *command, uint32_t capacity,
 }
 
 static void show_systeminfo(void){
-    uint64_t ram_mb=system_info_usable_ram_bytes()/(1024*1024);
-    uint64_t framebuffer_bytes=gop_get_framebuffer_size_bytes();
+    struct cpu_monitor_info cpu;
+    struct memory_monitor_info memory;
+    bool info_available=system_get_cpu_info(&cpu)
+        && system_get_memory_info(&memory);
+    uint64_t ram_mb=info_available ? memory.available_bytes/(1024*1024) : 0;
+    uint64_t framebuffer_bytes=display_get_framebuffer_size_bytes();
     uint64_t framebuffer_kib=framebuffer_bytes/1024;
     uint64_t framebuffer_mib=(framebuffer_bytes+1024*1024-1)/(1024*1024);
     terminal_write("=== System Information ===\n");
-    terminal_printf("Processor:  %s\n",system_info_cpu_name());
+    terminal_printf("Processor:  %s\n",info_available ? cpu.name : "unknown");
     terminal_printf("Usable RAM: %lu MB\n",ram_mb);
-    terminal_printf("Graphics:   %s\n",gop_get_protocol_name());
+    terminal_printf("Graphics:   %s\n",display_get_protocol_name());
     terminal_printf("Video mode: %ux%u, %u bpp\n",
-                    gop_get_width(),gop_get_height(),(unsigned int)gop_get_bpp());
+                    display_get_width(),display_get_height(),(unsigned int)display_get_bpp());
     terminal_printf("Framebuffer: %lu MiB mapped (%lu KiB exact)\n",
                     framebuffer_mib,framebuffer_kib);
     terminal_write("Total VRAM: not exposed by boot protocol\n");

@@ -3,7 +3,7 @@
 #include "calendar_app.h"
 #include "clock_app.h"
 #include "datetime_service.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 
 #define APP_COUNT 3
@@ -72,49 +72,49 @@ static void draw_window_frame(enum desktop_app app) {
         ? 0x89B4FA
         : 0x585B70;
 
-    gop_draw_rect(
+    display_draw_rect(
         window->x + 5,
         window->y + 5,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0x11111B
     );
-    gop_draw_rect(
+    display_draw_rect(
         window->x,
         window->y,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0x45475A
     );
-    gop_draw_rect(
+    display_draw_rect(
         window->x + 1,
         window->y + 1,
         WINDOW_WIDTH - 2,
         WINDOW_HEIGHT - 2,
         0x1E1E2E
     );
-    gop_draw_rect(
+    display_draw_rect(
         window->x + 1,
         window->y + 1,
         WINDOW_WIDTH - 2,
         TITLE_BAR_HEIGHT,
         title_color
     );
-    gop_draw_text_at(
+    display_draw_text_at(
         window->x + 12,
         window->y + 10,
         app_title(app),
         0x1E1E2E,
         title_color
     );
-    gop_draw_rect(
+    display_draw_rect(
         window->x + WINDOW_WIDTH - 27,
         window->y + 6,
         18,
         18,
         0xF38BA8
     );
-    gop_draw_text_at(
+    display_draw_text_at(
         window->x + WINDOW_WIDTH - 23,
         window->y + 10,
         "x",

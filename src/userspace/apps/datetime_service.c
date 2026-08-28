@@ -1,7 +1,7 @@
 #include "datetime_service.h"
 #include "../syscall.h"
+#include "../system.h"
 #include "../../kernel/syscall.h"
-#include "../../kernel/system_info.h"
 #include "../../lib/string.h"
 
 #define DATETIME_PATH "/purec/datetime.cfg"
@@ -225,11 +225,11 @@ void datetime_service_init(void) {
         }
     }
 
-    last_uptime_second = system_info_uptime_ms() / 1000;
+    last_uptime_second = system_uptime_ms() / 1000;
 }
 
 bool datetime_service_update(void) {
-    uint64_t uptime_second = system_info_uptime_ms() / 1000;
+    uint64_t uptime_second = system_uptime_ms() / 1000;
     bool changed = false;
 
     while (last_uptime_second < uptime_second) {
@@ -251,7 +251,7 @@ bool datetime_service_set(const struct desktop_datetime *datetime) {
     }
 
     current_datetime = *datetime;
-    last_uptime_second = system_info_uptime_ms() / 1000;
+    last_uptime_second = system_uptime_ms() / 1000;
     datetime_service_save();
     return true;
 }

@@ -9,6 +9,12 @@
 #define SYS_DRAW_RECT 100
 #define SYS_DRAW_LINE 101
 #define SYS_GET_MOUSE 102
+#define SYS_FB_INFO 103
+#define SYS_DRAW_TEXT 104
+#define SYS_DRAW_TEXT_SIZED 105
+#define SYS_SCROLL_RECT_UP 106
+#define SYS_SET_FONT_FACE 107
+#define SYS_GET_FONT_FACE 108
 // FAT32 ABI: open/read/delete/rename/move plus directory, creation and
 // whole-file write operations used by the terminal tools.
 #define SYS_FILE_OPEN   200
@@ -56,6 +62,34 @@ struct disk_monitor_info {
     uint32_t device_count;
     uint32_t operational_count;
     uint64_t total_bytes;
+};
+
+struct framebuffer_info {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint64_t size_bytes;
+    uint8_t bpp;
+    uint8_t available;
+    char protocol_name[16];
+};
+
+struct framebuffer_text_request {
+    uint32_t x;
+    uint32_t y;
+    const char *text;
+    uint32_t fg;
+    uint32_t bg;
+    uint32_t size;
+};
+
+struct framebuffer_scroll_request {
+    uint32_t x;
+    uint32_t y;
+    uint32_t w;
+    uint32_t h;
+    uint32_t amount;
+    uint32_t fill_color;
 };
 
 struct usb_scan_status {

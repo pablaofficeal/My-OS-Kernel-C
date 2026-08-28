@@ -1,7 +1,7 @@
 #include "explorer.h"
 
 #include "../syscall.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../fs/fs_types.h"
 #include "../../kernel/syscall.h"
@@ -132,30 +132,30 @@ static void draw_button(uint32_t index, const char *label){
     uint32_t x=toolbar_button_x(index);
     uint32_t width=toolbar_button_width();
     uint32_t y=window_y+TOOLBAR_Y;
-    gop_draw_rect(x,y,width,24,COLOR_BUTTON);
-    gop_draw_text_sized_at(x+5,y+8,label,COLOR_TEXT,COLOR_BUTTON,7);
+    display_draw_rect(x,y,width,24,COLOR_BUTTON);
+    display_draw_text_sized_at(x+5,y+8,label,COLOR_TEXT,COLOR_BUTTON,7);
 }
 
 static void draw_edit_box(void){
     uint32_t y=window_y+window_height-38;
-    gop_draw_rect(window_x+10,y,window_width-20,28,COLOR_BUTTON);
+    display_draw_rect(window_x+10,y,window_width-20,28,COLOR_BUTTON);
     if(edit_mode==EXPLORER_EDIT_NONE){
-        gop_draw_text_sized_at(window_x+16,y+9,status_text,COLOR_MUTED,
+        display_draw_text_sized_at(window_x+16,y+9,status_text,COLOR_MUTED,
                                COLOR_BUTTON,8);
         return;
     }
     const char *label=edit_mode==EXPLORER_EDIT_CREATE_DIRECTORY
         ? "New folder: " : edit_mode==EXPLORER_EDIT_CREATE_FILE
         ? "New file: " : "Rename: ";
-    gop_draw_text_sized_at(window_x+16,y+9,label,COLOR_OK,COLOR_BUTTON,8);
-    gop_draw_text_sized_at(window_x+112,y+9,edit_buffer,COLOR_TEXT,COLOR_BUTTON,8);
+    display_draw_text_sized_at(window_x+16,y+9,label,COLOR_OK,COLOR_BUTTON,8);
+    display_draw_text_sized_at(window_x+112,y+9,edit_buffer,COLOR_TEXT,COLOR_BUTTON,8);
     uint32_t cursor_x=window_x+112+edit_length*8;
-    gop_draw_rect(cursor_x,y+7,2,13,COLOR_TEXT);
+    display_draw_rect(cursor_x,y+7,2,13,COLOR_TEXT);
 }
 
 static void draw_file_preview(uint32_t top, uint32_t height){
-    gop_draw_rect(window_x+10,top,window_width-20,height,COLOR_BUTTON);
-    gop_draw_text_sized_at(window_x+16,top+7,preview_name,COLOR_FOLDER,
+    display_draw_rect(window_x+10,top,window_width-20,height,COLOR_BUTTON);
+    display_draw_text_sized_at(window_x+16,top+7,preview_name,COLOR_FOLDER,
                            COLOR_BUTTON,8);
     char line[46];
     uint32_t input=0;
@@ -169,7 +169,7 @@ static void draw_file_preview(uint32_t top, uint32_t height){
         }
         if(input<file_preview_length && file_preview[input]=='\n') input++;
         line[length]='\0';
-        gop_draw_text_sized_at(window_x+16,y,line,COLOR_TEXT,COLOR_BUTTON,8);
+        display_draw_text_sized_at(window_x+16,y,line,COLOR_TEXT,COLOR_BUTTON,8);
         y+=12;
     }
 }
@@ -177,33 +177,33 @@ static void draw_file_preview(uint32_t top, uint32_t height){
 static void draw_popup(void){
     if(popup==EXPLORER_POPUP_NONE) return;
     uint32_t height=popup==EXPLORER_POPUP_ENTRY ? 72 : 48;
-    gop_draw_rect(popup_x,popup_y,130,height,COLOR_BORDER);
-    gop_draw_rect(popup_x+1,popup_y+1,128,height-2,COLOR_WINDOW);
+    display_draw_rect(popup_x,popup_y,130,height,COLOR_BORDER);
+    display_draw_rect(popup_x+1,popup_y+1,128,height-2,COLOR_WINDOW);
     if(popup==EXPLORER_POPUP_NEW){
-        gop_draw_text_sized_at(popup_x+8,popup_y+8,"New folder",COLOR_TEXT,COLOR_WINDOW,8);
-        gop_draw_text_sized_at(popup_x+8,popup_y+28,"New file",COLOR_TEXT,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+8,"New folder",COLOR_TEXT,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+28,"New file",COLOR_TEXT,COLOR_WINDOW,8);
     } else if(popup==EXPLORER_POPUP_DELETE_CONFIRM){
-        gop_draw_text_sized_at(popup_x+8,popup_y+8,"Delete now",COLOR_CLOSE,COLOR_WINDOW,8);
-        gop_draw_text_sized_at(popup_x+8,popup_y+28,"Cancel",COLOR_TEXT,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+8,"Delete now",COLOR_CLOSE,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+28,"Cancel",COLOR_TEXT,COLOR_WINDOW,8);
     } else {
-        gop_draw_text_sized_at(popup_x+8,popup_y+8,"Open",COLOR_TEXT,COLOR_WINDOW,8);
-        gop_draw_text_sized_at(popup_x+8,popup_y+28,"Rename",COLOR_TEXT,COLOR_WINDOW,8);
-        gop_draw_text_sized_at(popup_x+8,popup_y+48,"Delete",COLOR_CLOSE,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+8,"Open",COLOR_TEXT,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+28,"Rename",COLOR_TEXT,COLOR_WINDOW,8);
+        display_draw_text_sized_at(popup_x+8,popup_y+48,"Delete",COLOR_CLOSE,COLOR_WINDOW,8);
     }
 }
 
 void explorer_window_draw(void){
     if(!visible) return;
     mouse_begin_framebuffer_update();
-    gop_draw_rect(window_x+5,window_y+5,window_width,window_height,0x11111B);
-    gop_draw_rect(window_x,window_y,window_width,window_height,COLOR_BORDER);
-    gop_draw_rect(window_x+1,window_y+1,window_width-2,
+    display_draw_rect(window_x+5,window_y+5,window_width,window_height,0x11111B);
+    display_draw_rect(window_x,window_y,window_width,window_height,COLOR_BORDER);
+    display_draw_rect(window_x+1,window_y+1,window_width-2,
                   window_height-2,COLOR_WINDOW);
-    gop_draw_rect(window_x+1,window_y+1,window_width-2,TITLE_HEIGHT,COLOR_TITLE);
-    gop_draw_text_sized_at(window_x+12,window_y+10,"Files",COLOR_WINDOW,
+    display_draw_rect(window_x+1,window_y+1,window_width-2,TITLE_HEIGHT,COLOR_TITLE);
+    display_draw_text_sized_at(window_x+12,window_y+10,"Files",COLOR_WINDOW,
                            COLOR_TITLE,9);
-    gop_draw_rect(window_x+window_width-27,window_y+6,18,18,COLOR_CLOSE);
-    gop_draw_text_sized_at(window_x+window_width-23,window_y+10,"x",
+    display_draw_rect(window_x+window_width-27,window_y+6,18,18,COLOR_CLOSE);
+    display_draw_text_sized_at(window_x+window_width-23,window_y+10,"x",
                            COLOR_WINDOW,COLOR_CLOSE,9);
 
     draw_button(0,"<");
@@ -211,7 +211,7 @@ void explorer_window_draw(void){
     draw_button(2,"R");
     draw_button(3,"+");
 
-    gop_draw_text_sized_at(window_x+12,window_y+64,current_path,COLOR_MUTED,
+    display_draw_text_sized_at(window_x+12,window_y+64,current_path,COLOR_MUTED,
                            COLOR_WINDOW,8);
     uint32_t list_top=window_y+LIST_Y;
     uint32_t row_count=visible_row_count();
@@ -223,23 +223,23 @@ void explorer_window_draw(void){
         mouse_end_framebuffer_update();
         return;
     }
-    gop_draw_rect(window_x+10,list_top,window_width-20,list_height,COLOR_BUTTON);
+    display_draw_rect(window_x+10,list_top,window_width-20,list_height,COLOR_BUTTON);
     uint32_t drawn_entries=entry_count<row_count ? entry_count : row_count;
     for(uint32_t index=0;index<drawn_entries;index++){
         uint32_t row_y=list_top+index*ROW_HEIGHT;
         uint32_t background=(int32_t)index==selected_index
             ? COLOR_SELECTED : COLOR_BUTTON;
         if(background!=COLOR_BUTTON)
-            gop_draw_rect(window_x+10,row_y,window_width-20,ROW_HEIGHT,background);
+            display_draw_rect(window_x+10,row_y,window_width-20,ROW_HEIGHT,background);
         bool directory=(entries[index].attributes&FS_ATTRIBUTE_DIRECTORY)!=0;
-        gop_draw_text_sized_at(window_x+16,row_y+6,directory ? "[DIR]" : "FILE",
+        display_draw_text_sized_at(window_x+16,row_y+6,directory ? "[DIR]" : "FILE",
                                directory ? COLOR_FOLDER : COLOR_MUTED,
                                background,8);
-        gop_draw_text_sized_at(window_x+68,row_y+6,entries[index].name,
+        display_draw_text_sized_at(window_x+68,row_y+6,entries[index].name,
                                COLOR_TEXT,background,8);
     }
     if(!entry_count)
-        gop_draw_text_sized_at(window_x+16,list_top+8,"Directory is empty",
+        display_draw_text_sized_at(window_x+16,list_top+8,"Directory is empty",
                                COLOR_MUTED,COLOR_BUTTON,8);
     draw_edit_box();
     draw_popup();

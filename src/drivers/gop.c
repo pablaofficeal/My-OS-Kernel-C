@@ -161,6 +161,7 @@ void gop_init_from_multiboot(void *mbi){
 bool gop_is_available(void){ return gop.available; }
 uint32_t gop_get_width(void){ return gop.width; }
 uint32_t gop_get_height(void){ return gop.height; }
+uint32_t gop_get_pitch(void){ return gop.pitch; }
 uint8_t gop_get_bpp(void){ return gop.bpp; }
 uint64_t gop_get_framebuffer_size_bytes(void){ return gop.framebuffer_bytes; }
 const char *gop_get_protocol_name(void){

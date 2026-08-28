@@ -1,5 +1,5 @@
 #include "calculator_app.h"
-#include "../../drivers/gop.h"
+#include "../display.h"
 
 static char input[40];
 static uint32_t input_length;
@@ -109,7 +109,7 @@ void calculator_app_open(void) {
 void calculator_app_draw(uint32_t window_x, uint32_t window_y) {
     const char *display = input[0] != '\0' ? input : "0";
 
-    gop_draw_text_sized_at(
+    display_draw_text_sized_at(
         window_x + 20,
         window_y + 52,
         display,
@@ -117,7 +117,7 @@ void calculator_app_draw(uint32_t window_x, uint32_t window_y) {
         0x1E1E2E,
         16
     );
-    gop_draw_text_sized_at(
+    display_draw_text_sized_at(
         window_x + 20,
         window_y + 105,
         "Keyboard: 0-9  + - * /  Enter  C",
@@ -125,7 +125,7 @@ void calculator_app_draw(uint32_t window_x, uint32_t window_y) {
         0x1E1E2E,
         8
     );
-    gop_draw_text_sized_at(
+    display_draw_text_sized_at(
         window_x + 18,
         window_y + 244,
         message,
