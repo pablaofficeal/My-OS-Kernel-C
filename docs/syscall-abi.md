@@ -31,6 +31,8 @@ must reference present ring-3 pages and output buffers must also be writable.
 - `SYS_TRY_GETCHAR`: returns a character or `-1` without blocking.
 - `SYS_GET_COMMAND_LINE`: copies the current process command line to `a1`;
   `a2` is the destination capacity.
+- `SYS_GET_PROCESS_NAME`: copies the executable alias used for the current
+  process. The shared system-program image uses it for multicall dispatch.
 - `SYS_ENV_GET`, `SYS_ENV_SET`, `SYS_ENV_UNSET`: access the current process
   environment. Names are limited to 31 characters and values to 127.
 - `SYS_ENV_LIST`: copies a bounded list of environment entries. A child gets a
@@ -48,6 +50,10 @@ the storage-administration capability; ordinary processes cannot format disks.
 addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal` and
 `/bin/program/nano`. The minimal shell does not search `PATH`; executable names
 must be absolute.
+
+Traditional commands such as `/bin/program/ls`, `/bin/program/cat` and
+`/bin/program/install` are aliases of the trusted `/bin/program/system` module.
+They remain separate executable paths while sharing one ring-3 implementation.
 
 ## File Descriptors
 VFS descriptors follow the Linux shape:

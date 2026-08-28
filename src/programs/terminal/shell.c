@@ -37,8 +37,17 @@ static void print_prompt(void){
 
 static void show_help(void){
     pc_write("Builtins: help clear cd pwd echo env set unset exit\n");
-    pc_write("Programs require an absolute path, for example:\n");
-    pc_write("  /bin/program/nano /notes.txt\n");
+    pc_write("System programs require an absolute path:\n");
+    pc_write("  /bin/program/ls [directory]\n");
+    pc_write("  /bin/program/cat <file>\n");
+    pc_write("  /bin/program/touch <file>\n");
+    pc_write("  /bin/program/mkdir <directory>\n");
+    pc_write("  /bin/program/nano <file>\n");
+    pc_write("  /bin/program/disks | usbscan | dmesg | savelog\n");
+    pc_write("  /bin/program/install | setup | update | mkfs.fat32\n");
+    pc_write("  /bin/program/uname | about | systeminfo | htop\n");
+    pc_write("  /bin/program/font | snake | mouse | battery\n");
+    pc_write("  /bin/program/reboot | poweroff | shutdown | halt\n");
 }
 
 static void change_directory(const char *argument){

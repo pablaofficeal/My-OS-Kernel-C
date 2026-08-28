@@ -1654,6 +1654,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/snake\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
+    "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
@@ -1664,6 +1665,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/snake\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
+    "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/lib/libpurec.a\n";
 
 static int32_t write_uefi_config(const char *directory,
@@ -1685,18 +1687,21 @@ static int32_t install_program_payload(void){
        || create_directory_checked("/game")<0
        || create_directory_checked("/lib")<0) return FS_ERROR_IO;
     const void *init_image,*installer_image,*snake_image,*terminal_image;
-    const void *nano_image,*library_image;
+    const void *nano_image,*system_image,*library_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t system_size;
     uint64_t library_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)
        || !boot_get_module("/bin/installer",&installer_image,&installer_size)
        || !boot_get_module("/bin/snake",&snake_image,&snake_size)
        || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
        || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
+       || !boot_get_module("/bin/program/system",&system_image,&system_size)
        || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
        || init_size>UINT32_MAX || installer_size>UINT32_MAX
        || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
-       || nano_size>UINT32_MAX || library_size>UINT32_MAX){
+       || nano_size>UINT32_MAX || system_size>UINT32_MAX
+       || library_size>UINT32_MAX){
         return FS_ERROR_NOT_FOUND;
     }
     int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
@@ -1712,6 +1717,9 @@ static int32_t install_program_payload(void){
                             (uint32_t)terminal_size);
     if(status<0) return status;
     status=fat32_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
+    if(status<0) return status;
+    status=fat32_write_file("/bin/program/system",system_image,
+                            (uint32_t)system_size);
     if(status<0) return status;
     return fat32_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
@@ -1751,18 +1759,22 @@ static int32_t install_uefi_payload(void){
     const void *snake_image;
     const void *terminal_image;
     const void *nano_image;
+    const void *system_image;
     const void *library_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
+    uint64_t system_size;
     uint64_t library_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)
        || !boot_get_module("/bin/installer",&installer_image,&installer_size)
        || !boot_get_module("/bin/snake",&snake_image,&snake_size)
        || !boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)
        || !boot_get_module("/bin/program/nano",&nano_image,&nano_size)
+       || !boot_get_module("/bin/program/system",&system_image,&system_size)
        || !boot_get_module("/lib/libpurec.a",&library_image,&library_size)
        || init_size>UINT32_MAX || installer_size>UINT32_MAX
        || snake_size>UINT32_MAX || terminal_size>UINT32_MAX
-       || nano_size>UINT32_MAX || library_size>UINT32_MAX){
+       || nano_size>UINT32_MAX || system_size>UINT32_MAX
+       || library_size>UINT32_MAX){
         return FS_ERROR_NOT_FOUND;
     }
 
@@ -1813,6 +1825,8 @@ static int32_t install_uefi_payload(void){
                                  (uint32_t)terminal_size);
     if(status<0) return status;
     status=verify_installed_file("/bin/program/nano",(uint32_t)nano_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/system",(uint32_t)system_size);
     if(status<0) return status;
     status=verify_installed_file("/lib/libpurec.a",(uint32_t)library_size);
     if(status<0) return status;
