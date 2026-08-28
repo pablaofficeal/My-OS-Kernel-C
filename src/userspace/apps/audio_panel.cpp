@@ -14,7 +14,7 @@ constexpr uint32_t Good = 0xA6E3A1;
 constexpr uint32_t BadgeWidth = 92;
 constexpr uint32_t BadgeHeight = 22;
 constexpr uint32_t PopupWidth = 198;
-constexpr uint32_t PopupHeight = 116;
+constexpr uint32_t PopupHeight = 150;
 constexpr uint32_t SliderWidth = 142;
 constexpr uint8_t KeyF1 = 1;
 constexpr uint8_t KeyF2 = 2;
@@ -84,6 +84,23 @@ void make_volume_label(char *buffer, uint32_t capacity, const struct audio_statu
     append_char(buffer, &length, capacity, '%');
 }
 
+void make_device_label(char *buffer, uint32_t capacity,
+                       const struct audio_status &status) {
+    uint32_t length = 0;
+    append_text(buffer, &length, capacity, "Device ");
+    append_uint(buffer, &length, capacity, status.selected_output_device + 1);
+    append_char(buffer, &length, capacity, '/');
+    append_uint(buffer, &length, capacity, status.output_device_count);
+    if (status.backend == AUDIO_BACKEND_HDA) {
+        append_text(buffer, &length, capacity, " D");
+        append_uint(buffer, &length, capacity, status.hda_dac_node);
+        append_text(buffer, &length, capacity, " P");
+        append_uint(buffer, &length, capacity, status.hda_pin_node);
+    } else {
+        append_text(buffer, &length, capacity, " Legacy");
+    }
+}
+
 const char *backend_label(const struct audio_status &status) {
     if ((status.backend & AUDIO_BACKEND_HDA) != 0) {
         return status.pcm_ready != 0 ? "HDA PCM" : "HDA found";
@@ -129,6 +146,7 @@ extern "C" void audio_panel_init(void) {
 extern "C" void audio_panel_draw(uint32_t screen_width) {
     struct audio_status status {};
     char label[18] {};
+    char device_label[28] {};
     uint32_t bx = badge_x(screen_width);
 
     if (!userspace_audio_get_status(&status)) {
@@ -137,6 +155,7 @@ extern "C" void audio_panel_draw(uint32_t screen_width) {
     }
 
     make_volume_label(label, sizeof(label), status);
+    make_device_label(device_label, sizeof(device_label), status);
     display_draw_rect(bx, 3, BadgeWidth, BadgeHeight, popup_visible ? 0x585B70 : PanelBorder);
     display_draw_text_at(bx + 8, 9, label, status.muted != 0 ? MutedText : Text, popup_visible ? 0x585B70 : PanelBorder);
 
@@ -151,10 +170,12 @@ extern "C" void audio_panel_draw(uint32_t screen_width) {
     display_draw_text_at(px + 122, 42, label, status.muted != 0 ? MutedText : Good, PanelBg);
     display_draw_text_at(px + 12, 58, backend_label(status), status.pcm_ready != 0 ? Good : MutedText, PanelBg);
     draw_slider(px + 28, 74, status.volume, status.muted != 0);
-    display_draw_rect(px + 12, 102, 82, 26, status.muted != 0 ? Warn : PanelBorder);
-    display_draw_text_at(px + 24, 111, status.muted != 0 ? "Unmute" : "Mute", Text, status.muted != 0 ? Warn : PanelBorder);
-    display_draw_rect(px + 104, 102, 80, 26, Accent);
-    display_draw_text_at(px + 116, 111, "Test", 0x1E1E2E, Accent);
+    display_draw_rect(px + 12, 98, 172, 26, PanelBorder);
+    display_draw_text_at(px + 20, 107, device_label, Text, PanelBorder);
+    display_draw_rect(px + 12, 132, 82, 26, status.muted != 0 ? Warn : PanelBorder);
+    display_draw_text_at(px + 24, 141, status.muted != 0 ? "Unmute" : "Mute", Text, status.muted != 0 ? Warn : PanelBorder);
+    display_draw_rect(px + 104, 132, 80, 26, Accent);
+    display_draw_text_at(px + 116, 141, "Test", 0x1E1E2E, Accent);
 }
 
 extern "C" bool audio_panel_handle_mouse(
@@ -204,7 +225,24 @@ extern "C" bool audio_panel_handle_mouse(
         return true;
     }
 
-    if (popup_visible && pressed && point_inside(x, y, px + 12, 102, 82, 26)) {
+    if (popup_visible && pressed && point_inside(x, y, px + 12, 98, 172, 26)) {
+        uint32_t count = 0;
+        uint32_t selected = 0;
+        struct audio_status status {};
+        if (userspace_audio_get_status(&status)) {
+            count = status.output_device_count;
+            selected = status.selected_output_device;
+        }
+        if (count > 0) {
+            (void)userspace_audio_select_output_device((selected + 1) % count);
+        }
+        if (redraw_required != nullptr) {
+            *redraw_required = true;
+        }
+        return true;
+    }
+
+    if (popup_visible && pressed && point_inside(x, y, px + 12, 132, 82, 26)) {
         userspace_audio_toggle_mute();
         if (redraw_required != nullptr) {
             *redraw_required = true;
@@ -212,7 +250,7 @@ extern "C" bool audio_panel_handle_mouse(
         return true;
     }
 
-    if (popup_visible && pressed && point_inside(x, y, px + 104, 102, 80, 26)) {
+    if (popup_visible && pressed && point_inside(x, y, px + 104, 132, 80, 26)) {
         userspace_audio_play_test_sound();
         if (redraw_required != nullptr) {
             *redraw_required = true;

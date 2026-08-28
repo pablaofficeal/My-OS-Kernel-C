@@ -80,10 +80,30 @@ static void make_pcm_label(char *buffer, uint32_t capacity,
                 status->pcm_ready != 0 ? "READY" : "NOT READY");
 }
 
+static void make_route_label(char *buffer, uint32_t capacity,
+                             const struct audio_status *status) {
+    uint32_t length = 0;
+    append_text(buffer, &length, capacity, "ROUTE ");
+    append_uint(buffer, &length, capacity, status->selected_output_device + 1);
+    append_char(buffer, &length, capacity, '/');
+    append_uint(buffer, &length, capacity, status->output_device_count);
+    if (status->backend == AUDIO_BACKEND_HDA) {
+        append_text(buffer, &length, capacity, " C");
+        append_uint(buffer, &length, capacity, status->hda_codec);
+        append_text(buffer, &length, capacity, " D");
+        append_uint(buffer, &length, capacity, status->hda_dac_node);
+        append_text(buffer, &length, capacity, " P");
+        append_uint(buffer, &length, capacity, status->hda_pin_node);
+    } else {
+        append_text(buffer, &length, capacity, " LEGACY");
+    }
+}
+
 void audio_overlay_draw(void) {
     struct audio_status status = {0};
     char master[24] = {0};
     char pcm[18] = {0};
+    char route[40] = {0};
 
     if (!userspace_audio_get_status(&status)) {
         status.muted = 1;
@@ -91,6 +111,7 @@ void audio_overlay_draw(void) {
 
     make_master_label(master, sizeof(master), &status);
     make_pcm_label(pcm, sizeof(pcm), &status);
+    make_route_label(route, sizeof(route), &status);
 
     display_draw_rect(AUDIO_OVERLAY_X, AUDIO_OVERLAY_Y,
                       AUDIO_OVERLAY_W, AUDIO_OVERLAY_H,
@@ -118,7 +139,7 @@ void audio_overlay_draw(void) {
                          status.test_active != 0 ? AUDIO_OVERLAY_GOOD : AUDIO_OVERLAY_TEXT,
                          AUDIO_OVERLAY_BG);
     display_draw_text_at(AUDIO_OVERLAY_X + 6, AUDIO_OVERLAY_Y + 56,
-                         "HDA ROUTE: controller discovery only",
+                         route,
                          status.pcm_ready != 0 ? AUDIO_OVERLAY_GOOD : AUDIO_OVERLAY_WARN,
                          AUDIO_OVERLAY_BG);
 }
