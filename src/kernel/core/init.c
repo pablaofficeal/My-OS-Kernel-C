@@ -4,8 +4,8 @@
 #include "panic.h"
 #include "scheduler.h"
 #include "process.h"
-#include "../drivers/serial/serial.h"
-#include "../userspace/userspace.h"
+#include "../../drivers/serial/serial.h"
+#include "../../userspace/userspace.h"
 
 static void boot_log_pause(void){
     volatile uint64_t dummy=0;

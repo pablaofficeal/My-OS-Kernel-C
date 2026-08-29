@@ -9,18 +9,18 @@ LINKER_SCRIPT := $(ROOT_DIR)/linker-limine.ld
 
 C_SOURCES := \
 	boot/boot.c \
-	kernel/kernel.c \
-	kernel/init.c \
-	kernel/system_info.c \
-	kernel/process.c \
-	kernel/program_alias.c \
-	kernel/elf.c \
+	kernel/core/kernel.c \
+	kernel/core/init.c \
+	kernel/core/system_info.c \
+	kernel/process/process.c \
+	kernel/process/program_alias.c \
+	kernel/process/elf.c \
 	mm/pmm.c \
 	mm/vmm.c \
 	arch/x86_64/gdt.c \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
-	kernel/syscall.c \
+	kernel/syscall/syscall.c \
 	drivers/serial/serial.c \
 	drivers/display/vga.c \
 	drivers/interrupts/pic.c \
@@ -30,9 +30,9 @@ C_SOURCES := \
 	drivers/mouse/ps2_mouse.c \
 	drivers/mouse/usb_mouse.c \
 	lib/string.c \
-	kernel/klog.c \
-	kernel/boot_diag.c \
-	kernel/panic.c \
+	kernel/diagnostics/klog.c \
+	kernel/diagnostics/boot_diag.c \
+	kernel/diagnostics/panic.c \
 	drivers/input/keyboard.c \
 	drivers/pci/pci.c \
 	drivers/storage/ata_pio.c \
@@ -56,7 +56,7 @@ C_SOURCES := \
 	userspace/apps/calendar_app.c \
 	userspace/apps/calculator_app.c \
 	userspace/apps/desktop_apps.c \
-	kernel/scheduler.c \
+	kernel/process/scheduler.c \
 	drivers/power/power.c \
 	drivers/audio/audio_hda.c \
 	drivers/audio/audio.c

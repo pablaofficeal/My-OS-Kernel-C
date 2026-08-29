@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 
 #define WINDOW_MANAGER_CAPACITY 8
 

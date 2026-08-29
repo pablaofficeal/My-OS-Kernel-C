@@ -5,7 +5,7 @@
 #include "../../fs/fs_types.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
-#include "../../kernel/syscall.h"
+#include "../../kernel/syscall/syscall.h"
 
 struct pc_display_info {
     uint32_t width;

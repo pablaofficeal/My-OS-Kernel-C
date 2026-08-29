@@ -1,5 +1,5 @@
 #include "program_alias.h"
-#include "../lib/string.h"
+#include "../../lib/string.h"
 
 static const char *system_program_names[]={
     "ls",

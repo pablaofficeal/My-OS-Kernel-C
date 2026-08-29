@@ -1,7 +1,7 @@
 #include "datetime_service.h"
 #include "../syscall.h"
 #include "../system.h"
-#include "../../kernel/syscall.h"
+#include "../../kernel/syscall/syscall.h"
 #include "../../lib/string.h"
 
 #define DATETIME_PATH "/purec/datetime.cfg"

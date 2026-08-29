@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../kernel/syscall.h"
+#include "../../kernel/syscall/syscall.h"
 
 struct installer_progress_view {
     uint32_t last_progress;

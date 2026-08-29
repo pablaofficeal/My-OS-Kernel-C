@@ -1,6 +1,6 @@
 #include "keyboard.h"
-#include "../../kernel/klog.h"
-#include "../../kernel/scheduler.h"
+#include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
 #include <stdint.h>
 #include <stdbool.h>
 

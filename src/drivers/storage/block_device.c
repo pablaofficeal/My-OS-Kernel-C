@@ -4,8 +4,8 @@
 #include "../usb/xhci.h"
 #include "../usb/ehci.h"
 #include "../../lib/string.h"
-#include "../../kernel/klog.h"
-#include "../../kernel/scheduler.h"
+#include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
 #include "../interrupts/timer.h"
 
 #define BLOCK_TRANSPORT_NONE 0

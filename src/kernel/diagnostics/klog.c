@@ -1,8 +1,8 @@
 #include "klog.h"
-#include "../drivers/display/gop.h"
-#include "../drivers/display/vga.h"
-#include "../drivers/serial/serial.h"
-#include "../lib/string.h"
+#include "../../drivers/display/gop.h"
+#include "../../drivers/display/vga.h"
+#include "../../drivers/serial/serial.h"
+#include "../../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>

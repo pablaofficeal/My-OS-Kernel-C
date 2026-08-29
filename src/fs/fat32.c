@@ -1,8 +1,8 @@
 #include "fat32.h"
 
 #include "../drivers/storage/block_device.h"
-#include "../kernel/klog.h"
-#include "../kernel/scheduler.h"
+#include "../kernel/diagnostics/klog.h"
+#include "../kernel/process/scheduler.h"
 #include "../lib/string.h"
 #include <stddef.h>
 #include "../boot/install_source.h"

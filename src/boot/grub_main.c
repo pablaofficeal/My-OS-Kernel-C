@@ -5,7 +5,7 @@
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../arch/x86_64/gdt.h"
 #include "../arch/x86_64/idt.h"
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 #include <stdint.h>
 
 // helper для int 0x80

@@ -4,12 +4,12 @@
 #include "klog.h"
 #include "panic.h"
 #include "program_alias.h"
-#include "../boot/install_source.h"
-#include "../fs/vfs.h"
-#include "../mm/pmm.h"
-#include "../mm/vmm.h"
-#include "../lib/string.h"
-#include "../userspace/window_manager.h"
+#include "../../boot/install_source.h"
+#include "../../fs/vfs.h"
+#include "../../mm/pmm.h"
+#include "../../mm/vmm.h"
+#include "../../lib/string.h"
+#include "../../userspace/window_manager.h"
 
 #define USER_STACK_TOP 0x00007FFFFFF00000ULL
 #define USER_STACK_PAGES 16

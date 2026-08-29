@@ -1,7 +1,7 @@
 #include "audio_hda.h"
 #include "../pci/pci.h"
 #include "../../arch/x86_64/mmio.h"
-#include "../../kernel/klog.h"
+#include "../../kernel/diagnostics/klog.h"
 #include "../../lib/string.h"
 
 #define PCI_CLASS_MULTIMEDIA 0x04

@@ -4,7 +4,7 @@
 #include "../serial/serial.h"
 #include "../display/gop.h"
 #include "../display/vga.h"
-#include "../../kernel/klog.h"
+#include "../../kernel/diagnostics/klog.h"
 #include <stdint.h>
 
 #define PS2_DATA   0x60

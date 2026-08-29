@@ -3,7 +3,7 @@
 #include "../pci/pci.h"
 #include "../storage/storage_probe.h"
 #include "../../arch/x86_64/mmio.h"
-#include "../../kernel/klog.h"
+#include "../../kernel/diagnostics/klog.h"
 #include "../../lib/string.h"
 #include "../mouse/usb_mouse.h"
 

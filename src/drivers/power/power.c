@@ -1,6 +1,6 @@
 #include "power.h"
 #include "../../boot/limine.h"
-#include "../../kernel/klog.h"
+#include "../../kernel/diagnostics/klog.h"
 #include "../../lib/string.h"
 #include <stddef.h>
 

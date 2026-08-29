@@ -4,7 +4,7 @@
 #include "../display.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
-#include "../../kernel/syscall.h"
+#include "../../kernel/syscall/syscall.h"
 
 #include <stdbool.h>
 #include <stdint.h>

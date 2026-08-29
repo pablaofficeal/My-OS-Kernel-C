@@ -1,7 +1,7 @@
 #include "elf.h"
-#include "../mm/pmm.h"
-#include "../mm/vmm.h"
-#include "../lib/string.h"
+#include "../../mm/pmm.h"
+#include "../../mm/vmm.h"
+#include "../../lib/string.h"
 
 #define ELF_CLASS_64 2
 #define ELF_DATA_LITTLE_ENDIAN 1

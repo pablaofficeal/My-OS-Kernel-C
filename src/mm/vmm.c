@@ -1,6 +1,6 @@
 #include "vmm.h"
 #include "pmm.h"
-#include "../kernel/klog.h"
+#include "../kernel/diagnostics/klog.h"
 #include "../lib/string.h"
 
 #define PAGE_ADDRESS_MASK 0x000FFFFFFFFFF000ULL

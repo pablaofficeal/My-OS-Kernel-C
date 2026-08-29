@@ -1,5 +1,5 @@
 #include "include/purec.h"
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 
 int64_t pc_syscall(uint64_t number, uint64_t argument1,
                    uint64_t argument2, uint64_t argument3){

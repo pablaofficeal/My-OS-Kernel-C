@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../boot/limine.h"
+#include "../../boot/limine.h"
 #include <stdint.h>
 
 void system_info_init(const struct limine_memmap_response *memory_map);

@@ -1,10 +1,10 @@
 #include "scheduler.h"
-#include "../drivers/interrupts/timer.h"
-#include "../kernel/klog.h"
-#include "../kernel/panic.h"
-#include "../arch/x86_64/gdt.h"
-#include "../mm/vmm.h"
-#include "../lib/string.h"
+#include "../../drivers/interrupts/timer.h"
+#include "../kernel/diagnostics/klog.h"
+#include "../kernel/diagnostics/panic.h"
+#include "../../arch/x86_64/gdt.h"
+#include "../../mm/vmm.h"
+#include "../../lib/string.h"
 
 static struct thread threads[SCHEDULER_MAX_THREADS];
 static struct thread *current = NULL;
