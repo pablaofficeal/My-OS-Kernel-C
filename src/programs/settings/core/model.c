@@ -15,6 +15,11 @@ static uint32_t parse_u32(const char *text){
     return value;
 }
 
+static bool starts_with(const char *text,const char *prefix){
+    while(*prefix){ if(*text++!=*prefix++) return false; }
+    return true;
+}
+
 static char *append_text(char *out, const char *text){
     while(*text) *out++=*text++;
     *out='\0';
@@ -58,10 +63,12 @@ bool settings_model_load(struct settings_model *model){
         while(*end && *end!='\n' && *end!='\r') end++;
         char saved=*end;
         *end='\0';
-        if(line[0]=='v' && line[1]=='o')
+        if(starts_with(line,"volume="))
             model->volume=(int)parse_u32(line+7);
-        else if(line[0]=='m') model->muted=parse_u32(line+6)!=0;
-        else if(line[0]=='d') model->device=(int)parse_u32(line+7);
+        else if(starts_with(line,"muted="))
+            model->muted=parse_u32(line+6)!=0;
+        else if(starts_with(line,"device="))
+            model->device=(int)parse_u32(line+7);
         if(!saved) break;
         line=end+1;
         while(*line=='\n' || *line=='\r') line++;

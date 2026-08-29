@@ -60,7 +60,11 @@ static void draw(struct pg_window *window,struct disk_app *app,
     out=append_u64(out,total/GIB); (void)append_text(out," GiB");
     pg_window_text(window,20,40,summary,window->theme.muted_text);
     pg_window_text(window,20,72,"Connected devices",window->theme.text);
-    for(int32_t index=0;index<app->count;index++){
+    uint32_t controls=window->client.height-88;
+    uint32_t visible_rows=controls>94 ? (controls-94)/30U : 0;
+    int32_t visible_count=app->count;
+    if((uint32_t)visible_count>visible_rows) visible_count=(int32_t)visible_rows;
+    for(int32_t index=0;index<visible_count;index++){
         struct pg_rect row={20,94+(uint32_t)index*30,
                             window->client.width-40,26};
         pg_window_rect(window,row,index==app->selected
@@ -78,7 +82,6 @@ static void draw(struct pg_window *window,struct disk_app *app,
             }
         }
     }
-    uint32_t controls=window->client.height-88;
     if(app->selected>=0){
         const struct storage_device_info *disk=&app->disks[app->selected];
         char selected[96]; out=append_text(selected,"Selected: ");
@@ -122,7 +125,11 @@ static void draw(struct pg_window *window,struct disk_app *app,
 
 static int disks_main(void){
     struct pg_window window;
-    if(!pg_window_center(&window,"Disks",760,520)) return 1;
+    struct pc_display_info display;
+    if(!pc_display_get_info(&display) || !display.available) return 1;
+    uint32_t width=display.width>780 ? 760 : display.width-20;
+    uint32_t height=display.height>560 ? 520 : display.height-40;
+    if(!pg_window_center(&window,"Disks",width,height)) return 1;
     struct disk_app app={.selected=-1};
     refresh(&app);
     struct pg_event event={0};
