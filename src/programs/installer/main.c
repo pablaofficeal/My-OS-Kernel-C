@@ -131,19 +131,16 @@ static void print_progress(uint32_t progress, const char *stage) {
     pc_write("\n");
 }
 
-static void print_new_log_entries(uint32_t *shown_count) {
-    struct install_log log;
-
-    if (!pc_install_log(&log)) {
+static void print_status_change(const struct install_status *status,
+                                uint32_t *last_progress,
+                                char last_stage[INSTALL_STAGE_CAPACITY]) {
+    if (status->progress == *last_progress &&
+        pc_strcmp(status->stage, last_stage) == 0) {
         return;
     }
-    if (log.count < *shown_count) {
-        *shown_count = 0;
-    }
-    for (uint32_t i = *shown_count; i < log.count; i++) {
-        print_progress(log.entries[i].progress, log.entries[i].stage);
-    }
-    *shown_count = log.count;
+    print_progress(status->progress, status->stage);
+    *last_progress = status->progress;
+    pc_copy(last_stage, status->stage, INSTALL_STAGE_CAPACITY);
 }
 
 static bool write_install_config(void) {
@@ -184,7 +181,8 @@ static void wait_for_reboot(void) {
 
 static bool run_installation(bool start_job) {
     struct install_status status;
-    uint32_t shown_log_entries = 0;
+    uint32_t last_progress = UINT32_MAX;
+    char last_stage[INSTALL_STAGE_CAPACITY] = {0};
 
     clear_console();
     pc_write("Pure OS installation\n");
@@ -211,7 +209,7 @@ static bool run_installation(bool start_job) {
             pc_write("Cannot read installation status.\n");
             return false;
         }
-        print_new_log_entries(&shown_log_entries);
+        print_status_change(&status, &last_progress, last_stage);
         if (status.state == INSTALL_FAILED) {
             pc_write("\nInstallation failed. Error: ");
             pc_write_i64(status.result);

@@ -1313,6 +1313,33 @@ static bool write_zero_range(uint32_t first_lba, uint32_t count){
     return true;
 }
 
+static bool write_zero_range_progress(
+    uint32_t first_lba,
+    uint32_t count,
+    fat32_progress_callback callback,
+    uint32_t progress_start,
+    uint32_t progress_end,
+    const char *stage
+){
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    uint32_t last_progress=UINT32_MAX;
+    for(uint32_t index=0;index<count;index++){
+        if((index&0x3FU)==0) scheduler_yield();
+        if(callback && count){
+            uint32_t progress=progress_start
+                +(uint32_t)(((uint64_t)index
+                             *(progress_end-progress_start))/count);
+            if(progress!=last_progress){
+                callback(progress,stage);
+                last_progress=progress;
+            }
+        }
+        if(!block_device_write(first_lba+index,sector_buffer)) return false;
+    }
+    if(callback) callback(progress_end,stage);
+    return true;
+}
+
 static void build_format_boot_sector(const struct fat32_format_layout *layout,
                                      uint32_t hidden_sectors,
                                      const uint8_t volume_label[11]){
@@ -1579,7 +1606,11 @@ static bool write_gpt_layout(uint32_t total_sectors, const char *serial){
 
 static bool write_format_metadata_at(uint32_t part_lba,
                                      const struct fat32_format_layout *layout,
-                                     const uint8_t volume_label[11]){
+                                     const uint8_t volume_label[11],
+                                     fat32_progress_callback callback,
+                                     uint32_t progress_start,
+                                     uint32_t progress_end,
+                                     const char *stage){
     uint32_t fat_start = part_lba + FAT32_ESP_RESERVED;
     uint32_t data_start = fat_start + FAT32_FORMAT_FAT_COUNT * layout->fat_size;
     klogf(KLOG_INFO,"write_format_at: part %u fat %u data %u fat_size %u spc %u",part_lba,fat_start,data_start,layout->fat_size,layout->sectors_per_cluster);
@@ -1587,7 +1618,10 @@ static bool write_format_metadata_at(uint32_t part_lba,
         klogf(KLOG_ERROR,"write_format_at: zero reserved %u count %u failed",part_lba,FAT32_ESP_RESERVED);
         return false;
     }
-    if(!write_zero_range(fat_start, FAT32_FORMAT_FAT_COUNT * layout->fat_size)){
+    if(!write_zero_range_progress(
+            fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size,
+            callback,progress_start,progress_end,stage
+        )){
         klogf(KLOG_ERROR,"write_format_at: zero FAT %u count %u failed",fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size);
         return false;
     }
@@ -1964,8 +1998,10 @@ int32_t fat32_format_uefi_device_progress(
         return FS_ERROR_IO;
     }
     if(callback) callback(18,"Formatting EFI system partition");
-    if(!write_format_metadata_at(FAT32_ESP_START_LBA,&esp_layout,
-                                 esp_volume_label)){
+    if(!write_format_metadata_at(
+            FAT32_ESP_START_LBA,&esp_layout,esp_volume_label,
+            callback,18,40,"Formatting EFI system partition"
+        )){
         klogf(KLOG_ERROR,"fat32_uefi: ESP format failed");
         return FS_ERROR_IO;
     }
@@ -1983,8 +2019,10 @@ int32_t fat32_format_uefi_device_progress(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
-    if(!write_format_metadata_at(data_start,&data_layout,
-                                 required_volume_label)){
+    if(!write_format_metadata_at(
+            data_start,&data_layout,required_volume_label,
+            callback,70,85,"Formatting PureC system partition"
+        )){
         klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
         return FS_ERROR_IO;
     }

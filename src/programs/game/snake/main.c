@@ -42,10 +42,13 @@ static void place_food(void){
     } while(occupied(food.x,food.y));
 }
 
-static void draw(uint32_t origin_x, uint32_t origin_y){
+static void draw_header(uint32_t origin_x, uint32_t origin_y){
     pc_display_clear(COLOR_BACKGROUND);
     pc_draw_text(origin_x,origin_y-28,"Snake - WASD to move, Q to exit",
                  COLOR_TEXT,COLOR_BACKGROUND);
+}
+
+static void draw_board(uint32_t origin_x, uint32_t origin_y){
     pc_draw_rect(origin_x-4,origin_y-4,BOARD_WIDTH*CELL_SIZE+8,
                  BOARD_HEIGHT*CELL_SIZE+8,COLOR_PANEL);
     pc_draw_rect(origin_x+food.x*CELL_SIZE,origin_y+food.y*CELL_SIZE,
@@ -57,7 +60,13 @@ static void draw(uint32_t origin_x, uint32_t origin_y){
     }
 }
 
-static bool advance(void){
+static void draw_cell(uint32_t origin_x, uint32_t origin_y,
+                      struct point point, uint32_t color){
+    pc_draw_rect(origin_x+point.x*CELL_SIZE,origin_y+point.y*CELL_SIZE,
+                 CELL_SIZE-2,CELL_SIZE-2,color);
+}
+
+static bool advance(bool *ate_food, struct point *old_tail){
     struct point next={
         (int16_t)(body[0].x+direction_x),
         (int16_t)(body[0].y+direction_y)
@@ -69,11 +78,21 @@ static bool advance(void){
     for(uint16_t index=0;index<collision_length;index++){
         if(body[index].x==next.x && body[index].y==next.y) return false;
     }
+    *old_tail=body[length-1];
     if(ate && length<MAX_LENGTH){ length++; score++; }
     for(uint16_t index=length-1;index>0;index--) body[index]=body[index-1];
     body[0]=next;
     if(ate) place_food();
+    *ate_food=ate;
     return true;
+}
+
+static void draw_advance(uint32_t origin_x, uint32_t origin_y,
+                         bool ate_food, struct point old_tail){
+    if(!ate_food) draw_cell(origin_x,origin_y,old_tail,COLOR_PANEL);
+    if(length>1) draw_cell(origin_x,origin_y,body[1],COLOR_SNAKE);
+    draw_cell(origin_x,origin_y,body[0],COLOR_HEAD);
+    if(ate_food) draw_cell(origin_x,origin_y,food,COLOR_FOOD);
 }
 
 static void handle_key(int32_t key, bool *running){
@@ -107,12 +126,16 @@ static int snake_main(void){
         ? (display.width-board_width)/2 : 0;
     uint32_t origin_y=display.height>board_height+40
         ? (display.height-board_height)/2+20 : 40;
+    draw_header(origin_x,origin_y);
+    draw_board(origin_x,origin_y);
     bool running=true;
     while(running){
         int32_t key;
+        bool ate_food=false;
+        struct point old_tail;
         while((key=pc_try_getchar())>=0) handle_key(key,&running);
-        if(!running || !advance()) break;
-        draw(origin_x,origin_y);
+        if(!running || !advance(&ate_food,&old_tail)) break;
+        draw_advance(origin_x,origin_y,ate_food,old_tail);
         pc_sleep(140);
     }
     pc_display_clear(COLOR_BACKGROUND);
