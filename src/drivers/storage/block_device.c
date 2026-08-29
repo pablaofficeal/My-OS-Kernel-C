@@ -96,6 +96,8 @@ uint32_t block_device_rescan_usb(void){
         for(uint32_t index=0;index<count;index++){
             struct storage_device_info info;
             if(block_device_get_info(index,&info)
+               && (info.transport==STORAGE_TRANSPORT_USB_MSC
+                   || info.transport==STORAGE_TRANSPORT_USB_EHCI)
                && strcmp(info.serial,preferred_usb_serial)==0){
                 (void)block_device_select(index);
                 restored_usb=true;
