@@ -145,7 +145,7 @@ static void receive_packet(const struct ethernet_packet *frame){
     const uint8_t *sender_mac=packet+8;
     uint32_t sender_ipv4=net_read_be32(packet+14);
     uint32_t target_ipv4=net_read_be32(packet+24);
-    if(!mac_is_unicast(sender_mac)){
+    if(!mac_is_unicast(sender_mac) || memcmp(sender_mac,frame->source,6)!=0){
         counters.malformed++;
         return;
     }
