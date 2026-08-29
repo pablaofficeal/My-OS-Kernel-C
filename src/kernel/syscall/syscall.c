@@ -23,6 +23,7 @@
 #include "../../mm/pmm.h"
 #include "../../userspace/userspace.h"
 #include "../../userspace/window_manager.h"
+#include "../../net/api/ping.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -645,6 +646,32 @@ int64_t syscall_handler(struct syscall_regs *r){
             if(!writable((void*)(uintptr_t)a1,sizeof(install_history))) return -1;
             *(struct install_log*)(uintptr_t)a1=install_history;
             return 0;
+        case SYS_NET_PING: {
+            const struct network_ping_request *user_request=
+                (const struct network_ping_request*)(uintptr_t)a1;
+            struct network_ping_result *user_result=
+                (struct network_ping_result*)(uintptr_t)a2;
+            if(!readable(user_request,sizeof(*user_request))
+               || !writable(user_result,sizeof(*user_result))) return -1;
+            struct network_ping_request request=*user_request;
+            request.target[sizeof(request.target)-1]='\0';
+            bool terminated=false;
+            for(uint32_t index=0;index<sizeof(request.target);index++){
+                if(!request.target[index]){ terminated=true; break; }
+            }
+            if(!terminated || !request.target[0] || request.timeout_ms>30000)
+                return NET_PING_INVALID;
+            struct net_ping_reply reply;
+            enum net_ping_status status=net_ping_target(
+                request.target,request.sequence,request.timeout_ms,&reply);
+            if(status!=NET_PING_OK) return status;
+            user_result->address=reply.address;
+            user_result->round_trip_ms=reply.round_trip_ms;
+            user_result->sequence=reply.sequence;
+            user_result->ttl=reply.ttl;
+            user_result->reserved=0;
+            return NET_PING_OK;
+        }
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;

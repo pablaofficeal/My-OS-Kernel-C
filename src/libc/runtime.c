@@ -170,6 +170,18 @@ bool pc_memory_info(struct memory_monitor_info *info){
         && pc_syscall(SYS_MEMORY_INFO,(uint64_t)(uintptr_t)info,0,0)>=0;
 }
 
+int32_t pc_ping(const char *target, uint16_t sequence, uint32_t timeout_ms,
+                struct network_ping_result *result){
+    if(!target || !result) return -1;
+    struct network_ping_request request={
+        .timeout_ms=timeout_ms,
+        .sequence=sequence
+    };
+    pc_copy(request.target,target,sizeof(request.target));
+    return (int32_t)pc_syscall(SYS_NET_PING,
+        (uint64_t)(uintptr_t)&request,(uint64_t)(uintptr_t)result,0);
+}
+
 void *pc_heap_grow(uint64_t size){
     int64_t result=pc_syscall(SYS_HEAP_GROW,size,0,0);
     return result<0 ? 0 : (void*)(uintptr_t)result;

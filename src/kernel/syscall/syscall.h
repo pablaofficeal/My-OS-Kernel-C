@@ -77,6 +77,24 @@
 #define SYS_HEAP_GROW 256
 #define SYS_PROCESS_LIST 257
 #define SYS_TRY_GET_SPECIAL 258
+#define SYS_NET_PING 259
+
+#define NETWORK_PING_TARGET_CAPACITY 128
+
+struct network_ping_request {
+    char target[NETWORK_PING_TARGET_CAPACITY];
+    uint32_t timeout_ms;
+    uint16_t sequence;
+    uint16_t reserved;
+};
+
+struct network_ping_result {
+    uint32_t address;
+    uint32_t round_trip_ms;
+    uint16_t sequence;
+    uint8_t ttl;
+    uint8_t reserved;
+};
 
 #define GUI_WINDOW_STATE_FOCUSED 1
 #define GUI_WINDOW_STATE_REPAINT 2

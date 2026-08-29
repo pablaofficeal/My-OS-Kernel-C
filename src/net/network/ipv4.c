@@ -58,11 +58,12 @@ static void receive_packet(const struct ethernet_packet *frame){
     if(fragment&0x3FFFU) return;
     uint32_t destination=net_read_be32(data+16);
     struct ipv4_interface_config *interface=find_interface(frame->device,false);
-    uint32_t directed_broadcast=interface && interface->configured
-        ? (interface->address&interface->netmask)|~interface->netmask : 0;
-    if(destination!=IPV4_BROADCAST && destination!=directed_broadcast
-       && (!interface || !interface->configured
-           || destination!=interface->address)) return;
+    if(interface && interface->configured){
+        uint32_t directed_broadcast=(interface->address&interface->netmask)
+            |~interface->netmask;
+        if(destination!=IPV4_BROADCAST && destination!=directed_broadcast
+           && destination!=interface->address) return;
+    }
     struct ipv4_packet packet={
         .device=frame->device,
         .source=net_read_be32(data+12),
