@@ -36,6 +36,8 @@ C_SOURCES := \
 	drivers/input/keyboard.c \
 	drivers/pci/pci.c \
 	drivers/net/e1000_82540em.c \
+	drivers/net/intel_ax201.c \
+	net/wifi/wifi.c \
 	net/core/net_device.c \
 	net/link/ethernet.c \
 	net/link/arp.c \
