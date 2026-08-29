@@ -39,6 +39,40 @@ static void begin_input(struct files_app *app, enum files_input_mode mode){
     set_status(app,"");
 }
 
+static bool selected_is_directory(const struct files_app *app){
+    return app->selected>=0
+        && (app->model.entries[app->selected].attributes
+            &FS_ATTRIBUTE_DIRECTORY)!=0;
+}
+
+static void open_selected(struct files_app *app){
+    if(app->selected<0) return;
+    if(selected_is_directory(app)){
+        if(files_model_enter(&app->model,(uint32_t)app->selected))
+            reset_selection(app);
+        return;
+    }
+    char path[FILES_PATH_CAPACITY];
+    if(!files_path_join(path,sizeof(path),app->model.path,
+                        app->model.entries[app->selected].name)){
+        set_status(app,"Path is too long");
+        return;
+    }
+    if(pc_strlen(path)>=128){
+        set_status(app,"Path is too long for the editor");
+        return;
+    }
+    int32_t pid=pc_exec_with_args("/bin/program/nano",path);
+    if(pid<0){
+        set_status(app,"Cannot open the file editor");
+        return;
+    }
+    int32_t status=0;
+    (void)pc_wait(pid,&status,false);
+    pc_desktop_redraw();
+    refresh(app);
+}
+
 static void submit_input(struct files_app *app){
     bool success=false;
     if(app->input_mode==FILES_INPUT_NEW_FOLDER)
@@ -84,8 +118,7 @@ static void handle_key(struct files_app *app, int32_t key){
     if(key=='\b' || key==127){
         if(!app->disk_view && files_model_up(&app->model)) reset_selection(app);
     } else if((key=='\r' || key=='\n') && app->selected>=0){
-        if(files_model_enter(&app->model,(uint32_t)app->selected))
-            reset_selection(app);
+        open_selected(app);
     } else if(key=='r' || key=='R'){
         refresh(app);
     }
@@ -110,9 +143,7 @@ static void handle_action(struct files_app *app, struct files_action action){
                 open_path(app,quick_paths[action.index]);
             break;
         case FILES_ACTION_ENTRY:
-            if(action.index==app->selected
-               && files_model_enter(&app->model,(uint32_t)action.index))
-                reset_selection(app);
+            if(action.index==app->selected) open_selected(app);
             else app->selected=action.index;
             break;
         case FILES_ACTION_PREVIOUS_PAGE:

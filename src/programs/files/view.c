@@ -227,8 +227,10 @@ static void draw_status(struct files_app *app, const struct pg_event *event,
     pg_window_rect(&app->window,(struct pg_rect){0,y,width,STATUS_HEIGHT},
                    0x292A3D);
     char summary[48]={0};
-    append_u64(summary,sizeof(summary),(uint64_t)app->model.entry_count);
-    append(summary,sizeof(summary)," items");
+    append_u64(summary,sizeof(summary),app->disk_view
+               ? (uint64_t)app->model.disk_count
+               : (uint64_t)app->model.entry_count);
+    append(summary,sizeof(summary),app->disk_view ? " drives" : " items");
     pg_window_text(&app->window,12,y+11,
                    app->status[0] ? app->status : summary,
                    app->status[0] ? 0xF9E2AF : app->window.theme.muted_text);
