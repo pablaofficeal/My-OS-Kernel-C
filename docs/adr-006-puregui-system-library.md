@@ -50,6 +50,8 @@ it without changing application source.
 ### Neutral
 
 - `/bin/gui-demo` acts as executable API documentation.
+- PureGUI and its applications are compiled with `-mgeneral-regs-only` until
+  the kernel provides per-process SIMD/FPU context management.
 
 ## Alternatives Considered
 

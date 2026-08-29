@@ -68,6 +68,11 @@ All functions are allocation-free. Invalid window pointers are ignored by
 drawing operations. Applications must pair every `pg_window_begin` with
 `pg_window_end`.
 
+PureGUI applications must currently be compiled with `-mgeneral-regs-only`.
+The kernel does not yet initialize and context-switch SIMD/FPU state for ring-3
+processes; emitting SSE instructions otherwise terminates a process with the
+`#UD` exception.
+
 ## Widgets contract
 
 | Function | Contract |
