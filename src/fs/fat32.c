@@ -1689,6 +1689,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/bin/program/files\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1705,6 +1706,7 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/bin/program/files\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1778,9 +1780,9 @@ static int32_t install_program_payload(void){
        || create_directory_checked("/include")<0) return FS_ERROR_IO;
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
-    const void *nano_image,*system_image,*library_image;
+    const void *nano_image,*system_image,*files_image,*library_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
-    uint64_t system_size;
+    uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
@@ -1806,6 +1808,10 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /bin/program/system");
         return FS_ERROR_NOT_FOUND;
     }
+    if(!boot_get_module("/bin/program/files",&files_image,&files_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/files");
+        return FS_ERROR_NOT_FOUND;
+    }
     if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
         klog(KLOG_ERROR,"install: missing /bin/gui-demo");
         return FS_ERROR_NOT_FOUND;
@@ -1814,7 +1820,7 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -1856,6 +1862,12 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write system %d",status);
         return status;
     }
+    status=fat32_write_file("/bin/program/files",files_image,
+                            (uint32_t)files_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write files %d",status);
+        return status;
+    }
     status=fat32_write_file("/bin/gui-demo",gui_demo_image,
                             (uint32_t)gui_demo_size);
     if(status<0){
@@ -1869,6 +1881,8 @@ static int32_t install_program_payload(void){
     }
     if(status<0) return status;
     status=verify_installed_file("/bin/gui-demo",(uint32_t)gui_demo_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/files",(uint32_t)files_size);
     if(status<0) return status;
     return install_gui_development_payload();
 }

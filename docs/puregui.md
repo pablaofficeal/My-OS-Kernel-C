@@ -13,6 +13,7 @@ theme and input policy out of applications.
 | `/lib/libpuregui.a` | Core implementation |
 | `/lib/libpguiw.a` | Optional widgets layer |
 | `/bin/gui-demo` | Runnable example |
+| `/bin/program/files` | PureGUI file manager client |
 
 The widgets archive depends on the core archive, and the core archive depends
 on `libpurec.a`. Link them in this order:
@@ -27,6 +28,11 @@ normalized window events, while the ring-3 console syscalls constrain shell
 and child-process text output to the window client rectangle. The console
 backend retains a character grid so the terminal can repaint after a
 full-screen child such as `install`, minimize/restore, or a window move.
+
+The system file manager is also a ring-3 PureGUI client. Its path handling,
+directory model, storage-device model and Explorer-style view are separate
+modules under `src/programs/files`; none of its window or filesystem policy is
+linked into the kernel.
 
 ## Minimal application
 

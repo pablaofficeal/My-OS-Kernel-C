@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "../../fs/fs_types.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/storage/storage_types.h"
 #include "../../kernel/syscall.h"
@@ -42,6 +43,14 @@ int32_t pc_file_open(const char *path);
 int32_t pc_file_read(int32_t descriptor, void *buffer, uint32_t capacity);
 int32_t pc_file_close(int32_t descriptor);
 int32_t pc_file_write(const char *path, const void *buffer, uint32_t size);
+int32_t pc_directory_list(const char *path,
+                          struct fs_directory_entry *entries,
+                          uint32_t capacity);
+int32_t pc_file_create(const char *path);
+int32_t pc_directory_create(const char *path);
+int32_t pc_file_delete(const char *path);
+int32_t pc_file_rename(const char *path, const char *new_name);
+int32_t pc_file_move(const char *path, const char *destination_directory);
 bool pc_display_get_info(struct pc_display_info *info);
 void pc_display_begin_update(void);
 void pc_display_end_update(void);

@@ -31,6 +31,11 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/filesystem.c -o system_filesystem.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/system.c -o system_platform.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/gui_demo/main.c -o gui_demo_program.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/main.c -o files_program.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/app.c -o files_app.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/model.c -o files_model.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/path.c -o files_path.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/view.c -o files_view.o
 x86_64-elf-ld -T linker-userspace.ld -o init init_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o installer installer_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o snake snake_program.o libpurec.a
@@ -38,6 +43,7 @@ x86_64-elf-ld -T linker-userspace.ld -o terminal terminal_program.o terminal_she
 x86_64-elf-ld -T linker-userspace.ld -o nano nano_program.o nano_editor.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o system system_program.o system_commands.o system_filesystem.o system_platform.o terminal_path.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o gui-demo gui_demo_program.o libpguiw.a libpuregui.a libpurec.a
+x86_64-elf-ld -T linker-userspace.ld -o files files_program.o files_app.o files_model.o files_path.o files_view.o libpguiw.a libpuregui.a libpurec.a
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/init.c -o init_limine.o
@@ -78,7 +84,6 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/system.c -o system_api_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/userspace.c -o userspace_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/monitor/monitor.c -o monitor_limine.o
-x86_64-elf-g++ -std=c++20 -g -O1 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/explorer/explorer.cpp -o explorer_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/apps/datetime_service.c -o datetime_service_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/apps/clock_app.c -o clock_app_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/userspace/apps/calendar_app.c -o calendar_app_limine.o
@@ -95,7 +100,7 @@ nasm -f elf64 src/arch/x86_64/gdt.asm -o gdt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/idt.asm -o idt_asm_limine.o
 nasm -f elf64 src/arch/x86_64/scheduler.asm -o scheduler_asm_limine.o
 nasm -f elf64 src/arch/x86_64/user.asm -o user_asm_limine.o
-x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o init_limine.o system_info_limine.o process_limine.o program_alias_limine.o elf_limine.o pmm_limine.o vmm_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o vfs_limine.o display_limine.o userspace_fs_limine.o system_api_limine.o userspace_audio_limine.o audio_overlay_limine.o userspace_limine.o monitor_limine.o explorer_limine.o datetime_service_limine.o clock_app_limine.o calendar_app_limine.o calculator_app_limine.o desktop_apps_limine.o audio_panel_limine.o scheduler_limine.o power_limine.o audio_hda_limine.o audio_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o user_asm_limine.o
+x86_64-elf-ld -T linker-limine.ld -o kernel-limine.elf boot_limine.o kernel_limine.o init_limine.o system_info_limine.o process_limine.o program_alias_limine.o elf_limine.o pmm_limine.o vmm_limine.o gdt_limine.o idt_limine.o mmio_limine.o syscall_limine.o serial_limine.o vga_limine.o pic_limine.o timer_limine.o fb_limine.o gop_limine.o ps2_mouse_limine.o usb_mouse_limine.o string_limine.o klog_limine.o boot_diag_limine.o panic_limine.o keyboard_limine.o pci_limine.o ata_pio_limine.o ahci_limine.o xhci_limine.o ehci_limine.o block_device_limine.o storage_probe_limine.o fat32_limine.o vfs_limine.o display_limine.o userspace_fs_limine.o system_api_limine.o userspace_audio_limine.o audio_overlay_limine.o userspace_limine.o monitor_limine.o datetime_service_limine.o clock_app_limine.o calendar_app_limine.o calculator_app_limine.o desktop_apps_limine.o audio_panel_limine.o scheduler_limine.o power_limine.o audio_hda_limine.o audio_limine.o gdt_asm_limine.o idt_asm_limine.o scheduler_asm_limine.o user_asm_limine.o
 if [ ! -f "$FALLBACK_KERNEL_IMAGE" ]; then
   cp kernel-limine.elf "$FALLBACK_KERNEL_IMAGE"
 fi
@@ -128,6 +133,7 @@ cp snake iso_limine/bin/snake
 cp terminal iso_limine/bin/program/terminal
 cp nano iso_limine/bin/program/nano
 cp system iso_limine/bin/program/system
+cp files iso_limine/bin/program/files
 cp gui-demo iso_limine/bin/gui-demo
 cp libpurec.a iso_limine/lib/libpurec.a
 cp libpuregui.a iso_limine/lib/libpuregui.a
@@ -149,6 +155,7 @@ serial: yes
     module_path: boot():/bin/program/terminal
     module_path: boot():/bin/program/nano
     module_path: boot():/bin/program/system
+    module_path: boot():/bin/program/files
     module_path: boot():/bin/gui-demo
     module_path: boot():/lib/libpurec.a
     module_path: boot():/lib/libpuregui.a
@@ -165,6 +172,7 @@ serial: yes
     module_path: boot():/bin/program/terminal
     module_path: boot():/bin/program/nano
     module_path: boot():/bin/program/system
+    module_path: boot():/bin/program/files
     module_path: boot():/bin/gui-demo
     module_path: boot():/lib/libpurec.a
     module_path: boot():/lib/libpuregui.a
@@ -192,5 +200,5 @@ echo "limine bios-install..."
 chmod +x "$LIMINE_BIN" 2>/dev/null || true
 "$LIMINE_BIN" bios-install purec_limine.iso 2>&1 | tail -5
 
-ls -lh purec_limine.iso kernel-limine.elf init installer snake terminal nano system gui-demo libpurec.a libpuregui.a libpguiw.a
+ls -lh purec_limine.iso kernel-limine.elf init installer snake terminal nano system files gui-demo libpurec.a libpuregui.a libpguiw.a
 echo "purec_limine.iso"

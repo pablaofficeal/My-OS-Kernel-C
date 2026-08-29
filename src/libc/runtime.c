@@ -169,6 +169,39 @@ int32_t pc_file_write(const char *path, const void *buffer, uint32_t size){
         (uint64_t)(uintptr_t)buffer,size);
 }
 
+int32_t pc_directory_list(const char *path,
+                          struct fs_directory_entry *entries,
+                          uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_DIR_LIST,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)entries,capacity);
+}
+
+int32_t pc_file_create(const char *path){
+    return (int32_t)pc_syscall(SYS_FILE_CREATE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_directory_create(const char *path){
+    return (int32_t)pc_syscall(SYS_DIR_CREATE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_file_delete(const char *path){
+    return (int32_t)pc_syscall(SYS_FILE_DELETE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_file_rename(const char *path, const char *new_name){
+    return (int32_t)pc_syscall(SYS_FILE_RENAME,
+        (uint64_t)(uintptr_t)path,(uint64_t)(uintptr_t)new_name,0);
+}
+
+int32_t pc_file_move(const char *path, const char *destination_directory){
+    return (int32_t)pc_syscall(SYS_FILE_MOVE,
+        (uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)destination_directory,0);
+}
+
 bool pc_file_exists(const char *path){
     int32_t descriptor=(int32_t)pc_syscall(SYS_OPEN,
         (uint64_t)(uintptr_t)path,0,0);

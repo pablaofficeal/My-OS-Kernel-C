@@ -1,7 +1,6 @@
 #include "userspace.h"
 #include "apps/desktop_apps.h"
 #include "apps/audio_panel.h"
-#include "explorer/explorer.h"
 #include "monitor/monitor.h"
 #include "syscall.h"
 #include "audio.h"
@@ -229,7 +228,6 @@ static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
     if(monitor_window_is_visible()) monitor_window_draw();
-    if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
     draw_power_menu();
@@ -269,7 +267,6 @@ static void redraw_icon_move(
     display_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
     draw_desktop_icons();
     if(monitor_window_is_visible()) monitor_window_draw();
-    if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
     draw_power_menu();
@@ -319,12 +316,6 @@ static void handle_desktop_mouse(void){
             desktop_width,desktop_height,&app_redraw
         );
         redraw=redraw || app_redraw;
-    }
-    if(!consumed && explorer_window_is_visible()){
-        consumed=explorer_window_contains_point(mouse.x,mouse.y);
-        redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                             pressed,released,
-                                             desktop_width,desktop_height);
     }
     if(!consumed && monitor_window_is_visible()){
         consumed=monitor_window_contains_point(mouse.x,mouse.y);
@@ -394,7 +385,8 @@ static void handle_desktop_mouse(void){
         int8_t icon=dragged_icon;
         dragged_icon=-1;
         if(!icon_drag_moved){
-            if(icon==0) explorer_open(desktop_width,desktop_height);
+            if(icon==0)
+                (void)userspace_run_program("/bin/program/files");
             else if(icon==1) monitor_run();
             else if(icon==2)
                 (void)userspace_run_program("/bin/program/terminal");
@@ -485,10 +477,8 @@ void userspace_keyboard_thread(void *arg){
             continue;
         }
         char c;
-        while(!external_program_has_input_focus() && keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c))
-                (void)explorer_window_handle_key(c);
-        }
+        while(!external_program_has_input_focus() && keyboard_try_getc(&c))
+            (void)desktop_apps_handle_key(c);
         // Yield so input thread can run even while terminal is idle
         scheduler_yield();
         for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
@@ -576,10 +566,7 @@ void userspace_run(void){
         handle_desktop_mouse();
 
         char c;
-        while(keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c))
-                (void)explorer_window_handle_key(c);
-        }
+        while(keyboard_try_getc(&c)) (void)desktop_apps_handle_key(c);
         monitor_window_update();
         desktop_apps_update();
 
