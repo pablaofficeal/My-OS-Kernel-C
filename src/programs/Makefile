@@ -38,7 +38,8 @@ GENERAL_SOURCES := \
 	settings/core/app.c \
 	settings/pages/audio.c \
 	settings/pages/wifi.c \
-	monitor/main.c
+	monitor/main.c \
+	disks/main.c
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 TARGETS := \
@@ -51,7 +52,8 @@ TARGETS := \
 	$(PROGRAM_DIR)/gui-demo \
 	$(PROGRAM_DIR)/files \
 	$(PROGRAM_DIR)/settings \
-	$(PROGRAM_DIR)/monitor
+	$(PROGRAM_DIR)/monitor \
+	$(PROGRAM_DIR)/disks
 
 .NOTPARALLEL:
 .PHONY: all
@@ -108,5 +110,9 @@ $(PROGRAM_DIR)/settings: $(OBJ_DIR)/settings/main.o $(OBJ_DIR)/settings/core/mod
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/monitor: $(OBJ_DIR)/monitor/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
+
+$(PROGRAM_DIR)/disks: $(OBJ_DIR)/disks/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)

@@ -157,7 +157,7 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
         process->command_line[sizeof(process->command_line)-1]='\0';
     }
     strncpy(process->name,name ? name : "process",sizeof(process->name)-1);
-    if(name && strcmp(name,"installer")==0)
+    if(name && (strcmp(name,"installer")==0 || strcmp(name,"disks")==0))
         process->capabilities|=PROCESS_CAP_STORAGE_ADMIN;
     process->thread_id=scheduler_create_user_thread(
         user_process_entry,process,process->name,USER_PROCESS_PRIORITY,-1,

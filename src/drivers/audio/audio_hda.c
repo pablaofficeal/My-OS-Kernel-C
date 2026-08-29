@@ -1236,6 +1236,60 @@ bool hda_select_output_device(uint32_t index) {
     return configure_output_device(index);
 }
 
+static uint8_t amp_gain_for_volume(uint8_t node, uint8_t parameter,
+                                   uint32_t widget_caps, uint8_t volume) {
+    uint8_t capability_node=
+        (widget_caps&HDA_WIDGET_CAP_AMP_OVERRIDE)!=0
+            ? node : function_group_node;
+    uint32_t capabilities=0;
+    if(!codec_parameter(capability_node,parameter,&capabilities)) return 0;
+    uint32_t zero_db=capabilities&0x7F;
+    return (uint8_t)((zero_db*volume)/100U);
+}
+
+static bool set_widget_master_gain(uint8_t node, uint8_t connection,
+                                   uint8_t volume, bool muted) {
+    uint32_t capabilities=0;
+    if(!codec_parameter(node,HDA_PARAMETER_WIDGET_CAPS,&capabilities))
+        return false;
+    bool ready=true;
+    uint16_t mute=muted ? 0x80U : 0;
+    if((capabilities&HDA_WIDGET_CAP_INPUT_AMP)!=0){
+        uint8_t gain=amp_gain_for_volume(
+            node,HDA_PARAMETER_INPUT_AMP_CAPS,capabilities,volume);
+        uint16_t payload=(uint16_t)(0x7000U
+            |((uint16_t)connection<<8)|mute|gain);
+        if(!codec_command(node,HDA_VERB_SET_AMP_GAIN_MUTE,payload))
+            ready=false;
+    }
+    if((capabilities&HDA_WIDGET_CAP_OUTPUT_AMP)!=0){
+        uint8_t gain=amp_gain_for_volume(
+            node,HDA_PARAMETER_OUTPUT_AMP_CAPS,capabilities,volume);
+        if(!codec_command(node,HDA_VERB_SET_AMP_GAIN_MUTE,
+                          (uint16_t)(0xB000U|mute|gain))) ready=false;
+    }
+    return ready;
+}
+
+bool hda_set_master_volume(uint8_t volume, bool muted) {
+    if(!pcm_ready || selected_output_index>=output_device_count) return false;
+    if(volume>100) volume=100;
+    const struct hda_output_device_info *device=
+        &output_devices[selected_output_index];
+    codec_address=device->codec_address;
+    function_group_node=device->function_group_node;
+    bool ready=true;
+    for(uint8_t index=0;index<device->route_length;index++)
+        if(!set_widget_master_gain(device->route_nodes[index],
+                                   device->route_connections[index],
+                                   volume,muted)) ready=false;
+    if(!set_widget_master_gain(device->dac_node,0,volume,muted)) ready=false;
+    klogf(ready ? KLOG_DEBUG : KLOG_WARN,
+          "audio: HDA master gain volume=%u mute=%u route=%u result=%u",
+          volume,muted ? 1 : 0,selected_output_index,ready ? 1 : 0);
+    return ready;
+}
+
 bool hda_play_tone(uint16_t frequency_hz, uint8_t volume) {
     if (!pcm_ready || frequency_hz == 0 || volume == 0) {
         klogf(KLOG_WARN,

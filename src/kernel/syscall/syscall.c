@@ -612,6 +612,10 @@ int64_t syscall_handler(struct syscall_regs *r){
             char character;
             return keyboard_try_getc(&character) ? (uint8_t)character : -1;
         }
+        case SYS_TRY_GET_SPECIAL: {
+            uint8_t key;
+            return keyboard_try_get_special(&key) ? key : -1;
+        }
         case SYS_INSTALL_START:
             if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -10;
             if(!readable_string((const char*)(uintptr_t)a1)
@@ -645,6 +649,56 @@ int64_t syscall_handler(struct syscall_regs *r){
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;
     }
+}
+
+static uint32_t parse_setting_u32(const char *text){
+    uint32_t value=0;
+    while(*text>='0' && *text<='9'){
+        uint32_t digit=(uint32_t)(*text-'0');
+        if(value>(UINT32_MAX-digit)/10U) return UINT32_MAX;
+        value=value*10U+digit;
+        text++;
+    }
+    return value;
+}
+
+static void audio_restore_system_settings(void){
+    int32_t descriptor=vfs_open("/config/settings.ini");
+    if(descriptor<0){
+        klog(KLOG_INFO,"audio: no saved system settings; detected defaults kept");
+        return;
+    }
+    char buffer[256]={0};
+    int32_t amount=vfs_read(descriptor,buffer,sizeof(buffer)-1);
+    (void)vfs_close(descriptor);
+    if(amount<=0) return;
+    buffer[amount]='\0';
+    struct audio_status detected={0};
+    audio_get_status(&detected);
+    uint32_t volume=detected.volume;
+    uint32_t device=detected.selected_output_device;
+    bool muted=detected.muted!=0;
+    for(char *line=buffer;*line;){
+        char *end=line;
+        while(*end && *end!='\n' && *end!='\r') end++;
+        char saved=*end;
+        *end='\0';
+        if(strncmp(line,"volume=",7)==0) volume=parse_setting_u32(line+7);
+        else if(strncmp(line,"muted=",6)==0)
+            muted=parse_setting_u32(line+6)!=0;
+        else if(strncmp(line,"device=",7)==0)
+            device=parse_setting_u32(line+7);
+        if(!saved) break;
+        line=end+1;
+        while(*line=='\n' || *line=='\r') line++;
+    }
+    if(volume>100) volume=100;
+    if(device<detected.output_device_count)
+        (void)audio_select_output_device(device);
+    audio_set_volume((uint8_t)volume);
+    audio_set_muted(muted);
+    klogf(KLOG_OK,"audio: restored settings volume=%u mute=%u device=%u",
+          volume,muted ? 1 : 0,device);
 }
 
 void syscall_init(void){
@@ -689,6 +743,7 @@ void syscall_init(void){
         klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
         if(vfs_mount_root()){
             klogf(KLOG_OK,"vfs: root mounted from %s",vfs_root_device_name());
+            audio_restore_system_settings();
             {
                 int32_t fd=vfs_open("/purec/install.cfg");
                 if(fd>=0){

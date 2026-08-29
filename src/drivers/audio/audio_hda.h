@@ -40,6 +40,7 @@ uint32_t hda_output_device_count(void);
 uint32_t hda_selected_output_device(void);
 bool hda_get_output_device(uint32_t index, struct hda_output_device_info *out);
 bool hda_select_output_device(uint32_t index);
+bool hda_set_master_volume(uint8_t volume, bool muted);
 bool hda_play_tone(uint16_t frequency_hz, uint8_t volume);
 void hda_stop_tone(void);
 bool hda_get_controller_info(struct hda_controller_info *out);

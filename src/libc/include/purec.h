@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "../../fs/fs_types.h"
 #include "../../drivers/mouse/ps2_mouse.h"
+#include "../../drivers/input/keyboard.h"
 #include "../../drivers/storage/storage_types.h"
 #include "../../kernel/syscall/syscall.h"
 
@@ -31,6 +32,7 @@ int32_t pc_exec(const char *path);
 int32_t pc_exec_with_args(const char *path, const char *arguments);
 int32_t pc_wait(int32_t pid, int32_t *status, bool nohang);
 int32_t pc_try_getchar(void);
+int32_t pc_try_get_special(void);
 int32_t pc_get_command_line(char *buffer, uint32_t capacity);
 int32_t pc_get_process_name(char *buffer, uint32_t capacity);
 int32_t pc_getenv(const char *name, char *buffer, uint32_t capacity);

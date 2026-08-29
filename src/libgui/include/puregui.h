@@ -41,6 +41,7 @@ enum pg_event_type {
     PG_EVENT_MINIMIZE,
     PG_EVENT_FOCUS,
     PG_EVENT_REPAINT,
+    PG_EVENT_SPECIAL_KEY,
     PG_EVENT_CLOSE
 };
 

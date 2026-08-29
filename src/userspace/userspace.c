@@ -49,6 +49,7 @@ static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
 static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
 static uint32_t settings_icon_x=256,settings_icon_y=ICON_Y;
 static uint32_t installer_icon_x=328,installer_icon_y=ICON_Y;
+static uint32_t disks_icon_x=400,disks_icon_y=130;
 static bool installer_icon_visible=true;
 static bool external_program_active;
 static uint32_t desktop_redraw_requested;
@@ -136,6 +137,7 @@ static void draw_desktop_icons(void){
     draw_app_icon(settings_icon_x,settings_icon_y,"{}", "Settings",0x94E2D5);
     if(installer_icon_visible)
         draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
+    draw_app_icon(disks_icon_x,disks_icon_y,"HD","Disks",0xF9E2AF);
 }
 
 static bool installation_present(void){
@@ -380,7 +382,7 @@ static void handle_desktop_mouse(void){
         );
         redraw=redraw || app_redraw;
     }
-    uint32_t *icon_positions[8]={
+    uint32_t *icon_positions[9]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
@@ -388,9 +390,10 @@ static void handle_desktop_mouse(void){
         &calculator_icon_x,
         &calendar_icon_x,
         &settings_icon_x,
-        &installer_icon_x
+        &installer_icon_x,
+        &disks_icon_x
     };
-    uint32_t *icon_y_positions[8]={
+    uint32_t *icon_y_positions[9]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
@@ -398,10 +401,11 @@ static void handle_desktop_mouse(void){
         &calculator_icon_y,
         &calendar_icon_y,
         &settings_icon_y,
-        &installer_icon_y
+        &installer_icon_y,
+        &disks_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<8;index++){
+        for(int8_t index=0;index<9;index++){
             if(index==7 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
@@ -448,6 +452,8 @@ static void handle_desktop_mouse(void){
             else if(icon==6)
                 (void)userspace_run_program("/bin/program/settings");
             else if(icon==7) launch_installer();
+            else if(icon==8)
+                (void)userspace_run_program("/bin/program/disks");
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;
@@ -516,7 +522,8 @@ void userspace_input_thread(void *arg){
             scheduler_sleep(10);
             continue;
         }
-        if(handle_special_keyboard()) redraw_managed_scene(0);
+        if(!window_manager_has_focus() && handle_special_keyboard())
+            redraw_managed_scene(0);
         handle_desktop_mouse();
         desktop_apps_update();
         scheduler_sleep(1);
@@ -617,7 +624,8 @@ void userspace_run(void){
             scheduler_yield();
             continue;
         }
-        if(handle_special_keyboard()) redraw_managed_scene(0);
+        if(!window_manager_has_focus() && handle_special_keyboard())
+            redraw_managed_scene(0);
         handle_desktop_mouse();
 
         char c;

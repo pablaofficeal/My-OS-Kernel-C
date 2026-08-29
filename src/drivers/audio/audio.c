@@ -126,6 +126,8 @@ void audio_init(void) {
         klog(KLOG_WARN,
              "audio: legacy fallback reason=HDA_CONTROLLER_NOT_FOUND");
     }
+    if(master_bus.pcm_ready)
+        (void)hda_set_master_volume(master_bus.volume,master_bus.muted);
     klogf(KLOG_INFO, "audio: master bus volume=%u mute=%u backend=%u available=0x%x pcm=%u",
           master_bus.volume, master_bus.muted ? 1 : 0,
           master_bus.active_backend, master_bus.available_backends,
@@ -188,6 +190,8 @@ void audio_set_volume(uint8_t volume) {
     if (master_bus.muted || master_bus.volume == 0) {
         stop_test_sound();
     }
+    if(master_bus.pcm_ready)
+        (void)hda_set_master_volume(master_bus.volume,master_bus.muted);
 }
 
 void audio_set_muted(bool muted) {
@@ -201,6 +205,8 @@ void audio_set_muted(bool muted) {
     if (master_bus.muted) {
         stop_test_sound();
     }
+    if(master_bus.pcm_ready)
+        (void)hda_set_master_volume(master_bus.volume,master_bus.muted);
 }
 
 void audio_adjust_volume(int8_t delta) {
@@ -245,6 +251,7 @@ bool audio_select_output_device(uint32_t index) {
     }
     master_bus.active_backend = AUDIO_BACKEND_HDA;
     master_bus.pcm_ready = true;
+    (void)hda_set_master_volume(master_bus.volume,master_bus.muted);
     klogf(KLOG_OK, "audio: output device selected index=%u backend=HDA hda_index=%u",
           index, hda_index);
     return true;

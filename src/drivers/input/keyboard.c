@@ -32,6 +32,7 @@ static bool caps_lock = false;
 static uint8_t active_scan_set = 1;
 static bool set2_break_pending = false;
 static bool set2_extended = false;
+static bool set1_extended = false;
 static uint8_t set2_pause_bytes = 0;
 
 // US QWERTY scancode set 1, без shift
@@ -135,6 +136,26 @@ static void emit_key(const char *plain, const char *shifted, uint8_t sc){
 }
 
 static void handle_scancode_set1(uint8_t sc){
+    if(sc==0xE0){ set1_extended=true; return; }
+    if(set1_extended){
+        bool released=(sc&0x80)!=0;
+        sc&=0x7F;
+        set1_extended=false;
+        if(released) return;
+        switch(sc){
+            case 0x47: special_push(KEYBOARD_SPECIAL_HOME); break;
+            case 0x4F: special_push(KEYBOARD_SPECIAL_END); break;
+            case 0x49: special_push(KEYBOARD_SPECIAL_PAGE_UP); break;
+            case 0x51: special_push(KEYBOARD_SPECIAL_PAGE_DOWN); break;
+            case 0x4B: special_push(KEYBOARD_SPECIAL_LEFT); break;
+            case 0x4D: special_push(KEYBOARD_SPECIAL_RIGHT); break;
+            case 0x48: special_push(KEYBOARD_SPECIAL_UP); break;
+            case 0x50: special_push(KEYBOARD_SPECIAL_DOWN); break;
+            case 0x53: special_push(KEYBOARD_SPECIAL_DELETE); break;
+            default: break;
+        }
+        return;
+    }
     if(sc == 0x1D){
         control_pressed = true;
         return;
@@ -213,6 +234,15 @@ static void handle_scancode_set2(uint8_t sc){
     if(extended){
         if(sc == 0x5A) kbd_push('\n'); // keypad Enter
         if(sc == 0x4A) kbd_push('/');  // keypad slash
+        if(sc == 0x6C) special_push(KEYBOARD_SPECIAL_HOME);
+        if(sc == 0x69) special_push(KEYBOARD_SPECIAL_END);
+        if(sc == 0x7D) special_push(KEYBOARD_SPECIAL_PAGE_UP);
+        if(sc == 0x7A) special_push(KEYBOARD_SPECIAL_PAGE_DOWN);
+        if(sc == 0x6B) special_push(KEYBOARD_SPECIAL_LEFT);
+        if(sc == 0x74) special_push(KEYBOARD_SPECIAL_RIGHT);
+        if(sc == 0x75) special_push(KEYBOARD_SPECIAL_UP);
+        if(sc == 0x72) special_push(KEYBOARD_SPECIAL_DOWN);
+        if(sc == 0x71) special_push(KEYBOARD_SPECIAL_DELETE);
         return;
     }
     if(sc == 0x05){
@@ -326,6 +356,7 @@ static bool decoder_self_test(void){
     caps_lock = false;
     set2_break_pending = false;
     set2_extended = false;
+    set1_extended = false;
     set2_pause_bytes = 0;
     kbd_head = kbd_tail = kbd_count = 0;
     special_head = special_tail = special_count = 0;
@@ -334,16 +365,23 @@ static bool decoder_self_test(void){
     handle_scancode(0xF0);
     handle_scancode(0x1C); // A break
     handle_scancode(0x5A); // Enter make in Set 2
+    handle_scancode(0xE0);
+    handle_scancode(0x7D); // Page Up make in Set 2
 
     char first=0, second=0, extra=0;
+    uint8_t navigation=0,extra_special=0;
     bool ok = kbd_pop(&first) && kbd_pop(&second) && !kbd_pop(&extra)
-        && first=='a' && second=='\n';
+        && first=='a' && second=='\n'
+        && special_pop(&navigation)
+        && navigation==KEYBOARD_SPECIAL_PAGE_UP
+        && !special_pop(&extra_special);
 
     shift_pressed = false;
     control_pressed = false;
     caps_lock = false;
     set2_break_pending = false;
     set2_extended = false;
+    set1_extended = false;
     set2_pause_bytes = 0;
     kbd_head = kbd_tail = kbd_count = 0;
     special_head = special_tail = special_count = 0;

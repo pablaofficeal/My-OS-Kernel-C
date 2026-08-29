@@ -121,6 +121,10 @@ int32_t pc_try_getchar(void){
     return (int32_t)pc_syscall(SYS_TRY_GETCHAR,0,0,0);
 }
 
+int32_t pc_try_get_special(void){
+    return (int32_t)pc_syscall(SYS_TRY_GET_SPECIAL,0,0,0);
+}
+
 int32_t pc_get_command_line(char *buffer, uint32_t capacity){
     return (int32_t)pc_syscall(SYS_GET_COMMAND_LINE,
         (uint64_t)(uintptr_t)buffer,capacity,0);

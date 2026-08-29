@@ -63,6 +63,20 @@ bool nano_window_is_minimized(const struct nano_window *window){
     return window && pg_window_is_minimized(&window->gui);
 }
 
+uint32_t nano_window_console_rows(const struct nano_window *window){
+    if(!window) return 0;
+    struct pg_rect client=pg_window_client(&window->gui);
+    return client.height>window->inset*2
+        ? (client.height-window->inset*2)/10U : 0;
+}
+
+uint32_t nano_window_console_columns(const struct nano_window *window){
+    if(!window) return 0;
+    struct pg_rect client=pg_window_client(&window->gui);
+    return client.width>window->inset*2
+        ? (client.width-window->inset*2)/8U : 0;
+}
+
 void nano_window_shutdown(struct nano_window *window){
     if(!window) return;
     nano_window_end_render(window);

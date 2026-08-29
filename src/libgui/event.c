@@ -34,6 +34,12 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
             if(event->type==PG_EVENT_CLOSE) pg_window_close(window);
             return true;
         }
+        int32_t special=pc_try_get_special();
+        if(special>=0){
+            event->key=special;
+            event->type=PG_EVENT_SPECIAL_KEY;
+            return true;
+        }
     }
     struct mouse_state mouse;
     if(!pc_mouse_get(&mouse)) return false;
