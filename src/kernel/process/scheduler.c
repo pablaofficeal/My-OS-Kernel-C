@@ -10,6 +10,7 @@ static struct thread threads[SCHEDULER_MAX_THREADS];
 static struct thread *current = NULL;
 static uint32_t next_id = 1;
 static bool initialized = false;
+static bool started = false;
 static volatile bool need_resched = false;
 static uint32_t core_count = 1;
 static volatile uint64_t total_ticks;
@@ -233,7 +234,6 @@ void scheduler_block(void){
     uint64_t flags;
     __asm__ volatile("pushfq; pop %0; cli":"=r"(flags)::"memory");
     current->state = THREAD_BLOCKED;
-    klogf(KLOG_DEBUG, "sched: thread %u (%s) blocked", current->id, current->name);
     struct thread *prev = current;
     struct thread *next = pick_next();
     if(!next){
@@ -299,6 +299,7 @@ static void scheduler_schedule(void){
 }
 
 void scheduler_on_timer_interrupt(void){
+    if(!started) return;
     scheduler_tick();
     scheduler_schedule();
 }
@@ -306,6 +307,7 @@ void scheduler_on_timer_interrupt(void){
 void scheduler_start(void){
     if(!initialized) for(;;) __asm__ volatile("cli; hlt");
     klogf(KLOG_INFO, "sched: starting with %u threads", scheduler_thread_count());
+    started=true;
     scheduler_yield();
     /* The boot context is threads[0].  It must be the real idle task; falling
        through here used to start a second desktop/input polling loop. */
