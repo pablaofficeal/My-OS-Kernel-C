@@ -10,7 +10,7 @@
 #define XHCI_DEVICE_LIMIT       4
 #define XHCI_RING_ENTRIES       64
 #define XHCI_EVENT_ENTRIES      128
-#define XHCI_TIMEOUT            50000000U
+#define XHCI_TIMEOUT            200000000U
 #define XHCI_MMIO_MAP_SIZE      0x100000U
 #define XHCI_SCRATCHPAD_LIMIT   1023
 #define XHCI_NO_DEVICE          0xFF
@@ -286,11 +286,6 @@ static bool dispatch_mouse_event(const struct xhci_trb *event){
         } else {
             probe_stats.mouse_transfer_errors++;
             probe_stats.last_completion_code=code;
-            /* A transaction error is recoverable for an interrupt endpoint.
-               Do not turn a transient babble/CRC/link error into a permanent
-               "sleeping" mouse.  The failed TRB is consumed by the
-               controller; interrupt_pending is already clear, so the next
-               poll submits a fresh report request. */
             if(device->interrupt_errors<UINT8_MAX) device->interrupt_errors++;
             if(device->interrupt_errors==1 || device->interrupt_errors==3)
                 klogf(KLOG_WARN,"xhci%u: HID mouse transfer error slot=%u ep=%u code=%u; retrying",
@@ -425,9 +420,6 @@ static uint16_t initial_packet_size(uint8_t speed){
     return 8;
 }
 
-/* xHCI stores FS/LS interrupt periods as log2(microframes), not USB's
-   millisecond bInterval.  Round down to the nearest power of two as required
-   by the xHCI endpoint-context interval encoding. */
 static uint8_t fs_ls_interrupt_interval(uint8_t b_interval){
     uint32_t microframes=(uint32_t)(b_interval ? b_interval : 1U)*8U;
     uint32_t period=1;
@@ -632,12 +624,17 @@ static bool find_boot_mouse_interface(uint16_t total_length,
         } else if(type==USB_DESCRIPTOR_INTERFACE && length>=9){
             if(descriptor_buffer[offset+5]==USB_CLASS_HID){
                 probe_stats.hid_interfaces++;
+                klogf(KLOG_DEBUG,"xhci%u: HID interface=%u subclass=%u protocol=%u",
+                      controller_number,descriptor_buffer[offset+2],
+                      descriptor_buffer[offset+6],descriptor_buffer[offset+7]);
             }
             if(descriptor_buffer[offset+5]==USB_CLASS_HUB){
                 probe_stats.hubs++;
             }
             mouse_interface=descriptor_buffer[offset+5]==USB_CLASS_HID
-                && descriptor_buffer[offset+7]==USB_HID_PROTOCOL_MOUSE;
+                && descriptor_buffer[offset+6]==USB_HID_SUBCLASS_BOOT
+                && (descriptor_buffer[offset+7]==USB_HID_PROTOCOL_MOUSE
+                    || descriptor_buffer[offset+7]==0);
             if(mouse_interface) *interface_number=descriptor_buffer[offset+2];
         } else if(type==USB_DESCRIPTOR_ENDPOINT && length>=7
                   && mouse_interface && (descriptor_buffer[offset+3]&3)==3
@@ -725,10 +722,6 @@ static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
     }
     endpoint[0]=(uint32_t)xhci_interval<<16;
     uint16_t report_length=packet_size<8 ? packet_size : 8;
-    /* Endpoint Context DW4: Max ESIT Payload is low 16 bits and Average TRB
-       Length is high 16 bits.  Keep both bounded by the actual report size;
-       reversing these fields can make the controller reject otherwise valid
-       interrupt transfers with USB Transaction Error. */
     endpoint[4]=(uint32_t)packet_size|((uint32_t)report_length<<16);
     if(!submit_command(physical_address(input),XHCI_TRB_CONFIGURE_EP,
                        devices[index].slot_id,0)) return false;
