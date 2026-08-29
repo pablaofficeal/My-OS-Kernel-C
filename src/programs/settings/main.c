@@ -13,8 +13,23 @@ static int settings_main(void){
     if(!pg_window_center(&w,"Settings - PureC",width,height)) return 1;
     struct pg_event ev={0};
     settings_app_draw(&app,&w,&ev);
+    uint32_t idle_ticks=0;
     while(pg_window_is_open(&w)){
-        if(!pg_window_poll_event(&w,&ev)){ pc_sleep(16); continue; }
+        if(!pg_window_poll_event(&w,&ev)){
+            pc_sleep(16);
+            if(app.tab==2){
+                idle_ticks++;
+                if(idle_ticks>=6){
+                    idle_ticks=0;
+                    struct pg_event repaint={.type=PG_EVENT_REPAINT};
+                    settings_app_draw(&app,&w,&repaint);
+                }
+            } else {
+                idle_ticks=0;
+            }
+            continue;
+        }
+        idle_ticks=0;
         if(ev.type==PG_EVENT_CLOSE) break;
         if(ev.type==PG_EVENT_MOUSE_MOVE) continue;
         settings_app_draw(&app,&w,&ev);
