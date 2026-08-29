@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define INSTALL_WORKER_PRIORITY 1
+#define INSTALL_WORKER_PRIORITY 3
 
 static volatile bool filesystem_syscall_busy;
 static struct install_status install_job;

@@ -66,6 +66,8 @@ static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 static void redraw_scene(void);
 static void redraw_managed_scene(uint32_t excluded_pid);
+static int32_t userspace_run_detached(const char *path,
+                                      const char *arguments);
 static int32_t userspace_run_program_with_args(const char *path,
                                                const char *arguments);
 
@@ -144,7 +146,7 @@ static bool installation_present(void){
 }
 
 static void launch_installer(void){
-    (void)userspace_run_program_with_args("/bin/program/terminal","install");
+    (void)userspace_run_detached("/bin/installer",0);
 }
 
 static bool installer_requires_restart(int32_t status){
@@ -160,6 +162,16 @@ static int32_t detached_program_slot(void){
         if(detached_programs[index]<=0) return (int32_t)index;
     }
     return -1;
+}
+
+static int32_t userspace_run_detached(const char *path,
+                                      const char *arguments){
+    int32_t slot=detached_program_slot();
+    if(slot<0) return -1;
+    int32_t pid=(int32_t)userspace_syscall(
+        SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
+    if(pid>=0) detached_programs[slot]=pid;
+    return pid;
 }
 
 static void reap_detached_programs(void){
@@ -179,14 +191,7 @@ static int32_t userspace_run_program_with_args(const char *path,
                                                const char *arguments){
     if(!path) return -1;
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
-    if(!supervise_installer){
-        int32_t slot=detached_program_slot();
-        if(slot<0) return -1;
-        int32_t pid=(int32_t)userspace_syscall(
-            SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
-        if(pid>=0) detached_programs[slot]=pid;
-        return pid;
-    }
+    if(!supervise_installer) return userspace_run_detached(path,arguments);
     if(external_program_has_input_focus()) return -1;
     set_external_program_input_focus(true);
     window_manager_set_suspended(true);

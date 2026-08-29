@@ -17,7 +17,7 @@ x86_64-elf-ar rcs libpuregui.a puregui_theme.o puregui_draw.o puregui_window.o p
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/libgui/widgets.c -o puregui_widgets.o
 x86_64-elf-ar rcs libpguiw.a puregui_widgets.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/init/main.c -o init_program.o
-x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/installer/main.c -o installer_program.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/installer/main.c -o installer_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/game/snake/main.c -o snake_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/terminal/main.c -o terminal_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/terminal/shell.c -o terminal_shell.o
@@ -38,7 +38,7 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/path.c -o files_path.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/files/view.c -o files_view.o
 x86_64-elf-ld -T linker-userspace.ld -o init init_program.o libpurec.a
-x86_64-elf-ld -T linker-userspace.ld -o installer installer_program.o libpurec.a
+x86_64-elf-ld -T linker-userspace.ld -o installer installer_program.o terminal_window.o libpuregui.a libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o snake snake_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o terminal terminal_program.o terminal_shell.o terminal_path.o terminal_environment.o terminal_window.o libpuregui.a libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o nano nano_program.o nano_editor.o nano_window.o libpuregui.a libpurec.a

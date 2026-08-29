@@ -23,8 +23,9 @@ even when no hover or application state changed.
 Add a bounded system window registry for PureGUI processes. Each window
 registers its frame, the desktop raises the topmost window under a click, and
 only the focused process may consume keyboard input. Normal desktop launches
-are detached and reaped asynchronously. The Install icon starts a PureGUI
-terminal whose initial command invokes the installer inside its console region.
+are detached and reaped asynchronously. The standalone installer uses the
+shared terminal-style PureGUI window and services repaint events while its
+kernel disk worker runs.
 
 The desktop input, keyboard and ordinary ring-3 processes share priority 1 and
 the desktop loops sleep after each polling pass. Both parts are required by the

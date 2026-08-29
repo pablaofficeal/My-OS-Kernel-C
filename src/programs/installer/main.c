@@ -1,4 +1,5 @@
 #include "../../libc/include/purec.h"
+#include "../terminal/window.h"
 
 #define MAX_INSTALL_DISKS 20
 
@@ -10,6 +11,7 @@
 static struct storage_device_info disks[MAX_INSTALL_DISKS];
 static int32_t disk_count;
 static int32_t selected_disk;
+static struct terminal_window installer_window;
 
 static void clear_console(void) {
     pc_console_clear();
@@ -61,9 +63,10 @@ static int32_t parse_disk_number(const char *text) {
     return value - 1;
 }
 
-static void wait_for_enter(void) {
+static bool wait_for_enter(void) {
     char input[2];
-    pc_read_line("Press Enter to continue.\n", input, sizeof(input));
+    return terminal_window_read_line(&installer_window,
+        "Press Enter to continue.\n",input,sizeof(input));
 }
 
 static bool select_disk(void) {
@@ -78,7 +81,9 @@ static bool select_disk(void) {
             print_disk(&disks[i], i);
         }
 
-        pc_read_line("\nDisk number (or q to quit): ", input, sizeof(input));
+        if(!terminal_window_read_line(&installer_window,
+                "\nDisk number (or q to quit): ",input,sizeof(input)))
+            return false;
         if (pc_strcmp(input, "q") == 0 || pc_strcmp(input, "Q") == 0) {
             return false;
         }
@@ -86,12 +91,12 @@ static bool select_disk(void) {
         int32_t index = parse_disk_number(input);
         if (index < 0) {
             pc_write("Invalid disk number.\n");
-            wait_for_enter();
+            if(!wait_for_enter()) return false;
             continue;
         }
         if (!disks[index].operational || !disks[index].writable) {
             pc_write("This disk cannot be used.\n");
-            wait_for_enter();
+            if(!wait_for_enter()) return false;
             continue;
         }
 
@@ -115,8 +120,9 @@ static bool confirm_erase(void) {
     pc_write_u64(disk_size_mib(disk));
     pc_write(" MiB\n\n");
     pc_write("WARNING: every partition and file on this disk will be erased.\n");
-    pc_read_line("Type ERASE to start, or anything else to cancel: ",
-                 input, sizeof(input));
+    if(!terminal_window_read_line(&installer_window,
+            "Type ERASE to start, or anything else to cancel: ",
+            input,sizeof(input))) return false;
     return pc_strcmp(input, "ERASE") == 0;
 }
 
@@ -168,7 +174,8 @@ static void wait_for_reboot(void) {
     pc_write("\nInstallation completed successfully.\n");
     pc_write("Remove the installation media, type REBOOT and press Enter.\n");
     for (;;) {
-        pc_read_line("> ", input, sizeof(input));
+        if(!terminal_window_read_line(&installer_window,"> ",input,
+                                      sizeof(input))) return;
         if (pc_strcmp(input, "REBOOT") == 0 ||
             pc_strcmp(input, "reboot") == 0) {
             (void)pc_syscall(SYS_REBOOT, 0, 0, 0);
@@ -202,6 +209,7 @@ static bool run_installation(bool start_job) {
     }
 
     for (;;) {
+        if(!terminal_window_service(&installer_window)) return false;
         if (!pc_install_status(&status)) {
             pc_write("Cannot read installation status.\n");
             return false;
@@ -243,6 +251,7 @@ static int installer_main(void) {
 
     for (;;) {
         if (!select_disk()) {
+            if(!pg_window_is_open(&installer_window.gui)) return 0;
             clear_console();
             pc_write("Installation cancelled.\n");
             return 0;
@@ -253,11 +262,16 @@ static int installer_main(void) {
         if (run_installation(true)) {
             return 0;
         }
+        if(!pg_window_is_open(&installer_window.gui)) return 0;
         pc_write("\n");
-        wait_for_enter();
+        if(!wait_for_enter()) return 0;
     }
 }
 
 void _start(void) {
-    pc_exit(installer_main());
+    if(!terminal_window_init_titled(&installer_window,"PureC Installer"))
+        pc_exit(1);
+    int status=installer_main();
+    terminal_window_shutdown(&installer_window);
+    pc_exit(status);
 }

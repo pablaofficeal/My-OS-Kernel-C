@@ -24,16 +24,17 @@ file probing, input, mouse and framebuffer primitives. Static linking is used
 because the current ELF loader has no dynamic relocation support.
 
 Expose the installer as a desktop icon only while `/purec/install.cfg` is
-absent. The icon starts the PureGUI terminal with `install` as its initial
-command. The standalone installer remains the storage-capable worker UI, but
-it inherits the terminal console region and clears only that region instead of
-the complete framebuffer. It lists real block devices, accepts a numbered
-selection and requires the explicit `ERASE` confirmation. Disk formatting runs
-in a kernel worker and reports real FAT32 stages through `SYS_INSTALL_STATUS`
-and `SYS_INSTALL_LOG` without blocking progress output.
+absent. The icon starts the standalone installer, which creates a terminal-style
+PureGUI window through the shared terminal window adapter. It clears only that
+window's console region instead of the complete framebuffer. It lists real
+block devices, accepts a numbered selection and requires the explicit `ERASE`
+confirmation. Disk formatting runs in a kernel worker and reports real FAT32
+stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG` without blocking
+window events or progress output.
 
-The install worker shares interactive scheduler priority 1 so a continuously
-ready application cannot starve disk progress on single-core hardware.
+The install worker uses background scheduler priority 3. The installer UI
+sleeps while polling progress, allowing disk work to run without competing in
+the interactive priority-1 round-robin queue on single-core hardware.
 
 ## Consequences
 
