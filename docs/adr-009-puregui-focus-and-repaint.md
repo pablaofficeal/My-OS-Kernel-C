@@ -23,13 +23,14 @@ even when no hover or application state changed.
 Add a bounded system window registry for PureGUI processes. Each window
 registers its frame, the desktop raises the topmost window under a click, and
 only the focused process may consume keyboard input. Normal desktop launches
-are detached and reaped asynchronously; the installer retains its supervised
-exclusive launch path.
+are detached and reaped asynchronously. The Install icon starts a PureGUI
+terminal whose initial command invokes the installer inside its console region.
 
-The desktop input and keyboard loops sleep after each polling pass. This is
-required by the strict-priority scheduler: a continuously ready priority-zero
-desktop thread would otherwise starve detached ring-3 processes before their
-first instruction.
+The desktop input, keyboard and ordinary ring-3 processes share priority 1 and
+the desktop loops sleep after each polling pass. Both parts are required by the
+strict-priority scheduler: on real timer hardware the former priority-zero
+desktop thread could repeatedly preempt detached ring-3 processes before their
+first instruction. Kernel logging remains a lower-priority background task.
 
 When the desktop surface must be restored, registered windows receive ordered
 `PG_EVENT_REPAINT` events from bottom to top. `pg_window_end()` acknowledges the
@@ -60,11 +61,6 @@ focus, explicit repaint, minimize or actual window movement.
   composition.
 - A client that does not service events can miss a restoration after the
   bounded repaint timeout.
-
-### Neutral
-
-- The installer remains exclusive because its crash supervision and disk
-  workflow intentionally block ordinary desktop interaction.
 
 ## Alternatives Considered
 

@@ -1,6 +1,5 @@
 #include "../../libc/include/purec.h"
 
-#define CONSOLE_BACKGROUND 0x181824u
 #define MAX_INSTALL_DISKS 20
 
 #define INSTALL_IDLE 0
@@ -13,9 +12,7 @@ static int32_t disk_count;
 static int32_t selected_disk;
 
 static void clear_console(void) {
-    pc_display_begin_update();
-    pc_display_clear(CONSOLE_BACKGROUND);
-    pc_display_end_update();
+    pc_console_clear();
 }
 
 static void print_separator(void) {

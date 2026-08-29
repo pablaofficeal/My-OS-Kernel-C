@@ -40,9 +40,9 @@ void init_process_start(uint32_t detected_cpu_count){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN,
                          "init and desktop ready, starting scheduler");
 
-    scheduler_create_thread(userspace_input_thread, 0, "init-input", 0, 0);
+    scheduler_create_thread(userspace_input_thread, 0, "init-input", 1, 0);
     scheduler_create_thread(userspace_keyboard_thread, 0, "desktop-keyboard", 1, 0);
-    scheduler_create_thread(userspace_log_thread, 0, "kernel-log", 2, 0);
+    scheduler_create_thread(userspace_log_thread, 0, "kernel-log", 3, 0);
     klog(KLOG_OK, "sched: init threads created, starting scheduler");
     serial_write_string("[SCHED] start\n");
     scheduler_start();

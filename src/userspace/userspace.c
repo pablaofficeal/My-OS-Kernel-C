@@ -66,6 +66,8 @@ static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 static void redraw_scene(void);
 static void redraw_managed_scene(uint32_t excluded_pid);
+static int32_t userspace_run_program_with_args(const char *path,
+                                               const char *arguments);
 
 static bool external_program_has_input_focus(void){
     return __atomic_load_n(&external_program_active,__ATOMIC_ACQUIRE);
@@ -142,8 +144,7 @@ static bool installation_present(void){
 }
 
 static void launch_installer(void){
-    (void)userspace_run_program("/bin/installer");
-    installer_icon_visible=!installation_present();
+    (void)userspace_run_program_with_args("/bin/program/terminal","install");
 }
 
 static bool installer_requires_restart(int32_t status){
@@ -167,17 +168,22 @@ static void reap_detached_programs(void){
         int32_t status=0;
         int64_t result=userspace_syscall(SYS_WAIT,
             (uint64_t)detached_programs[index],(uint64_t)&status,1);
-        if(result>0) detached_programs[index]=0;
+        if(result>0){
+            detached_programs[index]=0;
+            installer_icon_visible=!installation_present();
+        }
     }
 }
 
-int32_t userspace_run_program(const char *path){
+static int32_t userspace_run_program_with_args(const char *path,
+                                               const char *arguments){
     if(!path) return -1;
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
     if(!supervise_installer){
         int32_t slot=detached_program_slot();
         if(slot<0) return -1;
-        int32_t pid=(int32_t)userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        int32_t pid=(int32_t)userspace_syscall(
+            SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
         if(pid>=0) detached_programs[slot]=pid;
         return pid;
     }
@@ -188,7 +194,8 @@ int32_t userspace_run_program(const char *path){
     bool installer_pinned=false;
     int32_t status=-1;
     for(;;){
-        int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        int64_t pid=userspace_syscall(
+            SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
         if(pid<0){
             if(supervise_installer
                && (installer_pinned || installer_requires_restart(-1))){
@@ -213,6 +220,10 @@ int32_t userspace_run_program(const char *path){
     window_manager_set_suspended(false);
     redraw_managed_scene(0);
     return status;
+}
+
+int32_t userspace_run_program(const char *path){
+    return userspace_run_program_with_args(path,0);
 }
 
 static void draw_power_button(void){

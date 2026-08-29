@@ -27,7 +27,8 @@ The system terminal is a real PureGUI client. Its shell input is handled as
 normalized window events, while the ring-3 console syscalls constrain shell
 and child-process text output to the window client rectangle. The console
 backend retains a character grid so the terminal can repaint after a
-full-screen child such as `install`, minimize/restore, or a window move.
+full-screen child, minimize/restore, or a window move. The installer is a
+terminal child and clears only this bounded console region.
 
 The system file manager is also a ring-3 PureGUI client. Its path handling,
 directory model, storage-device model and Explorer-style view are separate

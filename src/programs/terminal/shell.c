@@ -207,10 +207,17 @@ static bool execute_line(struct terminal_window *terminal, char *line){
     return true;
 }
 
-int shell_run(struct terminal_window *terminal){
+int shell_run(struct terminal_window *terminal, const char *initial_command){
     char line[SHELL_LINE_CAPACITY];
     pc_write("PureC Terminal\n");
     pc_write("Minimal shell: type help. Programs resolve via PATH.\n\n");
+    if(initial_command && initial_command[0]){
+        pc_copy(line,initial_command,sizeof(line));
+        pc_write("purec@os:/$ ");
+        pc_write(line);
+        pc_write("\n");
+        if(!execute_line(terminal,line)) return 0;
+    }
     for(;;){
         char prompt[SHELL_LINE_CAPACITY];
         build_prompt(prompt,sizeof(prompt));

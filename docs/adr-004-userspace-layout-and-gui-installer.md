@@ -24,11 +24,13 @@ file probing, input, mouse and framebuffer primitives. Static linking is used
 because the current ELF loader has no dynamic relocation support.
 
 Expose the installer as a desktop icon only while `/purec/install.cfg` is
-absent. Starting it opens a standalone console program that lists real block
-devices, accepts a numbered selection and requires the explicit `ERASE`
-confirmation. Disk formatting runs in a kernel worker and reports real FAT32
-stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG`; the ring-3 installer
-prints the progress and stage log without blocking the worker.
+absent. The icon starts the PureGUI terminal with `install` as its initial
+command. The standalone installer remains the storage-capable worker UI, but
+it inherits the terminal console region and clears only that region instead of
+the complete framebuffer. It lists real block devices, accepts a numbered
+selection and requires the explicit `ERASE` confirmation. Disk formatting runs
+in a kernel worker and reports real FAT32 stages through `SYS_INSTALL_STATUS`
+and `SYS_INSTALL_LOG` without blocking progress output.
 
 ## Consequences
 

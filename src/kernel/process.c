@@ -13,6 +13,7 @@
 
 #define USER_STACK_TOP 0x00007FFFFFF00000ULL
 #define USER_STACK_PAGES 16
+#define USER_PROCESS_PRIORITY 1
 
 extern void arch_enter_user(uint64_t instruction_pointer,
                             uint64_t stack_pointer) __attribute__((noreturn));
@@ -143,7 +144,7 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
     if(name && strcmp(name,"installer")==0)
         process->capabilities|=PROCESS_CAP_STORAGE_ADMIN;
     process->thread_id=scheduler_create_user_thread(
-        user_process_entry,process,process->name,2,-1,
+        user_process_entry,process,process->name,USER_PROCESS_PRIORITY,-1,
         process->address_space,process);
     if(process->thread_id<0){
         vmm_destroy_address_space(process->address_space);

@@ -24,7 +24,7 @@ z-order. Drawing in the desktop thread is required because its text and metric
 renderers use kernel-owned buffers that must not be validated as buffers of the
 requesting ring-3 process. PureGUI invokes this contract before moving or
 closing a window and while collapsing it. The terminal also invokes it before
-restoring itself after a full-screen child process.
+restoring itself after a child process that used the display.
 
 PureGUI remains responsible only for its own window chrome and contents. It no
 longer guesses which color or system components occupied the old rectangle.
