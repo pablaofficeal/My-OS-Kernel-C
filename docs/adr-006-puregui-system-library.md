@@ -21,7 +21,7 @@ Introduce PureGUI as two static system libraries:
 
 - `/lib/libpuregui.a` provides themes, foreground windows, clipped drawing and
   normalized keyboard/mouse events.
-- `/lib/libpuregui_widgets.a` provides labels, panels and buttons on top of the
+- `/lib/libpguiw.a` provides labels, panels and buttons on top of the
   core library.
 
 Public headers live under `/include`. Applications use client-relative

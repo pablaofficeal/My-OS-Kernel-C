@@ -1692,9 +1692,9 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
-    "    module_path: boot():/lib/libpuregui_widgets.a\n"
+    "    module_path: boot():/lib/libpguiw.a\n"
     "    module_path: boot():/include/puregui.h\n"
-    "    module_path: boot():/include/puregui_widgets.h\n"
+    "    module_path: boot():/include/pguiw.h\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel2.elf\n"
@@ -1708,9 +1708,9 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
-    "    module_path: boot():/lib/libpuregui_widgets.a\n"
+    "    module_path: boot():/lib/libpguiw.a\n"
     "    module_path: boot():/include/puregui.h\n"
-    "    module_path: boot():/include/puregui_widgets.h\n";
+    "    module_path: boot():/include/pguiw.h\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1731,11 +1731,11 @@ static int32_t install_gui_development_payload(void){
     uint64_t core_header_size,widget_header_size;
     if(!boot_get_module("/lib/libpuregui.a",&core_library,
                         &core_library_size)
-       || !boot_get_module("/lib/libpuregui_widgets.a",&widget_library,
+       || !boot_get_module("/lib/libpguiw.a",&widget_library,
                            &widget_library_size)
        || !boot_get_module("/include/puregui.h",&core_header,
                            &core_header_size)
-       || !boot_get_module("/include/puregui_widgets.h",&widget_header,
+       || !boot_get_module("/include/pguiw.h",&widget_header,
                            &widget_header_size)){
         klog(KLOG_ERROR,"install: missing PureGUI development module");
         return FS_ERROR_NOT_FOUND;
@@ -1748,29 +1748,25 @@ static int32_t install_gui_development_payload(void){
         core_library,(uint32_t)core_library_size
     );
     if(status<0) return status;
-    status=write_lfn_file(
-        "/lib","libpuregui_widgets.a","/lib/libpur~2.a","libpur~2.a",
-        widget_library,(uint32_t)widget_library_size
-    );
+    status=fat32_write_file("/lib/libpguiw.a",widget_library,
+                            (uint32_t)widget_library_size);
     if(status<0) return status;
     status=fat32_write_file("/include/puregui.h",core_header,
                             (uint32_t)core_header_size);
     if(status<0) return status;
-    status=write_lfn_file(
-        "/include","puregui_widgets.h","/include/puregu~1.h",
-        "puregu~1.h",widget_header,(uint32_t)widget_header_size
-    );
+    status=fat32_write_file("/include/pguiw.h",widget_header,
+                            (uint32_t)widget_header_size);
     if(status<0) return status;
     status=verify_installed_file("/lib/libpuregui.a",
                                  (uint32_t)core_library_size);
     if(status<0) return status;
-    status=verify_installed_file("/lib/libpuregui_widgets.a",
+    status=verify_installed_file("/lib/libpguiw.a",
                                  (uint32_t)widget_library_size);
     if(status<0) return status;
     status=verify_installed_file("/include/puregui.h",
                                  (uint32_t)core_header_size);
     if(status<0) return status;
-    return verify_installed_file("/include/puregui_widgets.h",
+    return verify_installed_file("/include/pguiw.h",
                                  (uint32_t)widget_header_size);
 }
 

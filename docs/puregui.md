@@ -9,9 +9,9 @@ theme and input policy out of applications.
 | Path | Purpose |
 |---|---|
 | `/include/puregui.h` | Core window, drawing and event API |
-| `/include/puregui_widgets.h` | Labels, panels and buttons |
+| `/include/pguiw.h` | Labels, panels and buttons |
 | `/lib/libpuregui.a` | Core implementation |
-| `/lib/libpuregui_widgets.a` | Optional widgets layer |
+| `/lib/libpguiw.a` | Optional widgets layer |
 | `/bin/gui-demo` | Runnable example |
 
 The widgets archive depends on the core archive, and the core archive depends
@@ -19,14 +19,14 @@ on `libpurec.a`. Link them in this order:
 
 ```sh
 x86_64-elf-ld -T linker-userspace.ld -o my-app my-app.o \
-  libpuregui_widgets.a libpuregui.a libpurec.a
+  libpguiw.a libpuregui.a libpurec.a
 ```
 
 ## Minimal application
 
 ```c
 #include <puregui.h>
-#include <puregui_widgets.h>
+#include <pguiw.h>
 #include <purec.h>
 
 void _start(void){

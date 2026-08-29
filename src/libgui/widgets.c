@@ -1,4 +1,4 @@
-#include "include/puregui_widgets.h"
+#include "include/pguiw.h"
 #include "internal.h"
 #include "../libc/include/purec.h"
 

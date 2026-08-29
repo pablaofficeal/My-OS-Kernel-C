@@ -1,5 +1,5 @@
 #include "../../libgui/include/puregui.h"
-#include "../../libgui/include/puregui_widgets.h"
+#include "../../libgui/include/pguiw.h"
 #include "../../libc/include/purec.h"
 
 static bool draw_demo(struct pg_window *window, const struct pg_event *event,
