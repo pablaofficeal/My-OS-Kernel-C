@@ -41,7 +41,7 @@ static void show_help(void){
     pc_write("  ls [directory] | cat <file> | touch <file> | mkdir <directory>\n");
     pc_write("  nano <file> | disks | usbscan | dmesg | savelog\n");
     pc_write("  install | setup | update | mkfs.fat32\n");
-    pc_write("  uname | about | systeminfo | htop | font | snake\n");
+    pc_write("  uname | about | systeminfo | htop | font | snake | gui-demo\n");
     pc_write("  mouse | debug | battery | reboot | poweroff | shutdown | halt\n");
 }
 
