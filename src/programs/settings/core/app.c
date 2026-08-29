@@ -47,6 +47,7 @@ static void draw_sidebar(struct settings_app *app,struct pg_window *window,
 
 static void draw_storage_page(struct pg_window *window,
                               const struct pg_event *event){
+    (void)event;
     uint32_t left=SIDEBAR_WIDTH+22;
     uint32_t width=window->client.width-left-22;
     pg_window_text(window,left,HEADER_HEIGHT+22,"Storage",window->theme.text);
@@ -60,9 +61,8 @@ static void draw_storage_page(struct pg_window *window,
     pg_window_text(window,left+18,HEADER_HEIGHT+108,
                    "Formatting always requires a separate confirmation.",
                    window->theme.muted_text);
-    if(pg_button(window,(struct pg_rect){left+18,HEADER_HEIGHT+126,150,26},
-                 "Open Disks",event))
-        (void)pc_exec("/bin/program/disks");
+    pg_window_text(window,left+18,HEADER_HEIGHT+132,
+                   "Open the Disks app from the desktop.",window->theme.accent);
 }
 
 void settings_app_draw(struct settings_app *app,struct pg_window *window,
