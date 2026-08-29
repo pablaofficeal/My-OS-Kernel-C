@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "window.h"
 #include "../../libc/include/purec.h"
 
 #define NANO_INITIAL_CAPACITY 4096
@@ -9,6 +10,7 @@ static uint32_t editor_length;
 static uint32_t editor_capacity;
 static bool editor_dirty;
 static const char *editor_path;
+static struct nano_window editor_window;
 
 static void write_buffer(void){
     if(editor_length)
@@ -37,8 +39,9 @@ static bool reserve_buffer(uint32_t required){
     return true;
 }
 
-static void redraw(const char *status){
-    pc_display_clear(0x181825);
+static bool redraw(const char *status){
+    if(!nano_window_begin_render(&editor_window))
+        return nano_window_is_minimized(&editor_window);
     pc_write("PureC nano - ");
     pc_write(editor_path);
     if(editor_dirty) pc_write(" [modified]");
@@ -49,6 +52,8 @@ static void redraw(const char *status){
     }
     pc_write("------------------------------------------------------------\n");
     write_buffer();
+    nano_window_end_render(&editor_window);
+    return true;
 }
 
 static int load_file(void){
@@ -96,21 +101,46 @@ int nano_run(const char *path){
                             : "nano: cannot read file\n");
         return 1;
     }
-    redraw(loaded ? "" : "New file.");
+    if(!nano_window_init(&editor_window)){
+        pc_write("nano: cannot create editor window\n");
+        return 1;
+    }
+    if(!redraw(loaded ? "" : "New file.")){
+        nano_window_shutdown(&editor_window);
+        return 1;
+    }
     bool exit_armed=false;
     for(;;){
-        char character=(char)pc_syscall(SYS_GETCHAR,0,0,0);
-        if(character==19){
-            exit_armed=false;
-            redraw(save_file() ? "Saved." : "Save failed.");
+        struct pg_event event;
+        if(!nano_window_poll_event(&editor_window,&event)){
+            pc_sleep(8);
             continue;
         }
-        if(character==24 || character==27){
+        if(event.type==PG_EVENT_CLOSE){
+            nano_window_shutdown(&editor_window);
+            return 0;
+        }
+        if(event.type==PG_EVENT_MOVE || event.type==PG_EVENT_MINIMIZE
+           || event.type==PG_EVENT_FOCUS || event.type==PG_EVENT_REPAINT){
+            (void)redraw("");
+            continue;
+        }
+        if(event.type!=PG_EVENT_KEY
+           || nano_window_is_minimized(&editor_window)) continue;
+        char character=(char)event.key;
+        if(character==19){
+            exit_armed=false;
+            (void)redraw(save_file() ? "Saved." : "Save failed.");
+            continue;
+        }
+        if(character==24){
             if(editor_dirty && !exit_armed){
                 exit_armed=true;
-                redraw("Unsaved changes: press Ctrl+X again to discard.");
+                (void)redraw(
+                    "Unsaved changes: press Ctrl+X again to discard.");
                 continue;
             }
+            nano_window_shutdown(&editor_window);
             return 0;
         }
         if(character=='\b' || character==127){
@@ -118,7 +148,7 @@ int nano_run(const char *path){
                 editor_length--;
                 editor_dirty=true;
                 exit_armed=false;
-                redraw("");
+                (void)redraw("");
             }
             continue;
         }
@@ -127,7 +157,7 @@ int nano_run(const char *path){
            && (character<' ' || character>'~')) continue;
         if(editor_length==UINT32_MAX
            || !reserve_buffer(editor_length+1)){
-            redraw("Not enough memory to grow the buffer.");
+            (void)redraw("Not enough memory to grow the buffer.");
             continue;
         }
         editor_buffer[editor_length++]=character;

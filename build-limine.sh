@@ -26,6 +26,7 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/terminal/window.c -o terminal_window.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/nano/main.c -o nano_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/nano/editor.c -o nano_editor.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -I./src -c src/programs/nano/window.c -o nano_window.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/main.c -o system_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/commands.c -o system_commands.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/filesystem.c -o system_filesystem.o
@@ -40,7 +41,7 @@ x86_64-elf-ld -T linker-userspace.ld -o init init_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o installer installer_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o snake snake_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o terminal terminal_program.o terminal_shell.o terminal_path.o terminal_environment.o terminal_window.o libpuregui.a libpurec.a
-x86_64-elf-ld -T linker-userspace.ld -o nano nano_program.o nano_editor.o libpurec.a
+x86_64-elf-ld -T linker-userspace.ld -o nano nano_program.o nano_editor.o nano_window.o libpuregui.a libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o system system_program.o system_commands.o system_filesystem.o system_platform.o terminal_path.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o gui-demo gui_demo_program.o libpguiw.a libpuregui.a libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o files files_program.o files_app.o files_model.o files_path.o files_view.o libpguiw.a libpuregui.a libpurec.a
