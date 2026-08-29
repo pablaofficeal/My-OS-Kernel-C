@@ -26,6 +26,11 @@ only the focused process may consume keyboard input. Normal desktop launches
 are detached and reaped asynchronously; the installer retains its supervised
 exclusive launch path.
 
+The desktop input and keyboard loops sleep after each polling pass. This is
+required by the strict-priority scheduler: a continuously ready priority-zero
+desktop thread would otherwise starve detached ring-3 processes before their
+first instruction.
+
 When the desktop surface must be restored, registered windows receive ordered
 `PG_EVENT_REPAINT` events from bottom to top. `pg_window_end()` acknowledges the
 completed repaint before the next window is allowed to render. A bounded wait
@@ -46,6 +51,7 @@ focus, explicit repaint, minimize or actual window movement.
   movement.
 - Exited detached programs are reaped and do not permanently consume process
   table slots.
+- Detached programs receive CPU time while the desktop remains interactive.
 
 ### Negative
 

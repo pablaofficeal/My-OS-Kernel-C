@@ -34,8 +34,6 @@
 #define ICON_Y           48
 #define ICON_W           58
 #define ICON_H           72
-#define ICON_DIRTY_W     72
-#define ICON_DIRTY_H     72
 #define PERSISTENT_LOG_CHUNK (64 * 1024)
 #define PERSISTENT_LOG_MAX_BYTES 0xFFFFFFFFULL
 #define PERSISTENT_LOG_PATH "/kernel.log"
@@ -308,16 +306,7 @@ void userspace_redraw_desktop(void){
     __atomic_clear(&desktop_redraw_busy,__ATOMIC_RELEASE);
 }
 
-static void redraw_icon_move(
-    uint32_t old_x,
-    uint32_t old_y,
-    uint32_t new_x,
-    uint32_t new_y
-){
-    (void)old_x;
-    (void)old_y;
-    (void)new_x;
-    (void)new_y;
+static void redraw_icon_move(void){
     redraw_managed_scene(0);
 }
 
@@ -429,11 +418,7 @@ static void handle_desktop_mouse(void){
         *icon_y_positions[dragged_icon]=(uint32_t)next_y;
         if(old_x!=*icon_positions[dragged_icon]
            || old_y!=*icon_y_positions[dragged_icon]){
-            redraw_icon_move(
-                old_x,old_y,
-                *icon_positions[dragged_icon],
-                *icon_y_positions[dragged_icon]
-            );
+            redraw_icon_move();
         }
     }
     if(released && dragged_icon>=0){
@@ -518,9 +503,7 @@ void userspace_input_thread(void *arg){
         handle_desktop_mouse();
         monitor_window_update();
         desktop_apps_update();
-        scheduler_yield();
-        // Small pause to avoid 100% busy
-        __asm__ volatile("pause");
+        scheduler_sleep(1);
     }
 }
 
@@ -536,9 +519,7 @@ void userspace_keyboard_thread(void *arg){
         while(!external_program_has_input_focus()
               && !window_manager_has_focus() && keyboard_try_getc(&c))
             (void)desktop_apps_handle_key(c);
-        // Yield so input thread can run even while terminal is idle
-        scheduler_yield();
-        for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
+        scheduler_sleep(1);
     }
 }
 
