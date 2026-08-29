@@ -73,6 +73,7 @@ OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
 
 .PHONY: all
 all: $(TARGET)
+	@if [ ! -f $(FALLBACK) ]; then cp $(TARGET) $(FALLBACK); fi
 
 -include $(C_OBJECTS:.o=.d) $(CPP_OBJECTS:.o=.d)
 
