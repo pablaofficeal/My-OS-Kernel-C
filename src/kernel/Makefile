@@ -41,6 +41,10 @@ C_SOURCES := \
 	net/link/arp.c \
 	net/network/ipv4.c \
 	net/transport/udp.c \
+	net/name/dns.c \
+	net/config/dhcp.c \
+	net/diagnostics/icmp.c \
+	net/api/ping.c \
 	net/core/net_service.c \
 	drivers/storage/ata_pio.c \
 	drivers/storage/ahci.c \

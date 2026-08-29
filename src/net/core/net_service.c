@@ -2,6 +2,11 @@
 #include "net_device.h"
 #include "../link/ethernet.h"
 #include "../link/arp.h"
+#include "../network/ipv4.h"
+#include "../transport/udp.h"
+#include "../name/dns.h"
+#include "../config/dhcp.h"
+#include "../diagnostics/icmp.h"
 #include "../../drivers/net/e1000_82540em.h"
 #include "../../drivers/interrupts/timer.h"
 #include "../../kernel/diagnostics/klog.h"
@@ -20,8 +25,18 @@ bool net_service_init(void){
         ready=false;
         return false;
     }
+    if(!ipv4_init() || !udp_init() || !dns_init() || !dhcp_init()
+       || !icmp_init()){
+        klog(KLOG_ERROR,"net: protocol handler table initialization failed");
+        ready=false;
+        return false;
+    }
     ready=e1000_82540em_init();
     if(!ready) klog(KLOG_WARN,"net: no supported network adapter found");
+    else {
+        for(uint32_t index=0;index<net_device_count();index++)
+            (void)dhcp_start(net_device_get(index));
+    }
     return ready;
 }
 
@@ -41,6 +56,7 @@ void net_service_thread(void *argument){
             }
         }
         uint64_t now=timer_ticks();
+        dhcp_poll(now);
         if(now-last_housekeeping>=1000){
             arp_poll(now);
             last_housekeeping=now;
