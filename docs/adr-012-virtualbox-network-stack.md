@@ -28,14 +28,21 @@ The interrupt handler will acknowledge hardware and publish completed ring
 indices only. Packet parsing and protocol work will run in a scheduler thread.
 Ring sizes, packet queues and protocol tables will be compile-time bounded.
 
-## Implemented first slice
+## Implemented slices
 
 - `drivers/net/e1000_82540em` owns PCI `8086:100e`, controller reset, MAC,
   MMIO registers and legacy RX/TX DMA descriptors.
 - `net/net_device` owns the driver-neutral device API, counters and bounded
   raw-frame receive queues. It contains no IPv4, UDP, DHCP, DNS or TCP logic.
 - `net/net_service` owns deferred polling and is the future hand-off point to
-  the Ethernet protocol module.
+  protocol modules.
+- `net/ethernet` validates Ethernet II headers, provides bounded EtherType
+  dispatch (eight handlers) and serializes outgoing frames through a fixed
+  staging buffer.
+- `net/arp` implements Ethernet/IPv4 ARP requests and replies, passive sender
+  learning, conflict counting, request throttling and a 16-entry cache. Valid
+  entries expire after 120 seconds; unanswered requests expire after five
+  seconds and are retransmitted no faster than once per second.
 - The initial mode is polling with a budget of 32 RX descriptors per scheduler
   pass. Hardware interrupts remain masked until the kernel has a general PCI
   IRQ registration and routing interface.
@@ -45,9 +52,14 @@ one TX ring, 16 RX buffers and 16 TX buffers (136 KiB with 4 KiB pages). The
 device layer has four statically bounded queues of 16 Ethernet frames. No heap
 allocation occurs while transmitting or receiving.
 
-The next slice should add a separate Ethernet-II/ARP module that drains the raw
-frame queue. IPv4, UDP and DHCP follow it as independent modules; DNS and TCP
-remain later iterations.
+The network service drains at most 32 raw frames per device on each pass and
+hands them to Ethernet dispatch. Its 16 KiB scheduler stack contains one 1522
+byte receive frame. Ethernet adds one global 1522-byte transmit staging buffer;
+ARP adds no packet queues and allocates nothing dynamically.
+
+The next slice is the independent IPv4 module: header validation, checksum,
+local address/netmask/gateway configuration and ARP-backed unicast delivery.
+UDP and DHCP follow it; DNS and TCP remain later iterations.
 
 ## Wi-Fi consequence
 
