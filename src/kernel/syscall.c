@@ -79,13 +79,26 @@ static void install_progress(uint32_t progress, const char *stage){
 static void install_worker(void *argument){
     (void)argument;
     filesystem_syscall_lock();
+    block_device_begin_exclusive_io();
     int32_t result=vfs_format_uefi_device_progress(
         install_device,install_serial,install_progress);
+    block_device_end_exclusive_io();
     filesystem_syscall_unlock();
     install_job.result=result;
     if(result<0){
         install_job.state=3;
-        install_progress(100,"Installation failed");
+        char failed_stage[INSTALL_STAGE_CAPACITY];
+        const char *prefix="Failed: ";
+        uint32_t length=0;
+        while(prefix[length] && length+1<sizeof(failed_stage)){
+            failed_stage[length]=prefix[length];
+            length++;
+        }
+        for(uint32_t index=0;install_job.stage[index]
+            && length+1<sizeof(failed_stage);index++)
+            failed_stage[length++]=install_job.stage[index];
+        failed_stage[length]='\0';
+        install_progress(install_job.progress,failed_stage);
     } else {
         install_job.state=2;
         install_progress(92,"Disk layout complete");

@@ -35,6 +35,11 @@ window events or progress output.
 The installer presents the latest kernel percentage as a persistent progress
 bar. A separate activity spinner refreshes during long USB operations where the
 real percentage has not advanced; it never substitutes an invented percentage.
+The worker holds an exclusive block-device transaction guard for the complete
+format and copy sequence. USB hotplug rescans are deferred until that guard is
+released, preventing controller re-enumeration between sector operations. On a
+failure the kernel preserves the real percentage and prefixes the last stage
+instead of replacing it with a misleading `100%` state.
 
 The install worker uses background scheduler priority 3. The installer UI
 sleeps while polling progress, allowing disk work to run without competing in

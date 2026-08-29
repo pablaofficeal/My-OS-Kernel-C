@@ -15,6 +15,7 @@ static uint32_t active_index;
 static bool initialization_complete;
 static bool initialization_result;
 static volatile bool usb_rescan_busy;
+static volatile uint32_t exclusive_io_count;
 static uint64_t next_hotplug_scan;
 static bool preferred_usb_valid;
 static char preferred_usb_serial[STORAGE_SERIAL_CAPACITY];
@@ -26,6 +27,22 @@ static void usb_rescan_lock(void){
 
 static void usb_rescan_unlock(void){
     __atomic_clear(&usb_rescan_busy,__ATOMIC_RELEASE);
+}
+
+void block_device_begin_exclusive_io(void){
+    usb_rescan_lock();
+    (void)__atomic_add_fetch(&exclusive_io_count,1,__ATOMIC_ACQ_REL);
+    usb_rescan_unlock();
+}
+
+void block_device_end_exclusive_io(void){
+    uint32_t count=__atomic_load_n(&exclusive_io_count,__ATOMIC_ACQUIRE);
+    if(count) (void)__atomic_sub_fetch(&exclusive_io_count,1,
+                                      __ATOMIC_ACQ_REL);
+}
+
+static bool block_device_exclusive_io_active(void){
+    return __atomic_load_n(&exclusive_io_count,__ATOMIC_ACQUIRE)!=0;
 }
 
 bool block_device_init(void){
@@ -68,6 +85,10 @@ bool block_device_init(void){
 }
 
 uint32_t block_device_rescan_usb(void){
+    if(block_device_exclusive_io_active()){
+        klog(KLOG_INFO,"usb: rescan deferred during exclusive disk I/O");
+        return xhci_device_count()+ehci_device_count();
+    }
     bool restore_usb=active_transport==STORAGE_TRANSPORT_USB_MSC
         || active_transport==STORAGE_TRANSPORT_USB_EHCI
         || preferred_usb_valid;
@@ -86,6 +107,11 @@ uint32_t block_device_rescan_usb(void){
         }
     }
     usb_rescan_lock();
+    if(block_device_exclusive_io_active()){
+        uint32_t count=xhci_device_count()+ehci_device_count();
+        usb_rescan_unlock();
+        return count;
+    }
     uint32_t fixed_count=ata_pio_device_count()+ahci_device_count();
     (void)xhci_rescan(fixed_count);
     (void)ehci_rescan(fixed_count+xhci_device_count());
@@ -122,6 +148,7 @@ uint32_t block_device_rescan_usb(void){
 }
 
 void block_device_poll_usb_hotplug(void){
+    if(block_device_exclusive_io_active()) return;
     uint64_t now=timer_ticks();
     if(now<next_hotplug_scan) return;
     next_hotplug_scan=now+1000;

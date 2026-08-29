@@ -15,3 +15,4 @@ void installer_progress_init(struct installer_progress_view *view);
 void installer_progress_update(struct installer_progress_view *view,
                                const struct install_status *status,
                                const char *device, bool force);
+const char *installer_progress_error_text(int32_t status);

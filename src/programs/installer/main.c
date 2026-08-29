@@ -200,6 +200,9 @@ static bool run_installation(bool start_job) {
         if (status.state == INSTALL_FAILED) {
             pc_write("\nInstallation failed. Error: ");
             pc_write_i64(status.result);
+            pc_write(" (");
+            pc_write(installer_progress_error_text(status.result));
+            pc_write(")");
             pc_write("\n");
             return false;
         }
