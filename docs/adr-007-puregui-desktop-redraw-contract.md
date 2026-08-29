@@ -18,10 +18,13 @@ compositor or shared application surfaces.
 ## Decision
 
 Add the `SYS_DESKTOP_REDRAW` coordination syscall and expose it to ring-3 as
-`pc_desktop_redraw()`. The syscall asks the desktop owner to reconstruct its
-scene in its established z-order. PureGUI invokes this contract before moving
-or closing a window and while collapsing it. The terminal also invokes it
-before restoring itself after a full-screen child process.
+`pc_desktop_redraw()`. The syscall queues a generation-numbered request and
+waits while the desktop thread reconstructs its scene in its established
+z-order. Drawing in the desktop thread is required because its text and metric
+renderers use kernel-owned buffers that must not be validated as buffers of the
+requesting ring-3 process. PureGUI invokes this contract before moving or
+closing a window and while collapsing it. The terminal also invokes it before
+restoring itself after a full-screen child process.
 
 PureGUI remains responsible only for its own window chrome and contents. It no
 longer guesses which color or system components occupied the old rectangle.
@@ -32,6 +35,7 @@ longer guesses which color or system components occupied the old rectangle.
 
 - Moving a PureGUI window preserves the top bar, icons and native windows.
 - Restoration always uses current desktop state instead of stale pixels.
+- Kernel buffer validation remains enabled during redraw coordination.
 - The contract can later be implemented by a compositor without changing the
   PureGUI application API.
 
@@ -39,6 +43,7 @@ longer guesses which color or system components occupied the old rectangle.
 
 - A move redraws the full desktop and can cost more than dirty-rectangle
   composition.
+- The requesting application can wait up to one desktop polling interval.
 - Multiple independently overlapping ring-3 windows are still unsupported.
 
 ### Neutral

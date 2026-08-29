@@ -52,6 +52,8 @@ static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICO
 static uint32_t installer_icon_x=256,installer_icon_y=ICON_Y;
 static bool installer_icon_visible=true;
 static bool external_program_active;
+static uint32_t desktop_redraw_requested;
+static uint32_t desktop_redraw_completed;
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
 static int8_t dragged_icon=-1;
@@ -234,7 +236,27 @@ static void redraw_scene(void){
     mouse_end_framebuffer_update();
 }
 
-void userspace_redraw_desktop(void){ redraw_scene(); }
+static bool service_desktop_redraw(void){
+    uint32_t requested=__atomic_load_n(&desktop_redraw_requested,
+                                       __ATOMIC_ACQUIRE);
+    uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
+                                       __ATOMIC_RELAXED);
+    if(requested==completed) return false;
+    redraw_scene();
+    __atomic_store_n(&desktop_redraw_completed,requested,__ATOMIC_RELEASE);
+    return true;
+}
+
+void userspace_redraw_desktop(void){
+    uint32_t ticket=__atomic_add_fetch(&desktop_redraw_requested,1,
+                                       __ATOMIC_ACQ_REL);
+    for(;;){
+        uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
+                                           __ATOMIC_ACQUIRE);
+        if((int32_t)(completed-ticket)>=0) return;
+        scheduler_sleep(1);
+    }
+}
 
 static void redraw_icon_move(
     uint32_t old_x,
@@ -439,6 +461,7 @@ void userspace_input_thread(void *arg){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_sleep(10);
             continue;
@@ -544,6 +567,7 @@ void userspace_run(void){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_yield();
             continue;
