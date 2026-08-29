@@ -65,6 +65,9 @@
 #define SYS_GET_PROCESS_NAME 244
 #define SYS_MOUSE_DEBUG_GET 245
 #define SYS_MOUSE_DEBUG_SET 246
+#define SYS_CONSOLE_CONFIGURE 247
+#define SYS_CONSOLE_CLEAR 248
+#define SYS_CONSOLE_DISABLE 249
 
 #define PROCESS_ENVIRONMENT_LIMIT 16
 #define PROCESS_ENVIRONMENT_NAME_LIMIT 32
@@ -152,6 +155,15 @@ struct framebuffer_scroll_request {
     uint32_t h;
     uint32_t amount;
     uint32_t fill_color;
+};
+
+struct framebuffer_console_request {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint32_t foreground;
+    uint32_t background;
 };
 
 struct usb_scan_status {

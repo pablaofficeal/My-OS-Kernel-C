@@ -1,4 +1,4 @@
-# PureGUI API version 1
+# PureGUI API V1.0.1
 
 PureGUI is the small ring-3 GUI toolkit shipped with PureC OS. It translates
 client-relative coordinates into framebuffer operations and keeps window,
@@ -21,6 +21,10 @@ on `libpurec.a`. Link them in this order:
 x86_64-elf-ld -T linker-userspace.ld -o my-app my-app.o \
   libpguiw.a libpuregui.a libpurec.a
 ```
+
+The system terminal is a real PureGUI client. Its shell input is handled as
+normalized window events, while the ring-3 console syscalls constrain shell
+and child-process text output to the window client rectangle.
 
 ## Minimal application
 
@@ -57,12 +61,15 @@ void _start(void){
 | `pg_window_begin` | Starts an atomic framebuffer update and draws window chrome. |
 | `pg_window_end` | Finishes the update started by `pg_window_begin`. |
 | `pg_window_close` | Marks a window closed without terminating the process. |
+| `pg_window_minimize` | Collapses an open window to its title bar. |
+| `pg_window_restore` | Restores a minimized window and its client area. |
 | `pg_window_is_open` | Reports whether the window remains active. |
+| `pg_window_is_minimized` | Reports whether an open window is collapsed. |
 | `pg_window_client` | Returns the absolute client rectangle, or an empty rectangle for `NULL`. |
 | `pg_window_clear` | Fills the client area with a caller-selected color. |
 | `pg_window_rect` | Draws a clipped rectangle using client-relative coordinates. |
 | `pg_window_text` | Draws clipped fixed-width text using client-relative coordinates. |
-| `pg_window_poll_event` | Returns one normalized keyboard or mouse event; Escape and the titlebar close button produce `PG_EVENT_CLOSE`. |
+| `pg_window_poll_event` | Returns one normalized keyboard or mouse event; Escape and the close button produce `PG_EVENT_CLOSE`, while the titlebar minimize button toggles the window and produces `PG_EVENT_MINIMIZE`. |
 
 All functions are allocation-free. Invalid window pointers are ignored by
 drawing operations. Applications must pair every `pg_window_begin` with
@@ -84,6 +91,8 @@ processes; emitting SSE instructions otherwise terminates a process with the
 ## Current limitations
 
 - One foreground application window is supported at a time.
+- Minimize currently collapses a window to its title bar; a system taskbar is
+  not implemented yet.
 - There is no compositor, overlapping-window damage tracking or shared surface.
 - Mouse and keyboard events come from the current system input syscalls.
 - Text uses the fixed-width kernel font.

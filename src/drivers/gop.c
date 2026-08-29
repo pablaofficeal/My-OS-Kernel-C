@@ -9,6 +9,20 @@ static uint32_t cur_x=12, cur_y=12;
 static uint32_t fg=0xCDD6F4, bg=0x1E1E2E;
 static enum gop_font_face font_face=GOP_FONT_CLEAN;
 
+struct gop_console {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint32_t cursor_x;
+    uint32_t cursor_y;
+    uint32_t foreground;
+    uint32_t background;
+    bool active;
+};
+
+static struct gop_console user_console;
+
 // тот же 8x8 font что в fb.c
 static const uint8_t font[128][8] = {
   {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
@@ -324,6 +338,83 @@ void gop_putc(char c){
 }
 void gop_write(const char *s){ while(*s) gop_putc(*s++); }
 void gop_write_hex(uint64_t v){ const char*h="0123456789ABCDEF"; gop_write("0x"); for(int i=60;i>=0;i-=4) gop_putc(h[(v>>i)&0xF]); }
+
+bool gop_console_configure(uint32_t x, uint32_t y,
+                           uint32_t width, uint32_t height,
+                           uint32_t foreground, uint32_t background){
+    if(!gop.available || !width || !height || x>=gop.width || y>=gop.height)
+        return false;
+    if(width>gop.width-x) width=gop.width-x;
+    if(height>gop.height-y) height=gop.height-y;
+    bool changed=!user_console.active || user_console.x!=x
+        || user_console.y!=y || user_console.width!=width
+        || user_console.height!=height;
+    user_console.x=x;
+    user_console.y=y;
+    user_console.width=width;
+    user_console.height=height;
+    user_console.foreground=foreground;
+    user_console.background=background;
+    user_console.active=true;
+    if(changed){
+        user_console.cursor_x=x;
+        user_console.cursor_y=y;
+    }
+    return true;
+}
+
+bool gop_console_is_active(void){ return user_console.active; }
+
+void gop_console_clear(void){
+    if(!user_console.active) return;
+    gop_draw_rect(user_console.x,user_console.y,user_console.width,
+                  user_console.height,user_console.background);
+    user_console.cursor_x=user_console.x;
+    user_console.cursor_y=user_console.y;
+}
+
+void gop_console_disable(void){ user_console.active=false; }
+
+void gop_console_putc(char character){
+    if(!user_console.active){ gop_putc(character); return; }
+    uint32_t right=user_console.x+user_console.width;
+    uint32_t bottom=user_console.y+user_console.height;
+    if(character=='\b'){
+        if(user_console.cursor_x>user_console.x){
+            user_console.cursor_x-=8;
+            uint32_t saved_fg=fg,saved_bg=bg;
+            fg=user_console.foreground;
+            bg=user_console.background;
+            draw_char(' ',user_console.cursor_x,user_console.cursor_y);
+            fg=saved_fg;
+            bg=saved_bg;
+        }
+        return;
+    }
+    if(character=='\n'){
+        user_console.cursor_x=user_console.x;
+        user_console.cursor_y+=10;
+    } else if(character=='\r'){
+        user_console.cursor_x=user_console.x;
+    } else {
+        if(user_console.cursor_x+8>right){
+            user_console.cursor_x=user_console.x;
+            user_console.cursor_y+=10;
+        }
+        uint32_t saved_fg=fg,saved_bg=bg;
+        fg=user_console.foreground;
+        bg=user_console.background;
+        draw_char(character,user_console.cursor_x,user_console.cursor_y);
+        fg=saved_fg;
+        bg=saved_bg;
+        user_console.cursor_x+=8;
+    }
+    if(user_console.cursor_y+8>bottom){
+        gop_scroll_rect_up(user_console.x,user_console.y,user_console.width,
+                           user_console.height,10,user_console.background);
+        user_console.cursor_y=bottom>=10 ? bottom-10 : user_console.y;
+    }
+}
 void gop_draw_text_at(uint32_t x, uint32_t y, const char *text, uint32_t text_fg, uint32_t text_bg){
     if(!gop.available) return;
     uint32_t saved_fg=fg, saved_bg=bg;

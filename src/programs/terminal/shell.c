@@ -1,6 +1,7 @@
 #include "shell.h"
 #include "environment.h"
 #include "path.h"
+#include "window.h"
 #include "../../libc/include/purec.h"
 
 #define SHELL_LINE_CAPACITY 256
@@ -23,16 +24,29 @@ static void split_line(char *line, char **command, const char **arguments){
     *arguments=skip_spaces(cursor);
 }
 
-static void print_prompt(void){
+static bool append_prompt(char *prompt, uint32_t *length,
+                          uint32_t capacity, const char *text){
+    for(uint32_t index=0;text[index];index++){
+        if(*length+1>=capacity) return false;
+        prompt[(*length)++]=text[index];
+    }
+    prompt[*length]='\0';
+    return true;
+}
+
+static void build_prompt(char *prompt, uint32_t capacity){
     char user[PROCESS_ENVIRONMENT_VALUE_LIMIT];
     char directory[PROCESS_ENVIRONMENT_VALUE_LIMIT];
     if(pc_getenv("USER",user,sizeof(user))<0) pc_copy(user,"purec",sizeof(user));
     if(pc_getenv("PWD",directory,sizeof(directory))<0)
         pc_copy(directory,"/",sizeof(directory));
-    pc_write(user);
-    pc_write("@os:");
-    pc_write(directory);
-    pc_write("$ ");
+    uint32_t length=0;
+    prompt[0]='\0';
+    if(!append_prompt(prompt,&length,capacity,user)
+       || !append_prompt(prompt,&length,capacity,"@os:")
+       || !append_prompt(prompt,&length,capacity,directory)
+       || !append_prompt(prompt,&length,capacity,"$ "))
+        pc_copy(prompt,"$ ",capacity);
 }
 
 static void show_help(void){
@@ -169,7 +183,7 @@ static bool execute_line(char *line){
     if(!command[0]) return true;
     if(pc_strcmp(command,"exit")==0) return false;
     if(pc_strcmp(command,"help")==0) show_help();
-    else if(pc_strcmp(command,"clear")==0) pc_display_clear(0x181825);
+    else if(pc_strcmp(command,"clear")==0) pc_console_clear();
     else if(pc_strcmp(command,"pwd")==0){
         char directory[SHELL_PATH_CAPACITY];
         if(pc_getenv("PWD",directory,sizeof(directory))>=0) pc_write(directory);
@@ -189,14 +203,15 @@ static bool execute_line(char *line){
     return true;
 }
 
-int shell_run(void){
+int shell_run(struct terminal_window *terminal){
     char line[SHELL_LINE_CAPACITY];
-    pc_display_clear(0x181825);
     pc_write("PureC Terminal\n");
     pc_write("Minimal shell: type help. Programs resolve via PATH.\n\n");
     for(;;){
-        print_prompt();
-        pc_read_line("",line,sizeof(line));
+        char prompt[SHELL_LINE_CAPACITY];
+        build_prompt(prompt,sizeof(prompt));
+        if(!terminal_window_read_line(terminal,prompt,line,sizeof(line)))
+            return 0;
         if(!execute_line(line)) return 0;
     }
 }

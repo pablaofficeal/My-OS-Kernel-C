@@ -46,6 +46,11 @@ bool pc_display_get_info(struct pc_display_info *info);
 void pc_display_begin_update(void);
 void pc_display_end_update(void);
 void pc_display_clear(uint32_t color);
+bool pc_console_configure(uint32_t x, uint32_t y,
+                          uint32_t width, uint32_t height,
+                          uint32_t foreground, uint32_t background);
+void pc_console_clear(void);
+void pc_console_disable(void);
 void pc_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color);
 void pc_draw_text(uint32_t x, uint32_t y, const char *text,

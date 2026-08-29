@@ -28,6 +28,7 @@ bool pg_window_init(struct pg_window *window, const char *title,
     window->previous_mouse_x=-1;
     window->previous_mouse_y=-1;
     window->previous_mouse_buttons=0;
+    window->minimized=false;
     window->open=true;
     update_client_rect(window);
     return true;
@@ -45,19 +46,29 @@ bool pg_window_center(struct pg_window *window, const char *title,
 void pg_window_begin(struct pg_window *window){
     if(!window || !window->open) return;
     pc_display_begin_update();
+    if(window->minimized){
+        pc_draw_rect(window->frame.x,window->frame.y,
+                     window->frame.width+6,window->frame.height+6,
+                     window->theme.desktop);
+    }
     pc_draw_rect(window->frame.x+6,window->frame.y+6,
-                 window->frame.width,window->frame.height,
+                 window->frame.width,window->minimized
+                    ? PG_TITLEBAR_HEIGHT+PG_WINDOW_BORDER*2
+                    : window->frame.height,
                  window->theme.shadow);
     pc_draw_rect(window->frame.x,window->frame.y,
-                 window->frame.width,window->frame.height,
+                 window->frame.width,window->minimized
+                    ? PG_TITLEBAR_HEIGHT+PG_WINDOW_BORDER*2
+                    : window->frame.height,
                  window->theme.border);
     pc_draw_rect(window->frame.x+PG_WINDOW_BORDER,
                  window->frame.y+PG_WINDOW_BORDER,
                  window->frame.width-PG_WINDOW_BORDER*2,
                  PG_TITLEBAR_HEIGHT,window->theme.titlebar);
-    pc_draw_rect(window->client.x,window->client.y,
-                 window->client.width,window->client.height,
-                 window->theme.window);
+    if(!window->minimized)
+        pc_draw_rect(window->client.x,window->client.y,
+                     window->client.width,window->client.height,
+                     window->theme.window);
     pg_internal_draw_text_clipped(window->frame.x+10,window->frame.y+10,
                                   window->title,window->theme.text,
                                   window->theme.titlebar,&window->frame);
@@ -66,6 +77,11 @@ void pg_window_begin(struct pg_window *window){
     pc_draw_text(window->frame.x+window->frame.width-21,
                  window->frame.y+11,"x",window->theme.window,
                  window->theme.danger);
+    pc_draw_rect(window->frame.x+window->frame.width-44,
+                 window->frame.y+8,14,14,window->theme.accent);
+    pc_draw_text(window->frame.x+window->frame.width-41,
+                 window->frame.y+11,window->minimized ? "+" : "-",
+                 window->theme.window,window->theme.accent);
 }
 
 void pg_window_end(struct pg_window *window){
@@ -76,8 +92,20 @@ void pg_window_close(struct pg_window *window){
     if(window) window->open=false;
 }
 
+void pg_window_minimize(struct pg_window *window){
+    if(window && window->open) window->minimized=true;
+}
+
+void pg_window_restore(struct pg_window *window){
+    if(window && window->open) window->minimized=false;
+}
+
 bool pg_window_is_open(const struct pg_window *window){
     return window && window->open;
+}
+
+bool pg_window_is_minimized(const struct pg_window *window){
+    return window && window->open && window->minimized;
 }
 
 struct pg_rect pg_window_client(const struct pg_window *window){
@@ -85,7 +113,7 @@ struct pg_rect pg_window_client(const struct pg_window *window){
 }
 
 void pg_window_clear(struct pg_window *window, uint32_t color){
-    if(window && window->open)
+    if(window && window->open && !window->minimized)
         pc_draw_rect(window->client.x,window->client.y,
                      window->client.width,window->client.height,color);
 }

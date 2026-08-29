@@ -42,6 +42,15 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
         if(pg_internal_point_inside(mouse.x,mouse.y,&close)){
             event->type=PG_EVENT_CLOSE;
             window->open=false;
+            return true;
+        }
+        struct pg_rect minimize={
+            window->frame.x+window->frame.width-44,
+            window->frame.y+8,14,14
+        };
+        if(pg_internal_point_inside(mouse.x,mouse.y,&minimize)){
+            window->minimized=!window->minimized;
+            event->type=PG_EVENT_MINIMIZE;
         }
     }
     return event->type!=PG_EVENT_NONE;

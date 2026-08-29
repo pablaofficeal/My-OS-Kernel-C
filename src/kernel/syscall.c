@@ -119,7 +119,11 @@ int64_t syscall_handler(struct syscall_regs *r){
             uint64_t len = a2;
             // fd в a3 игнорируем, пишем в serial+gop
             if(!readable(s,len)) return -1;
-            for(uint64_t i=0;i<len;i++){ serial_putc(s[i]); gop_putc(s[i]); }
+            for(uint64_t i=0;i<len;i++){
+                serial_putc(s[i]);
+                if(gop_console_is_active()) gop_console_putc(s[i]);
+                else gop_putc(s[i]);
+            }
             return (int64_t)len;
         }
         case SYS_CLEAR: {
@@ -192,6 +196,21 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_FB_END_UPDATE:
             mouse_end_framebuffer_update();
+            return 0;
+        case SYS_CONSOLE_CONFIGURE: {
+            const struct framebuffer_console_request *request=
+                (const struct framebuffer_console_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))) return -1;
+            return gop_console_configure(
+                request->x,request->y,request->width,request->height,
+                request->foreground,request->background) ? 0 : -1;
+        }
+        case SYS_CONSOLE_CLEAR:
+            if(!gop_console_is_active()) return -1;
+            gop_console_clear();
+            return 0;
+        case SYS_CONSOLE_DISABLE:
+            gop_console_disable();
             return 0;
         case SYS_GETPID:
             return process_current_pid();

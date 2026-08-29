@@ -202,6 +202,25 @@ void pc_display_clear(uint32_t color){
     (void)pc_syscall(SYS_CLEAR,color,0,0);
 }
 
+bool pc_console_configure(uint32_t x, uint32_t y,
+                          uint32_t width, uint32_t height,
+                          uint32_t foreground, uint32_t background){
+    struct framebuffer_console_request request={
+        .x=x,.y=y,.width=width,.height=height,
+        .foreground=foreground,.background=background
+    };
+    return pc_syscall(SYS_CONSOLE_CONFIGURE,
+        (uint64_t)(uintptr_t)&request,0,0)>=0;
+}
+
+void pc_console_clear(void){
+    (void)pc_syscall(SYS_CONSOLE_CLEAR,0,0,0);
+}
+
+void pc_console_disable(void){
+    (void)pc_syscall(SYS_CONSOLE_DISABLE,0,0,0);
+}
+
 void pc_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color){
     (void)syscall5(SYS_DRAW_RECT,x,y,width,height,color);

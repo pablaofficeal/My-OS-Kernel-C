@@ -40,7 +40,8 @@ void pg_internal_draw_text_clipped(uint32_t x, uint32_t y,
 
 void pg_window_rect(struct pg_window *window, struct pg_rect bounds,
                     uint32_t color){
-    if(!window || !window->open || !bounds.width || !bounds.height) return;
+    if(!window || !window->open || window->minimized
+       || !bounds.width || !bounds.height) return;
     struct pg_rect screen=pg_internal_to_screen(window,bounds);
     uint32_t right=window->client.x+window->client.width;
     uint32_t bottom=window->client.y+window->client.height;
@@ -52,7 +53,7 @@ void pg_window_rect(struct pg_window *window, struct pg_rect bounds,
 
 void pg_window_text(struct pg_window *window, uint32_t x, uint32_t y,
                     const char *text, uint32_t color){
-    if(!window || !window->open) return;
+    if(!window || !window->open || window->minimized) return;
     pg_internal_draw_text_clipped(window->client.x+x,window->client.y+y,
                                   text,color,window->theme.window,
                                   &window->client);

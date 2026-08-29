@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PG_API_VERSION 1
+#define PG_API_VERSION 2
 #define PG_TITLE_CAPACITY 64
 #define PG_TITLEBAR_HEIGHT 26
 #define PG_WINDOW_BORDER 2
@@ -33,6 +33,7 @@ enum pg_event_type {
     PG_EVENT_MOUSE_MOVE,
     PG_EVENT_MOUSE_DOWN,
     PG_EVENT_MOUSE_UP,
+    PG_EVENT_MINIMIZE,
     PG_EVENT_CLOSE
 };
 
@@ -52,6 +53,7 @@ struct pg_window {
     int32_t previous_mouse_x;
     int32_t previous_mouse_y;
     uint8_t previous_mouse_buttons;
+    bool minimized;
     bool open;
 };
 
@@ -64,7 +66,10 @@ bool pg_window_center(struct pg_window *window, const char *title,
 void pg_window_begin(struct pg_window *window);
 void pg_window_end(struct pg_window *window);
 void pg_window_close(struct pg_window *window);
+void pg_window_minimize(struct pg_window *window);
+void pg_window_restore(struct pg_window *window);
 bool pg_window_is_open(const struct pg_window *window);
+bool pg_window_is_minimized(const struct pg_window *window);
 struct pg_rect pg_window_client(const struct pg_window *window);
 void pg_window_clear(struct pg_window *window, uint32_t color);
 void pg_window_rect(struct pg_window *window, struct pg_rect bounds,

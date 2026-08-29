@@ -50,6 +50,8 @@ it without changing application source.
 ### Neutral
 
 - `/bin/gui-demo` acts as executable API documentation.
+- PureGUI API version 2 adds close/minimize window controls and normalized
+  minimize events without introducing a window-server dependency.
 - PureGUI and its applications are compiled with `-mgeneral-regs-only` until
   the kernel provides per-process SIMD/FPU context management.
 
