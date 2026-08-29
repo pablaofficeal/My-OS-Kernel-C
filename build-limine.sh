@@ -9,6 +9,13 @@ fi
 echo "Building Limine kernel (higher half, GOP)..."
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libc/runtime.c -o purec_runtime.o
 x86_64-elf-ar rcs libpurec.a purec_runtime.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libgui/theme.c -o puregui_theme.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libgui/draw.c -o puregui_draw.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libgui/window.c -o puregui_window.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libgui/event.c -o puregui_event.o
+x86_64-elf-ar rcs libpuregui.a puregui_theme.o puregui_draw.o puregui_window.o puregui_event.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/libgui/widgets.c -o puregui_widgets.o
+x86_64-elf-ar rcs libpuregui_widgets.a puregui_widgets.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/init/main.c -o init_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/installer/main.c -o installer_program.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/game/snake/main.c -o snake_program.o
@@ -22,12 +29,14 @@ x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/commands.c -o system_commands.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/filesystem.c -o system_filesystem.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/system/system.c -o system_platform.o
+x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=small -mno-red-zone -I./src -c src/programs/gui_demo/main.c -o gui_demo_program.o
 x86_64-elf-ld -T linker-userspace.ld -o init init_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o installer installer_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o snake snake_program.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o terminal terminal_program.o terminal_shell.o terminal_path.o terminal_environment.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o nano nano_program.o nano_editor.o libpurec.a
 x86_64-elf-ld -T linker-userspace.ld -o system system_program.o system_commands.o system_filesystem.o system_platform.o terminal_path.o libpurec.a
+x86_64-elf-ld -T linker-userspace.ld -o gui-demo gui_demo_program.o libpuregui_widgets.a libpuregui.a libpurec.a
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/boot/boot.c -o boot_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/kernel.c -o kernel_limine.o
 x86_64-elf-gcc -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -mgeneral-regs-only -mno-red-zone -I./src -c src/kernel/init.c -o init_limine.o
@@ -108,7 +117,7 @@ done
 
 echo "Limine: $LIMINE_SHARE"
 rm -rf iso_limine
-mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT iso_limine/bin/program iso_limine/lib
+mkdir -p iso_limine/boot/limine iso_limine/EFI/BOOT iso_limine/bin/program iso_limine/lib iso_limine/include
 
 cp kernel-limine.elf iso_limine/boot/kernel.elf
 cp "$FALLBACK_KERNEL_IMAGE" iso_limine/boot/kernel-fallback.elf
@@ -118,7 +127,12 @@ cp snake iso_limine/bin/snake
 cp terminal iso_limine/bin/program/terminal
 cp nano iso_limine/bin/program/nano
 cp system iso_limine/bin/program/system
+cp gui-demo iso_limine/bin/gui-demo
 cp libpurec.a iso_limine/lib/libpurec.a
+cp libpuregui.a iso_limine/lib/libpuregui.a
+cp libpuregui_widgets.a iso_limine/lib/libpuregui_widgets.a
+cp src/libgui/include/puregui.h iso_limine/include/puregui.h
+cp src/libgui/include/puregui_widgets.h iso_limine/include/puregui_widgets.h
 cat > iso_limine/boot/limine/limine.conf <<'EOF'
 timeout: 10
 verbose: yes
@@ -134,7 +148,12 @@ serial: yes
     module_path: boot():/bin/program/terminal
     module_path: boot():/bin/program/nano
     module_path: boot():/bin/program/system
+    module_path: boot():/bin/gui-demo
     module_path: boot():/lib/libpurec.a
+    module_path: boot():/lib/libpuregui.a
+    module_path: boot():/lib/libpuregui_widgets.a
+    module_path: boot():/include/puregui.h
+    module_path: boot():/include/puregui_widgets.h
 /PureC OS 64-bit (fallback previous image)
     protocol: limine
     kernel_path: boot():/boot/kernel-fallback.elf
@@ -145,7 +164,12 @@ serial: yes
     module_path: boot():/bin/program/terminal
     module_path: boot():/bin/program/nano
     module_path: boot():/bin/program/system
+    module_path: boot():/bin/gui-demo
     module_path: boot():/lib/libpurec.a
+    module_path: boot():/lib/libpuregui.a
+    module_path: boot():/lib/libpuregui_widgets.a
+    module_path: boot():/include/puregui.h
+    module_path: boot():/include/puregui_widgets.h
 EOF
 cp iso_limine/boot/limine/limine.conf iso_limine/limine.conf
 
@@ -167,5 +191,5 @@ echo "limine bios-install..."
 chmod +x "$LIMINE_BIN" 2>/dev/null || true
 "$LIMINE_BIN" bios-install purec_limine.iso 2>&1 | tail -5
 
-ls -lh purec_limine.iso kernel-limine.elf init installer snake terminal nano system libpurec.a
+ls -lh purec_limine.iso kernel-limine.elf init installer snake terminal nano system gui-demo libpurec.a libpuregui.a libpuregui_widgets.a
 echo "purec_limine.iso"

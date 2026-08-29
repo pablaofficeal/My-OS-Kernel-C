@@ -1,0 +1,63 @@
+# ADR-006: PureGUI modular system library
+
+## Status
+
+Accepted
+
+## Context
+
+Ring-3 applications currently call framebuffer syscalls directly. Repeating
+window chrome, client-coordinate translation, input polling and widget drawing
+in every application makes the UI inconsistent and couples applications to the
+current framebuffer ABI. Porting Qt would add a runtime, allocator and platform
+surface far larger than the operating system currently needs.
+
+The first release must remain freestanding, avoid dynamic allocation, run on
+the existing syscall ABI and be usable from small C programs.
+
+## Decision
+
+Introduce PureGUI as two static system libraries:
+
+- `/lib/libpuregui.a` provides themes, foreground windows, clipped drawing and
+  normalized keyboard/mouse events.
+- `/lib/libpuregui_widgets.a` provides labels, panels and buttons on top of the
+  core library.
+
+Public headers live under `/include`. Applications use client-relative
+coordinates and link only the layers they need. The ABI begins at
+`PG_API_VERSION 1`.
+
+PureGUI version 1 deliberately supports one foreground window owned by the
+running application. Rendering still uses the existing framebuffer syscalls;
+the public API does not expose that backend so a future compositor can replace
+it without changing application source.
+
+## Consequences
+
+### Positive
+
+- Applications no longer implement window frames and input normalization.
+- Core and widgets are separately linkable and contain no heap dependency.
+- A future window server can preserve the application-facing API.
+
+### Negative
+
+- Windows cannot overlap safely and are not independently composited.
+- Static linking duplicates the small client runtime in each application.
+- Text uses the current fixed-width system font.
+
+### Neutral
+
+- `/bin/gui-demo` acts as executable API documentation.
+
+## Alternatives Considered
+
+**Port Qt** was rejected because its platform abstraction, event loop and
+runtime dependencies are disproportionate to the current kernel.
+
+**Put widgets in the kernel** was rejected because widget policy does not need
+kernel privilege and would make the syscall ABI difficult to evolve.
+
+**Build a compositor first** was deferred until processes can share surfaces
+and receive routed input events.
