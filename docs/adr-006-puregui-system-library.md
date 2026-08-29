@@ -26,12 +26,13 @@ Introduce PureGUI as two static system libraries:
 
 Public headers live under `/include`. Applications use client-relative
 coordinates and link only the layers they need. The ABI begins at
-`PG_API_VERSION 1`.
+`PG_API_VERSION 1`; close/minimize controls advance it to V1.0.1.
 
-PureGUI version 1 deliberately supports one foreground window owned by the
-running application. Rendering still uses the existing framebuffer syscalls;
-the public API does not expose that backend so a future compositor can replace
-it without changing application source.
+PureGUI deliberately supports one foreground window owned by the running
+application. Version 2 keeps that model and adds title-bar collapse/restore.
+Rendering still uses the existing framebuffer syscalls; the public API does
+not expose that backend so a future compositor can replace it without changing
+application source.
 
 ## Consequences
 
