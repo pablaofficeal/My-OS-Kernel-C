@@ -1,5 +1,5 @@
 #include "net_device.h"
-#include "../lib/string.h"
+#include "../../lib/string.h"
 
 struct net_rx_queue {
     struct net_frame frames[NET_DEVICE_RX_QUEUE_LENGTH];

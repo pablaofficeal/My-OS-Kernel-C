@@ -6,7 +6,7 @@
 #include "../process/process.h"
 #include "../../drivers/serial/serial.h"
 #include "../../userspace/userspace.h"
-#include "../../net/net_service.h"
+#include "../../net/core/net_service.h"
 
 static void boot_log_pause(void){
     volatile uint64_t dummy=0;

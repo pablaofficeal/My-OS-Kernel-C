@@ -36,10 +36,12 @@ C_SOURCES := \
 	drivers/input/keyboard.c \
 	drivers/pci/pci.c \
 	drivers/net/e1000_82540em.c \
-	net/net_device.c \
-	net/ethernet.c \
-	net/arp.c \
-	net/net_service.c \
+	net/core/net_device.c \
+	net/link/ethernet.c \
+	net/link/arp.c \
+	net/network/ipv4.c \
+	net/transport/udp.c \
+	net/core/net_service.c \
 	drivers/storage/ata_pio.c \
 	drivers/storage/ahci.c \
 	drivers/storage/block_device.c \

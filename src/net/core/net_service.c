@@ -1,11 +1,11 @@
 #include "net_service.h"
 #include "net_device.h"
-#include "ethernet.h"
-#include "arp.h"
-#include "../drivers/net/e1000_82540em.h"
-#include "../drivers/interrupts/timer.h"
-#include "../kernel/diagnostics/klog.h"
-#include "../kernel/process/scheduler.h"
+#include "../link/ethernet.h"
+#include "../link/arp.h"
+#include "../../drivers/net/e1000_82540em.h"
+#include "../../drivers/interrupts/timer.h"
+#include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
 
 #define NET_POLL_BUDGET 32U
 #define NET_POLL_INTERVAL_MS 1U

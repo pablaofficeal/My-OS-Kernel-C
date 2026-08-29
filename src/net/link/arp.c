@@ -1,8 +1,8 @@
 #include "arp.h"
-#include "byteorder.h"
+#include "../util/byteorder.h"
 #include "ethernet.h"
-#include "../drivers/interrupts/timer.h"
-#include "../lib/string.h"
+#include "../../drivers/interrupts/timer.h"
+#include "../../lib/string.h"
 
 #define ARP_HARDWARE_ETHERNET 1
 #define ARP_OPERATION_REQUEST 1

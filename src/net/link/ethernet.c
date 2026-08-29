@@ -1,6 +1,6 @@
 #include "ethernet.h"
-#include "byteorder.h"
-#include "../lib/string.h"
+#include "../util/byteorder.h"
+#include "../../lib/string.h"
 
 #define ETHERNET_HANDLER_CAPACITY 8
 #define ETHERNET_TYPE_MINIMUM 0x0600

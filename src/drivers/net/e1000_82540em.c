@@ -4,7 +4,7 @@
 #include "../../kernel/diagnostics/klog.h"
 #include "../../lib/string.h"
 #include "../../mm/pmm.h"
-#include "../../net/net_device.h"
+#include "../../net/core/net_device.h"
 #include <stddef.h>
 #include <stdint.h>
 

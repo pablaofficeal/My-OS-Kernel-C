@@ -12,7 +12,7 @@
 #include "../process/process.h"
 #include "../../mm/pmm.h"
 #include "../../mm/vmm.h"
-#include "../../net/net_service.h"
+#include "../../net/core/net_service.h"
 extern struct limine_memmap_response *memmap_response_ptr;
 extern struct limine_smp_response *smp_response_ptr;
 extern uint64_t hhdm_offset_global;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "net_device.h"
+#include "../core/net_device.h"
 #include <stdbool.h>
 #include <stdint.h>
 
