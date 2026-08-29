@@ -3,8 +3,10 @@
 #include "ps2_mouse.h"
 #include "../usb/xhci.h"
 #include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
 
 static struct usb_mouse_info info;
+static volatile bool polling;
 
 void usb_mouse_attach(uint16_t vendor_id, uint16_t product_id, uint8_t port){
     info.vendor_id=vendor_id;
@@ -33,7 +35,18 @@ void usb_mouse_report(const uint8_t *report, uint32_t length){
 }
 
 void usb_mouse_poll(void){
-    if(info.connected) xhci_poll_mouse();
+    if(!info.connected) return;
+    if(__atomic_test_and_set(&polling,__ATOMIC_ACQUIRE)) return;
+    xhci_poll_mouse();
+    __atomic_clear(&polling,__ATOMIC_RELEASE);
+}
+
+void usb_mouse_service_thread(void *arg){
+    (void)arg;
+    for(;;){
+        usb_mouse_poll();
+        scheduler_sleep(1);
+    }
 }
 
 struct usb_mouse_info usb_mouse_get_info(void){ return info; }

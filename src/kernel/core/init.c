@@ -5,6 +5,7 @@
 #include "../process/scheduler.h"
 #include "../process/process.h"
 #include "../../drivers/serial/serial.h"
+#include "../../drivers/mouse/usb_mouse.h"
 #include "../../userspace/userspace.h"
 #include "../../net/core/net_service.h"
 
@@ -41,6 +42,7 @@ void init_process_start(uint32_t detected_cpu_count){
     boot_diag_checkpoint(BOOT_STAGE_USERSPACE_RUN,
                          "init and desktop ready, starting scheduler");
 
+    scheduler_create_thread(usb_mouse_service_thread, 0, "usb-hid", 0, 0);
     scheduler_create_thread(userspace_input_thread, 0, "init-input", 1, 0);
     scheduler_create_thread(userspace_keyboard_thread, 0, "desktop-keyboard", 1, 0);
     scheduler_create_thread(userspace_log_thread, 0, "kernel-log", 3, 0);
