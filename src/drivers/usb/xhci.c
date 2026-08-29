@@ -286,11 +286,15 @@ static bool dispatch_mouse_event(const struct xhci_trb *event){
         } else {
             probe_stats.mouse_transfer_errors++;
             probe_stats.last_completion_code=code;
-            device->interrupt_errors++;
-            if(device->interrupt_errors>=3){
-                device->kind=XHCI_DEVICE_DISABLED;
-                usb_mouse_detach();
-            }
+            /* A transaction error is recoverable for an interrupt endpoint.
+               Do not turn a transient babble/CRC/link error into a permanent
+               "sleeping" mouse.  The failed TRB is consumed by the
+               controller; interrupt_pending is already clear, so the next
+               poll submits a fresh report request. */
+            if(device->interrupt_errors<UINT8_MAX) device->interrupt_errors++;
+            if(device->interrupt_errors==1 || device->interrupt_errors==3)
+                klogf(KLOG_WARN,"xhci%u: HID mouse transfer error slot=%u ep=%u code=%u; retrying",
+                      controller_number,slot,endpoint,code);
         }
         return true;
     }
@@ -721,8 +725,11 @@ static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
     }
     endpoint[0]=(uint32_t)xhci_interval<<16;
     uint16_t report_length=packet_size<8 ? packet_size : 8;
-    // Average TRB Length (low 16) = 8, Max ESIT Payload (high 16) = wMaxPacket
-    endpoint[4]=(uint32_t)report_length|((uint32_t)packet_size<<16);
+    /* Endpoint Context DW4: Max ESIT Payload is low 16 bits and Average TRB
+       Length is high 16 bits.  Keep both bounded by the actual report size;
+       reversing these fields can make the controller reject otherwise valid
+       interrupt transfers with USB Transaction Error. */
+    endpoint[4]=(uint32_t)packet_size|((uint32_t)report_length<<16);
     if(!submit_command(physical_address(input),XHCI_TRB_CONFIGURE_EP,
                        devices[index].slot_id,0)) return false;
     if(!control_transfer(index,0,9,configuration,0,0,0,false)) return false;
