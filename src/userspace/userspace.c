@@ -154,14 +154,11 @@ static bool installer_requires_restart(int32_t status){
         && install.state!=0;
 }
 
-static void track_detached_program(int32_t pid){
-    if(pid<0) return;
+static int32_t detached_program_slot(void){
     for(uint32_t index=0;index<WINDOW_MANAGER_CAPACITY;index++){
-        if(detached_programs[index]<=0){
-            detached_programs[index]=pid;
-            return;
-        }
+        if(detached_programs[index]<=0) return (int32_t)index;
     }
+    return -1;
 }
 
 static void reap_detached_programs(void){
@@ -178,8 +175,10 @@ int32_t userspace_run_program(const char *path){
     if(!path) return -1;
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
     if(!supervise_installer){
+        int32_t slot=detached_program_slot();
+        if(slot<0) return -1;
         int32_t pid=(int32_t)userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
-        track_detached_program(pid);
+        if(pid>=0) detached_programs[slot]=pid;
         return pid;
     }
     if(external_program_has_input_focus()) return -1;
