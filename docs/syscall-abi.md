@@ -47,8 +47,8 @@ of the address space remains supervisor-only. The installer module receives
 the storage-administration capability; ordinary processes cannot format disks.
 
 `/bin/init` is mandatory and must receive PID 1. Boot-media applications are
-addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal` and
-`/bin/program/nano`. The minimal shell searches the process `PATH`, which
+addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal`,
+`/bin/program/files` and `/bin/program/nano`. The minimal shell searches the process `PATH`, which
 defaults to `/bin/program:/bin`, and also accepts absolute executable paths.
 
 Traditional commands such as `/bin/program/ls`, `/bin/program/cat` and
@@ -88,6 +88,18 @@ EOF and does not close the descriptor.
 - `SYS_AUDIO_ADJUST_VOLUME`: `a1` is a signed step.
 - `SYS_AUDIO_PLAY_TEST_SOUND`: plays the current backend's test sound.
 - `SYS_AUDIO_UPDATE`: advances non-blocking audio state from the scheduler loop.
+
+## PureGUI window coordination
+
+- `SYS_GUI_WINDOW_REGISTER`: registers the calling PID and its window frame.
+- `SYS_GUI_WINDOW_UPDATE`: updates the registered frame after move or minimize.
+- `SYS_GUI_WINDOW_UNREGISTER`: removes the calling process window.
+- `SYS_GUI_WINDOW_STATE`: returns focused and ordered-repaint flags.
+- `SYS_GUI_WINDOW_REPAINT_DONE`: acknowledges completion of a repaint event.
+
+The registry routes keyboard focus to one process and restores multiple
+direct-framebuffer windows in z-order. Drawing still uses the framebuffer
+syscalls; these calls coordinate ownership and do not expose framebuffer memory.
 
 ## Kernel Virtual Files
 The kernel exposes a small read-only virtual filesystem:
