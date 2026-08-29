@@ -421,6 +421,21 @@ static uint16_t initial_packet_size(uint8_t speed){
     return 8;
 }
 
+/* xHCI stores FS/LS interrupt periods as log2(microframes), not USB's
+   millisecond bInterval.  Round down to the nearest power of two as required
+   by the xHCI endpoint-context interval encoding. */
+static uint8_t fs_ls_interrupt_interval(uint8_t b_interval){
+    uint32_t microframes=(uint32_t)(b_interval ? b_interval : 1U)*8U;
+    uint32_t period=1;
+    uint8_t exponent=0;
+    while(exponent<10 && period<=microframes/2U){
+        period<<=1;
+        exponent++;
+    }
+    if(exponent<3) exponent=3;
+    return exponent;
+}
+
 static void xhci_log_port(uint8_t port_number, uint32_t portsc, const char *when){
     uint8_t ccs=(portsc&1)!=0;
     uint8_t ped=(portsc>>1)&1;
@@ -696,8 +711,7 @@ static bool configure_boot_mouse(uint8_t index, uint8_t configuration,
     configure_endpoint_context(endpoint,7,packet_size,&bulk_in_rings[index]);
     uint8_t xhci_interval;
     if(speed<=2){
-        xhci_interval = interval ? interval : 1;
-        if(xhci_interval==0) xhci_interval=10;
+        xhci_interval=fs_ls_interrupt_interval(interval);
         klogf(KLOG_DEBUG,"xhci%u: FS/LS mouse interval bInterval=%u -> xHCI interval=%u",controller_number,interval,xhci_interval);
     } else {
         if(interval<1) interval=1;
