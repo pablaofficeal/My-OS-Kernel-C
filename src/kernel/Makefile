@@ -1,0 +1,95 @@
+ROOT_DIR ?= $(abspath ../..)
+include $(ROOT_DIR)/mk/toolchain.mk
+
+OBJ_DIR := $(BIN_DIR)/obj/kernel
+KERNEL_DIR := $(BIN_DIR)/kernel
+TARGET := $(KERNEL_DIR)/kernel-limine.elf
+FALLBACK := $(KERNEL_DIR)/kernel-fallback.elf
+LINKER_SCRIPT := $(ROOT_DIR)/linker-limine.ld
+
+C_SOURCES := \
+	boot/boot.c \
+	kernel/kernel.c \
+	kernel/init.c \
+	kernel/system_info.c \
+	kernel/process.c \
+	kernel/program_alias.c \
+	kernel/elf.c \
+	mm/pmm.c \
+	mm/vmm.c \
+	arch/x86_64/gdt.c \
+	arch/x86_64/idt.c \
+	arch/x86_64/mmio.c \
+	kernel/syscall.c \
+	drivers/serial.c \
+	drivers/vga.c \
+	drivers/pic.c \
+	drivers/timer.c \
+	drivers/fb.c \
+	drivers/gop.c \
+	drivers/mouse/ps2_mouse.c \
+	drivers/mouse/usb_mouse.c \
+	lib/string.c \
+	kernel/klog.c \
+	kernel/boot_diag.c \
+	kernel/panic.c \
+	drivers/keyboard.c \
+	drivers/pci/pci.c \
+	drivers/storage/ata_pio.c \
+	drivers/storage/ahci.c \
+	drivers/storage/block_device.c \
+	drivers/storage/storage_probe.c \
+	drivers/usb/xhci.c \
+	drivers/usb/ehci.c \
+	fs/fat32.c \
+	fs/vfs.c \
+	userspace/display.c \
+	userspace/fs.c \
+	userspace/system.c \
+	userspace/audio.c \
+	userspace/audio_overlay.c \
+	userspace/userspace.c \
+	userspace/window_manager.c \
+	userspace/monitor/monitor.c \
+	userspace/apps/datetime_service.c \
+	userspace/apps/clock_app.c \
+	userspace/apps/calendar_app.c \
+	userspace/apps/calculator_app.c \
+	userspace/apps/desktop_apps.c \
+	kernel/scheduler.c \
+	drivers/power.c \
+	drivers/audio_hda.c \
+	drivers/audio.c
+CPP_SOURCES := userspace/apps/audio_panel.cpp
+ASM_SOURCES := \
+	arch/x86_64/gdt.asm \
+	arch/x86_64/idt.asm \
+	arch/x86_64/scheduler.asm \
+	arch/x86_64/user.asm
+C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
+CPP_OBJECTS := $(CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
+ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.o)
+OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
+
+.PHONY: all
+all: $(TARGET)
+
+-include $(C_OBJECTS:.o=.d) $(CPP_OBJECTS:.o=.d)
+
+$(TARGET): $(OBJECTS) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	@if [ -f $@ ]; then cp $@ $(FALLBACK); fi
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS)
+	@if [ ! -f $(FALLBACK) ]; then cp $@ $(FALLBACK); fi
+
+$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(KERNEL_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CPPFLAGS) $(DEPFLAGS) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.asm
+	@mkdir -p $(@D)
+	$(NASM) -f elf64 $< -o $@

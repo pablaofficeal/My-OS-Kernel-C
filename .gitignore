@@ -1,6 +1,7 @@
 *.o
 *.iso
 *.bin
+/bin/
 *iso/
 *.idea/
 kernel.elf
