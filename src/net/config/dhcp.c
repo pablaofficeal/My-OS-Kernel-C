@@ -29,7 +29,7 @@ enum dhcp_state {
 
 struct dhcp_client {
     struct net_device *device;
-    enum dhcp_state state;
+    volatile enum dhcp_state state;
     uint32_t transaction;
     uint32_t offered_address;
     uint32_t server;
@@ -136,8 +136,8 @@ static void receive_message(const struct udp_datagram *datagram){
         if(!ipv4_configure(client->device,address,client->netmask,
                            client->gateway)) return;
         if(client->dns) (void)dns_set_server(client->device,client->dns);
-        client->state=DHCP_STATE_BOUND;
         client->lease_start_ms=timer_ticks();
+        __atomic_store_n(&client->state,DHCP_STATE_BOUND,__ATOMIC_RELEASE);
         klogf(KLOG_OK,"dhcp: %s address=%u.%u.%u.%u gateway=%u.%u.%u.%u",
               client->device->name,(address>>24)&255,(address>>16)&255,
               (address>>8)&255,address&255,(client->gateway>>24)&255,
@@ -198,5 +198,6 @@ void dhcp_poll(uint64_t now_ms){
 
 bool dhcp_is_bound(struct net_device *device){
     struct dhcp_client *client=find_client(device);
-    return client && client->state==DHCP_STATE_BOUND;
+    return client && __atomic_load_n(&client->state,__ATOMIC_ACQUIRE)
+        ==DHCP_STATE_BOUND;
 }

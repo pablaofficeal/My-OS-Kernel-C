@@ -181,7 +181,7 @@ bool dns_set_server(struct net_device *device, uint32_t server){
     if(!device || !server) return false;
     struct dns_server_entry *entry=server_entry(device,true);
     if(!entry) return false;
-    entry->address=server;
+    __atomic_store_n(&entry->address,server,__ATOMIC_RELEASE);
     return true;
 }
 
@@ -195,7 +195,9 @@ enum dns_result dns_resolve_ipv4(struct net_device *device,
         return DNS_RESULT_INVALID;
     if(cache_lookup(normalized,address)) return DNS_RESULT_OK;
     struct dns_server_entry *server=server_entry(device,false);
-    if(!server || !server->address) return DNS_RESULT_NO_SERVER;
+    if(!server) return DNS_RESULT_NO_SERVER;
+    uint32_t server_address=__atomic_load_n(&server->address,__ATOMIC_ACQUIRE);
+    if(!server_address) return DNS_RESULT_NO_SERVER;
     if(__atomic_test_and_set(&query_lock,__ATOMIC_ACQUIRE)) return DNS_RESULT_BUSY;
 
     uint8_t packet[DNS_PACKET_CAPACITY];
@@ -226,7 +228,7 @@ enum dns_result dns_resolve_ipv4(struct net_device *device,
 
     memset(&query,0,sizeof(query));
     query.device=device;
-    query.server=server->address;
+    query.server=server_address;
     query.identifier=identifier;
     query.active=true;
     uint64_t start=timer_ticks();
@@ -236,7 +238,7 @@ enum dns_result dns_resolve_ipv4(struct net_device *device,
         uint64_t now=timer_ticks();
         if(last_send==UINT64_MAX || now-last_send>=DNS_RETRY_MS){
             enum ipv4_send_result sent=udp_send(
-                device,server->address,DNS_CLIENT_PORT,DNS_SERVER_PORT,
+                device,server_address,DNS_CLIENT_PORT,DNS_SERVER_PORT,
                 packet,offset);
             if(sent==IPV4_SEND_ERROR){ result=DNS_RESULT_NETWORK; break; }
             last_send=now;

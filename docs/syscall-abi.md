@@ -99,6 +99,20 @@ EOF and does not close the descriptor.
 - `SYS_AUDIO_PLAY_TEST_SOUND`: plays the current backend's test sound.
 - `SYS_AUDIO_UPDATE`: advances non-blocking audio state from the scheduler loop.
 
+## Network diagnostics
+
+- `SYS_NET_PING` (259): `a1` points to a readable bounded
+  `struct network_ping_request`; `a2` points to a writable
+  `struct network_ping_result`.
+- The request contains a null-terminated IPv4 address, hostname or URL, a
+  timeout capped at 30 seconds and an ICMP sequence number.
+- The kernel strips a URL scheme/path, resolves hostnames through the DHCP
+  supplied DNS server and performs one ICMP Echo transaction. It never exposes
+  raw kernel packet buffers to ring 3.
+- Success returns `0`. Negative results distinguish invalid input, missing or
+  unconfigured interfaces, DNS failure, timeout, contention and transmission
+  failure.
+
 ## PureGUI window coordination
 
 - `SYS_GUI_WINDOW_REGISTER`: registers the calling PID and its window frame.

@@ -112,7 +112,7 @@ bool ipv4_configure(struct net_device *device, uint32_t address,
     interface->address=address;
     interface->netmask=netmask;
     interface->gateway=gateway;
-    interface->configured=true;
+    __atomic_store_n(&interface->configured,true,__ATOMIC_RELEASE);
     return true;
 }
 
@@ -120,7 +120,8 @@ bool ipv4_get_config(struct net_device *device,
                      struct ipv4_interface_config *config){
     if(!device || !config) return false;
     struct ipv4_interface_config *interface=find_interface(device,false);
-    if(!interface || !interface->configured) return false;
+    if(!interface || !__atomic_load_n(&interface->configured,__ATOMIC_ACQUIRE))
+        return false;
     *config=*interface;
     return true;
 }

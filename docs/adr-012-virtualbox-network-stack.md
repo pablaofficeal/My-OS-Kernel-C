@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. The first hardware and device-interface layer is implemented.
+Accepted. The initial IPv4 diagnostic stack is implemented.
 
 ## Context
 
@@ -22,7 +22,7 @@ The initial PureC OS network target is the VirtualBox Intel PRO/1000 MT Desktop
 4. ARP cache with expiry and bounded entries.
 5. IPv4 validation, checksum and routing for one interface.
 6. UDP sockets and a DHCP client for VirtualBox NAT/bridged networking.
-7. ICMP echo for diagnostics, followed by DNS and TCP in later iterations.
+7. ICMP echo and DNS for diagnostics, followed by TCP in later iterations.
 
 The interrupt handler will acknowledge hardware and publish completed ring
 indices only. Packet parsing and protocol work will run in a scheduler thread.
@@ -32,16 +32,33 @@ Ring sizes, packet queues and protocol tables will be compile-time bounded.
 
 - `drivers/net/e1000_82540em` owns PCI `8086:100e`, controller reset, MAC,
   MMIO registers and legacy RX/TX DMA descriptors.
-- `net/net_device` owns the driver-neutral device API, counters and bounded
+- `net/core/net_device` owns the driver-neutral device API, counters and bounded
   raw-frame receive queues. It contains no IPv4, UDP, DHCP, DNS or TCP logic.
-- `net/net_service` owns deferred polling and is the future hand-off point to
-  protocol modules.
-- `net/ethernet` validates Ethernet II headers, provides bounded EtherType
+- `net/core/net_service` owns deferred polling and protocol housekeeping.
+- `net/link/ethernet` validates Ethernet II headers, provides bounded EtherType
   dispatch (eight handlers) and serializes outgoing frames through a fixed
   staging buffer.
-- `net/arp` implements Ethernet/IPv4 ARP requests and replies, passive sender
-  learning, conflict counting, request throttling and a 16-entry cache. Valid
-  entries expire after 120 seconds; unanswered requests expire after five
+- `net/link/arp` implements Ethernet/IPv4 ARP requests and replies, passive
+  sender learning, conflict counting, request throttling and a 16-entry cache.
+- `net/network/ipv4` validates IPv4 headers and checksums, rejects fragments,
+  stores address/netmask/gateway configuration and routes unicast through ARP.
+- `net/transport/udp` provides eight fixed destination-port bindings and
+  bounded datagram transmission. IPv4 UDP checksums are currently transmitted
+  as zero; receive lengths are validated.
+- `net/config/dhcp` is a non-blocking DISCOVER/OFFER/REQUEST/ACK state machine
+  with five bounded retries. It installs the leased address, mask, gateway and
+  DNS server.
+- `net/name/dns` resolves bounded host names using A/IN records, understands
+  compressed response names and keeps eight TTL-controlled cache entries.
+- `net/diagnostics/icmp` answers Echo Requests and provides one synchronized
+  Echo transaction for diagnostics.
+- `net/api/ping` accepts an IPv4 address, hostname or URL, extracts the host,
+  resolves it and performs ICMP echo for the `SYS_NET_PING` syscall.
+- The remaining `net/` subdirectories separate protocol ownership:
+  `api`, `config`, `core`, `diagnostics`, `link`, `name`, `network`,
+  `transport` and `util`; no source files are kept directly in `net/`.
+  These modules contain no TCP logic.
+- Valid ARP entries expire after 120 seconds; unanswered requests expire after five
   seconds and are retransmitted no faster than once per second.
 - The initial mode is polling with a budget of 32 RX descriptors per scheduler
   pass. Hardware interrupts remain masked until the kernel has a general PCI
@@ -57,9 +74,13 @@ hands them to Ethernet dispatch. Its 16 KiB scheduler stack contains one 1522
 byte receive frame. Ethernet adds one global 1522-byte transmit staging buffer;
 ARP adds no packet queues and allocates nothing dynamically.
 
-The next slice is the independent IPv4 module: header validation, checksum,
-local address/netmask/gateway configuration and ARP-backed unicast delivery.
-UDP and DHCP follow it; DNS and TCP remain later iterations.
+The terminal exposes `ping [-c count] <ip|host|url>` with a default of four and
+a hard maximum of twenty requests. DNS and ICMP waits sleep the calling thread;
+the network service continues processing frames independently.
+
+The next major protocol slice is TCP. Before treating the current stack as
+general-purpose networking, add IPv4 fragment reassembly, UDP checksum
+verification, DHCP lease renewal and DNS CNAME chasing.
 
 ## Wi-Fi consequence
 
