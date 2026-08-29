@@ -1689,7 +1689,12 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
+    "    module_path: boot():/lib/libpuregui.a\n"
+    "    module_path: boot():/lib/libpuregui_widgets.a\n"
+    "    module_path: boot():/include/puregui.h\n"
+    "    module_path: boot():/include/puregui_widgets.h\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel2.elf\n"
@@ -1700,7 +1705,12 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
-    "    module_path: boot():/lib/libpurec.a\n";
+    "    module_path: boot():/bin/gui-demo\n"
+    "    module_path: boot():/lib/libpurec.a\n"
+    "    module_path: boot():/lib/libpuregui.a\n"
+    "    module_path: boot():/lib/libpuregui_widgets.a\n"
+    "    module_path: boot():/include/puregui.h\n"
+    "    module_path: boot():/include/puregui_widgets.h\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1715,16 +1725,67 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
     return entry.size==expected_size?0:FS_ERROR_IO;
 }
 
+static int32_t install_gui_development_payload(void){
+    const void *core_library,*widget_library,*core_header,*widget_header;
+    uint64_t core_library_size,widget_library_size;
+    uint64_t core_header_size,widget_header_size;
+    if(!boot_get_module("/lib/libpuregui.a",&core_library,
+                        &core_library_size)
+       || !boot_get_module("/lib/libpuregui_widgets.a",&widget_library,
+                           &widget_library_size)
+       || !boot_get_module("/include/puregui.h",&core_header,
+                           &core_header_size)
+       || !boot_get_module("/include/puregui_widgets.h",&widget_header,
+                           &widget_header_size)){
+        klog(KLOG_ERROR,"install: missing PureGUI development module");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(core_library_size>UINT32_MAX || widget_library_size>UINT32_MAX
+       || core_header_size>UINT32_MAX || widget_header_size>UINT32_MAX)
+        return FS_ERROR_UNSUPPORTED;
+    int32_t status=write_lfn_file(
+        "/lib","libpuregui.a","/lib/libpur~1.a","libpur~1.a",
+        core_library,(uint32_t)core_library_size
+    );
+    if(status<0) return status;
+    status=write_lfn_file(
+        "/lib","libpuregui_widgets.a","/lib/libpur~2.a","libpur~2.a",
+        widget_library,(uint32_t)widget_library_size
+    );
+    if(status<0) return status;
+    status=fat32_write_file("/include/puregui.h",core_header,
+                            (uint32_t)core_header_size);
+    if(status<0) return status;
+    status=write_lfn_file(
+        "/include","puregui_widgets.h","/include/puregu~1.h",
+        "puregu~1.h",widget_header,(uint32_t)widget_header_size
+    );
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpuregui.a",
+                                 (uint32_t)core_library_size);
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpuregui_widgets.a",
+                                 (uint32_t)widget_library_size);
+    if(status<0) return status;
+    status=verify_installed_file("/include/puregui.h",
+                                 (uint32_t)core_header_size);
+    if(status<0) return status;
+    return verify_installed_file("/include/puregui_widgets.h",
+                                 (uint32_t)widget_header_size);
+}
+
 static int32_t install_program_payload(void){
     if(create_directory_checked("/bin")<0
        || create_directory_checked("/bin/program")<0
        || create_directory_checked("/game")<0
-       || create_directory_checked("/lib")<0) return FS_ERROR_IO;
+       || create_directory_checked("/lib")<0
+       || create_directory_checked("/include")<0) return FS_ERROR_IO;
     const void *init_image,*installer_image,*snake_image,*terminal_image;
+    const void *gui_demo_image;
     const void *nano_image,*system_image,*library_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size;
-    uint64_t library_size;
+    uint64_t library_size,gui_demo_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -1749,11 +1810,15 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /bin/program/system");
         return FS_ERROR_NOT_FOUND;
     }
+    if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
+        klog(KLOG_ERROR,"install: missing /bin/gui-demo");
+        return FS_ERROR_NOT_FOUND;
+    }
     if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -1795,18 +1860,27 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write system %d",status);
         return status;
     }
+    status=fat32_write_file("/bin/gui-demo",gui_demo_image,
+                            (uint32_t)gui_demo_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write gui-demo %d",status);
+        return status;
+    }
     status=fat32_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
     }
-    return status;
+    if(status<0) return status;
+    status=verify_installed_file("/bin/gui-demo",(uint32_t)gui_demo_size);
+    if(status<0) return status;
+    return install_gui_development_payload();
 }
 
 static int32_t install_uefi_payload(void){
     static const char *directories[]={
         "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine",
-        "/bin","/bin/program","/game","/lib"
+        "/bin","/bin/program","/game","/lib","/include"
     };
     for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
         int32_t status=create_directory_checked(directories[index]);
