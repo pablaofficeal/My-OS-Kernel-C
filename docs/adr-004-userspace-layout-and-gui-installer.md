@@ -32,6 +32,9 @@ selection and requires the explicit `ERASE` confirmation. Disk formatting runs
 in a kernel worker and reports real FAT32 stages through `SYS_INSTALL_STATUS`
 and `SYS_INSTALL_LOG` without blocking progress output.
 
+The install worker shares interactive scheduler priority 1 so a continuously
+ready application cannot starve disk progress on single-core hardware.
+
 ## Consequences
 
 ### Positive
