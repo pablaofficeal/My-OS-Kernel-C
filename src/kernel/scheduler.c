@@ -1,5 +1,5 @@
 #include "scheduler.h"
-#include "../drivers/timer.h"
+#include "../drivers/interrupts/timer.h"
 #include "../kernel/klog.h"
 #include "../kernel/panic.h"
 #include "../arch/x86_64/gdt.h"

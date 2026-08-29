@@ -21,19 +21,19 @@ C_SOURCES := \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
 	kernel/syscall.c \
-	drivers/serial.c \
-	drivers/vga.c \
-	drivers/pic.c \
-	drivers/timer.c \
-	drivers/fb.c \
-	drivers/gop.c \
+	drivers/serial/serial.c \
+	drivers/display/vga.c \
+	drivers/interrupts/pic.c \
+	drivers/interrupts/timer.c \
+	drivers/display/fb.c \
+	drivers/display/gop.c \
 	drivers/mouse/ps2_mouse.c \
 	drivers/mouse/usb_mouse.c \
 	lib/string.c \
 	kernel/klog.c \
 	kernel/boot_diag.c \
 	kernel/panic.c \
-	drivers/keyboard.c \
+	drivers/input/keyboard.c \
 	drivers/pci/pci.c \
 	drivers/storage/ata_pio.c \
 	drivers/storage/ahci.c \
@@ -57,9 +57,9 @@ C_SOURCES := \
 	userspace/apps/calculator_app.c \
 	userspace/apps/desktop_apps.c \
 	kernel/scheduler.c \
-	drivers/power.c \
-	drivers/audio_hda.c \
-	drivers/audio.c
+	drivers/power/power.c \
+	drivers/audio/audio_hda.c \
+	drivers/audio/audio.c
 CPP_SOURCES := userspace/apps/audio_panel.cpp
 ASM_SOURCES := \
 	arch/x86_64/gdt.asm \

@@ -1,6 +1,6 @@
 #include "kernel.h"
-#include "../drivers/gop.h"
-#include "../drivers/serial.h"
+#include "../drivers/display/gop.h"
+#include "../drivers/serial/serial.h"
 #include "../kernel/syscall.h"
 #include "../kernel/klog.h"
 #include "../kernel/system_info.h"

@@ -1,5 +1,5 @@
 #include "system_info.h"
-#include "../drivers/timer.h"
+#include "../drivers/interrupts/timer.h"
 
 #include <stddef.h>
 

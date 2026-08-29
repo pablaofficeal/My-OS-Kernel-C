@@ -1,6 +1,6 @@
 #include "timer.h"
 
-#include "../kernel/klog.h"
+#include "../../kernel/klog.h"
 
 #define PIT_INPUT_HZ 1193182U
 #define PIT_COMMAND  0x43

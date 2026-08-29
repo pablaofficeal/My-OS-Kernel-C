@@ -1,8 +1,8 @@
 #include "audio_hda.h"
-#include "pci/pci.h"
-#include "../arch/x86_64/mmio.h"
-#include "../kernel/klog.h"
-#include "../lib/string.h"
+#include "../pci/pci.h"
+#include "../../arch/x86_64/mmio.h"
+#include "../../kernel/klog.h"
+#include "../../lib/string.h"
 
 #define PCI_CLASS_MULTIMEDIA 0x04
 #define PCI_SUBCLASS_HDA 0x03

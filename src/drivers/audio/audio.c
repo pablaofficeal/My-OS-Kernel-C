@@ -1,7 +1,7 @@
 #include "audio.h"
 #include "audio_hda.h"
-#include "../kernel/system_info.h"
-#include "../kernel/klog.h"
+#include "../../kernel/system_info.h"
+#include "../../kernel/klog.h"
 
 #define PIT_CHANNEL2_PORT 0x42
 #define PIT_COMMAND_PORT  0x43

@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
-#include "../boot/limine.h"
+#include "../../boot/limine.h"
 
 // Универсальный GOP/Framebuffer драйвер
 // Работает через Limine (UEFI) и как fallback через VGA text (BIOS)

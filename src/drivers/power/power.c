@@ -1,7 +1,7 @@
 #include "power.h"
-#include "../boot/limine.h"
-#include "../kernel/klog.h"
-#include "../lib/string.h"
+#include "../../boot/limine.h"
+#include "../../kernel/klog.h"
+#include "../../lib/string.h"
 #include <stddef.h>
 
 extern struct limine_rsdp_response *rsdp_response_ptr;

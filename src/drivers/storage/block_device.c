@@ -6,7 +6,7 @@
 #include "../../lib/string.h"
 #include "../../kernel/klog.h"
 #include "../../kernel/scheduler.h"
-#include "../timer.h"
+#include "../interrupts/timer.h"
 
 #define BLOCK_TRANSPORT_NONE 0
 

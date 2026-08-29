@@ -1,5 +1,5 @@
 #pragma once
-#include "../boot/limine.h"
+#include "../../boot/limine.h"
 #include <stdint.h>
 
 void fb_init(struct limine_framebuffer *fb);
