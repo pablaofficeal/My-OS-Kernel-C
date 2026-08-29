@@ -16,10 +16,12 @@ static bool initialization_complete;
 static bool initialization_result;
 static volatile bool usb_rescan_busy;
 static uint64_t next_hotplug_scan;
+static bool preferred_usb_valid;
+static char preferred_usb_serial[STORAGE_SERIAL_CAPACITY];
 
 static void usb_rescan_lock(void){
     while(__atomic_test_and_set(&usb_rescan_busy,__ATOMIC_ACQUIRE))
-        scheduler_yield();
+        scheduler_sleep(1);
 }
 
 static void usb_rescan_unlock(void){
@@ -66,15 +68,19 @@ bool block_device_init(void){
 }
 
 uint32_t block_device_rescan_usb(void){
-    char selected_serial[STORAGE_SERIAL_CAPACITY]={0};
     bool restore_usb=active_transport==STORAGE_TRANSPORT_USB_MSC
-        || active_transport==STORAGE_TRANSPORT_USB_EHCI;
-    if(restore_usb){
+        || active_transport==STORAGE_TRANSPORT_USB_EHCI
+        || preferred_usb_valid;
+    if(active_transport==STORAGE_TRANSPORT_USB_MSC
+       || active_transport==STORAGE_TRANSPORT_USB_EHCI){
         uint32_t count=block_device_count();
         for(uint32_t index=0;index<count;index++){
             struct storage_device_info info;
             if(block_device_get_info(index,&info) && info.selected){
-                strncpy(selected_serial,info.serial,sizeof(selected_serial)-1);
+                memset(preferred_usb_serial,0,sizeof(preferred_usb_serial));
+                strncpy(preferred_usb_serial,info.serial,
+                        sizeof(preferred_usb_serial)-1);
+                preferred_usb_valid=true;
                 break;
             }
         }
@@ -90,7 +96,7 @@ uint32_t block_device_rescan_usb(void){
         for(uint32_t index=0;index<count;index++){
             struct storage_device_info info;
             if(block_device_get_info(index,&info)
-               && strcmp(info.serial,selected_serial)==0){
+               && strcmp(info.serial,preferred_usb_serial)==0){
                 (void)block_device_select(index);
                 restored_usb=true;
                 break;
@@ -197,6 +203,7 @@ bool block_device_select(uint32_t index){
         if(!ata_pio_select_device(index)) return false;
         active_transport=STORAGE_TRANSPORT_ATA_PIO;
         active_index=index;
+        preferred_usb_valid=false;
         return true;
     }
     uint32_t ahci_count=ahci_device_count();
@@ -206,6 +213,7 @@ bool block_device_select(uint32_t index){
         if(!ahci_select_device(relative)) return false;
         active_transport=STORAGE_TRANSPORT_AHCI;
         active_index=relative;
+        preferred_usb_valid=false;
         return true;
     }
     uint32_t usb_index=relative-ahci_count;
@@ -213,12 +221,26 @@ bool block_device_select(uint32_t index){
         if(!xhci_select_device(usb_index)) return false;
         active_transport=STORAGE_TRANSPORT_USB_MSC;
         active_index=usb_index;
+        struct storage_device_info info;
+        if(xhci_get_device_info(usb_index,&info)){
+            memset(preferred_usb_serial,0,sizeof(preferred_usb_serial));
+            strncpy(preferred_usb_serial,info.serial,
+                    sizeof(preferred_usb_serial)-1);
+            preferred_usb_valid=true;
+        }
         return true;
     }
     uint32_t ehci_index=usb_index-xhci_count;
     if(!ehci_select_device(ehci_index)) return false;
     active_transport=STORAGE_TRANSPORT_USB_EHCI;
     active_index=ehci_index;
+    struct storage_device_info info;
+    if(ehci_get_device_info(ehci_index,&info)){
+        memset(preferred_usb_serial,0,sizeof(preferred_usb_serial));
+        strncpy(preferred_usb_serial,info.serial,
+                sizeof(preferred_usb_serial)-1);
+        preferred_usb_valid=true;
+    }
     return true;
 }
 
