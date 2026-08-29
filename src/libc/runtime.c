@@ -323,6 +323,16 @@ bool pc_install_log(struct install_log *log){
         (uint64_t)(uintptr_t)log,0,0)>=0;
 }
 
+bool pc_audio_get_status(struct audio_status *status){
+    return status && pc_syscall(SYS_AUDIO_GET_STATUS,(uint64_t)(uintptr_t)status,0,0)>=0;
+}
+int32_t pc_audio_get_volume(void){ return (int32_t)pc_syscall(SYS_AUDIO_GET_VOLUME,0,0,0); }
+bool pc_audio_is_muted(void){ return pc_syscall(SYS_AUDIO_IS_MUTED,0,0,0)!=0; }
+void pc_audio_set_volume(uint32_t v){ (void)pc_syscall(SYS_AUDIO_SET_VOLUME,v,0,0); }
+void pc_audio_set_muted(bool m){ (void)pc_syscall(SYS_AUDIO_SET_MUTED,m?1:0,0,0); }
+void pc_audio_adjust_volume(int32_t d){ (void)pc_syscall(SYS_AUDIO_ADJUST_VOLUME,(uint64_t)(int64_t)d,0,0); }
+bool pc_audio_select_output(uint32_t i){ return pc_syscall(SYS_AUDIO_SELECT_OUTPUT_DEVICE,i,0,0)==0; }
+void pc_audio_play_test(void){ (void)pc_syscall(SYS_AUDIO_PLAY_TEST_SOUND,0,0,0); }
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

@@ -50,7 +50,8 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/nano" "$(ISO_ROOT)/bin/program/nano"; \
 	cp "$(PROGRAM_DIR)/system" "$(ISO_ROOT)/bin/program/system"; \
 	cp "$(PROGRAM_DIR)/files" "$(ISO_ROOT)/bin/program/files"; \
-	cp "$(PROGRAM_DIR)/gui-demo" "$(ISO_ROOT)/bin/gui-demo"; \
+	cp "$(PROGRAM_DIR)/gui-demo" "$(ISO_ROOT)/bin/gui-demo";
+	cp "$(PROGRAM_DIR)/settings" "$(ISO_ROOT)/bin/program/settings"; \
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \

@@ -32,7 +32,12 @@ GENERAL_SOURCES := \
 	files/app.c \
 	files/model.c \
 	files/path.c \
-	files/view.c
+	files/view.c \
+	settings/main.c \
+	settings/core/model.c \
+	settings/core/app.c \
+	settings/pages/audio.c \
+	settings/pages/wifi.c
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 TARGETS := \
@@ -43,7 +48,8 @@ TARGETS := \
 	$(PROGRAM_DIR)/nano \
 	$(PROGRAM_DIR)/system \
 	$(PROGRAM_DIR)/gui-demo \
-	$(PROGRAM_DIR)/files
+	$(PROGRAM_DIR)/files \
+	$(PROGRAM_DIR)/settings
 
 .NOTPARALLEL:
 .PHONY: all
@@ -61,7 +67,7 @@ $(LIBPUREGUI) $(LIBPGUIW):
 
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CFLAGS) -c $< -o $@
 
 $(PROGRAM_DIR)/init: $(OBJ_DIR)/init/main.o $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
@@ -92,5 +98,9 @@ $(PROGRAM_DIR)/gui-demo: $(OBJ_DIR)/gui_demo/main.o $(LIBPGUIW) $(LIBPUREGUI) $(
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/files: $(OBJ_DIR)/files/main.o $(OBJ_DIR)/files/app.o $(OBJ_DIR)/files/model.o $(OBJ_DIR)/files/path.o $(OBJ_DIR)/files/view.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
+
+$(PROGRAM_DIR)/settings: $(OBJ_DIR)/settings/main.o $(OBJ_DIR)/settings/core/model.o $(OBJ_DIR)/settings/core/app.o $(OBJ_DIR)/settings/pages/audio.o $(OBJ_DIR)/settings/pages/wifi.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
