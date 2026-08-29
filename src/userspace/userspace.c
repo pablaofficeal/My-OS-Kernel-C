@@ -2,6 +2,7 @@
 #include "apps/desktop_apps.h"
 #include "apps/audio_panel.h"
 #include "monitor/monitor.h"
+#include "window_manager.h"
 #include "syscall.h"
 #include "audio.h"
 #include "display.h"
@@ -13,6 +14,7 @@
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
+#include "../kernel/process.h"
 #include "../kernel/scheduler.h"
 #include "../kernel/syscall.h"
 #include "../lib/string.h"
@@ -53,6 +55,9 @@ static bool installer_icon_visible=true;
 static bool external_program_active;
 static uint32_t desktop_redraw_requested;
 static uint32_t desktop_redraw_completed;
+static uint32_t desktop_redraw_requester;
+static bool desktop_redraw_busy;
+static int32_t detached_programs[WINDOW_MANAGER_CAPACITY];
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
 static int8_t dragged_icon=-1;
@@ -62,6 +67,7 @@ static bool icon_drag_moved;
 static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 static void redraw_scene(void);
+static void redraw_managed_scene(uint32_t excluded_pid);
 
 static bool external_program_has_input_focus(void){
     return __atomic_load_n(&external_program_active,__ATOMIC_ACQUIRE);
@@ -150,10 +156,38 @@ static bool installer_requires_restart(int32_t status){
         && install.state!=0;
 }
 
+static void track_detached_program(int32_t pid){
+    if(pid<0) return;
+    for(uint32_t index=0;index<WINDOW_MANAGER_CAPACITY;index++){
+        if(detached_programs[index]<=0){
+            detached_programs[index]=pid;
+            return;
+        }
+    }
+}
+
+static void reap_detached_programs(void){
+    for(uint32_t index=0;index<WINDOW_MANAGER_CAPACITY;index++){
+        if(detached_programs[index]<=0) continue;
+        int32_t status=0;
+        int64_t result=userspace_syscall(SYS_WAIT,
+            (uint64_t)detached_programs[index],(uint64_t)&status,1);
+        if(result>0) detached_programs[index]=0;
+    }
+}
+
 int32_t userspace_run_program(const char *path){
-    if(!path || external_program_has_input_focus()) return -1;
-    set_external_program_input_focus(true);
+    if(!path) return -1;
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
+    if(!supervise_installer){
+        int32_t pid=(int32_t)userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        track_detached_program(pid);
+        return pid;
+    }
+    if(external_program_has_input_focus()) return -1;
+    set_external_program_input_focus(true);
+    window_manager_set_suspended(true);
+    (void)userspace_syscall(SYS_CONSOLE_DISABLE,0,0,0);
     bool installer_pinned=false;
     int32_t status=-1;
     for(;;){
@@ -179,7 +213,8 @@ int32_t userspace_run_program(const char *path){
         scheduler_sleep(20);
     }
     set_external_program_input_focus(false);
-    redraw_scene();
+    window_manager_set_suspended(false);
+    redraw_managed_scene(0);
     return status;
 }
 
@@ -234,26 +269,43 @@ static void redraw_scene(void){
     mouse_end_framebuffer_update();
 }
 
+static void wait_for_managed_repaint(void){
+    for(uint32_t attempt=0;
+        attempt<250 && window_manager_repaint_pending();attempt++)
+        scheduler_sleep(1);
+    if(window_manager_repaint_pending()) window_manager_cancel_repaint();
+}
+
+static void redraw_managed_scene(uint32_t excluded_pid){
+    redraw_scene();
+    window_manager_request_repaint(excluded_pid);
+    wait_for_managed_repaint();
+}
+
 static bool service_desktop_redraw(void){
     uint32_t requested=__atomic_load_n(&desktop_redraw_requested,
                                        __ATOMIC_ACQUIRE);
     uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
                                        __ATOMIC_RELAXED);
     if(requested==completed) return false;
-    redraw_scene();
+    redraw_managed_scene(desktop_redraw_requester);
     __atomic_store_n(&desktop_redraw_completed,requested,__ATOMIC_RELEASE);
     return true;
 }
 
 void userspace_redraw_desktop(void){
+    while(__atomic_test_and_set(&desktop_redraw_busy,__ATOMIC_ACQUIRE))
+        scheduler_sleep(1);
+    desktop_redraw_requester=(uint32_t)process_current_pid();
     uint32_t ticket=__atomic_add_fetch(&desktop_redraw_requested,1,
                                        __ATOMIC_ACQ_REL);
     for(;;){
         uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
                                            __ATOMIC_ACQUIRE);
-        if((int32_t)(completed-ticket)>=0) return;
+        if((int32_t)(completed-ticket)>=0) break;
         scheduler_sleep(1);
     }
+    __atomic_clear(&desktop_redraw_busy,__ATOMIC_RELEASE);
 }
 
 static void redraw_icon_move(
@@ -262,15 +314,11 @@ static void redraw_icon_move(
     uint32_t new_x,
     uint32_t new_y
 ){
-    mouse_begin_framebuffer_update();
-    display_draw_rect(old_x,old_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
-    display_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
-    draw_desktop_icons();
-    if(monitor_window_is_visible()) monitor_window_draw();
-    if(desktop_apps_is_visible()) desktop_apps_draw();
-    audio_panel_draw(desktop_width);
-    draw_power_menu();
-    mouse_end_framebuffer_update();
+    (void)old_x;
+    (void)old_y;
+    (void)new_x;
+    (void)new_y;
+    redraw_managed_scene(0);
 }
 
 static void handle_desktop_mouse(void){
@@ -307,6 +355,13 @@ static void handle_desktop_mouse(void){
             power_menu_visible=false;
             redraw=true;
         }
+    }
+
+    if(!consumed){
+        bool focus_changed=false;
+        consumed=window_manager_handle_pointer(mouse.x,mouse.y,pressed,
+                                                &focus_changed);
+        if(focus_changed) redraw_managed_scene(0);
     }
 
     if(!consumed && desktop_apps_is_visible()){
@@ -396,7 +451,7 @@ static void handle_desktop_mouse(void){
         if(!icon_drag_moved) redraw=true;
     }
     previous_mouse_buttons=mouse.buttons;
-    if(redraw) redraw_scene();
+    if(redraw) redraw_managed_scene(0);
 }
 
 static bool handle_special_keyboard(void){
@@ -453,12 +508,13 @@ void userspace_input_thread(void *arg){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        reap_detached_programs();
         (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_sleep(10);
             continue;
         }
-        if(handle_special_keyboard()) redraw_scene();
+        if(handle_special_keyboard()) redraw_managed_scene(0);
         handle_desktop_mouse();
         monitor_window_update();
         desktop_apps_update();
@@ -472,12 +528,13 @@ void userspace_keyboard_thread(void *arg){
     (void)arg;
     klog(KLOG_INFO, "sched: desktop keyboard thread started");
     for(;;){
-        if(external_program_has_input_focus()){
+        if(external_program_has_input_focus() || window_manager_has_focus()){
             scheduler_sleep(10);
             continue;
         }
         char c;
-        while(!external_program_has_input_focus() && keyboard_try_getc(&c))
+        while(!external_program_has_input_focus()
+              && !window_manager_has_focus() && keyboard_try_getc(&c))
             (void)desktop_apps_handle_key(c);
         // Yield so input thread can run even while terminal is idle
         scheduler_yield();
@@ -557,16 +614,18 @@ void userspace_run(void){
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        reap_detached_programs();
         (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_yield();
             continue;
         }
-        if(handle_special_keyboard()) redraw_scene();
+        if(handle_special_keyboard()) redraw_managed_scene(0);
         handle_desktop_mouse();
 
         char c;
-        while(keyboard_try_getc(&c)) (void)desktop_apps_handle_key(c);
+        while(!window_manager_has_focus() && keyboard_try_getc(&c))
+            (void)desktop_apps_handle_key(c);
         monitor_window_update();
         desktop_apps_update();
 

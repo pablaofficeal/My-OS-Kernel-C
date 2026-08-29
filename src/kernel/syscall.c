@@ -22,6 +22,7 @@
 #include "../kernel/process.h"
 #include "../mm/pmm.h"
 #include "../userspace/userspace.h"
+#include "../userspace/window_manager.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -215,6 +216,28 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_DESKTOP_REDRAW:
             userspace_redraw_desktop();
+            return 0;
+        case SYS_GUI_WINDOW_REGISTER: {
+            const struct gui_window_request *request=
+                (const struct gui_window_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))) return -1;
+            return window_manager_register((uint32_t)process_current_pid(),
+                                            request) ? 0 : -1;
+        }
+        case SYS_GUI_WINDOW_UPDATE: {
+            const struct gui_window_request *request=
+                (const struct gui_window_request*)(uintptr_t)a1;
+            if(!readable(request,sizeof(*request))) return -1;
+            return window_manager_update((uint32_t)process_current_pid(),
+                                          request) ? 0 : -1;
+        }
+        case SYS_GUI_WINDOW_UNREGISTER:
+            window_manager_unregister((uint32_t)process_current_pid());
+            return 0;
+        case SYS_GUI_WINDOW_STATE:
+            return window_manager_state((uint32_t)process_current_pid());
+        case SYS_GUI_WINDOW_REPAINT_DONE:
+            window_manager_finish_repaint((uint32_t)process_current_pid());
             return 0;
         case SYS_GETPID:
             return process_current_pid();

@@ -1,4 +1,4 @@
-# PureGUI API V1.0.1
+# PureGUI API V1.0.2
 
 PureGUI is the small ring-3 GUI toolkit shipped with PureC OS. It translates
 client-relative coordinates into framebuffer operations and keeps window,
@@ -79,7 +79,7 @@ void _start(void){
 | `pg_window_clear` | Fills the client area with a caller-selected color. |
 | `pg_window_rect` | Draws a clipped rectangle using client-relative coordinates. |
 | `pg_window_text` | Draws clipped fixed-width text using client-relative coordinates. |
-| `pg_window_poll_event` | Returns one normalized keyboard or mouse event; title-bar dragging produces `PG_EVENT_MOVE`, Escape and the close button produce `PG_EVENT_CLOSE`, and the minimize button produces `PG_EVENT_MINIMIZE`. |
+| `pg_window_poll_event` | Returns one normalized input, focus or repaint event; title-bar dragging produces `PG_EVENT_MOVE`, focus changes produce `PG_EVENT_FOCUS`, and ordered restoration produces `PG_EVENT_REPAINT`. |
 
 All functions are allocation-free. Invalid window pointers are ignored by
 drawing operations. Applications must pair every `pg_window_begin` with
@@ -100,11 +100,13 @@ processes; emitting SSE instructions otherwise terminates a process with the
 
 ## Current limitations
 
-- One foreground application window is supported at a time.
+- Up to eight registered PureGUI windows can coexist; one receives keyboard
+  focus at a time.
 - Window movement coordinates with the desktop redraw contract, preserving
   the top bar, icons, native windows and overlays.
 - Minimize currently collapses a window to its title bar; a system taskbar is
   not implemented yet.
-- There is no compositor, overlapping-window damage tracking or shared surface.
+- There are no off-screen compositor surfaces; restoration uses ordered
+  application repaint events.
 - Mouse and keyboard events come from the current system input syscalls.
 - Text uses the fixed-width kernel font.

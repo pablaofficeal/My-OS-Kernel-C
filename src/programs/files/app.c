@@ -185,6 +185,7 @@ int files_app_run(void){
             continue;
         }
         if(event.type==PG_EVENT_CLOSE) break;
+        if(event.type==PG_EVENT_MOUSE_MOVE) continue;
         if(event.type==PG_EVENT_KEY) handle_key(&app,event.key);
         struct files_action action=files_view_draw(&app,&event);
         handle_action(&app,action);

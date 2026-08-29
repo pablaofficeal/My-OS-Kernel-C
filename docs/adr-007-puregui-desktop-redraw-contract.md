@@ -44,7 +44,8 @@ longer guesses which color or system components occupied the old rectangle.
 - A move redraws the full desktop and can cost more than dirty-rectangle
   composition.
 - The requesting application can wait up to one desktop polling interval.
-- Multiple independently overlapping ring-3 windows are still unsupported.
+- Ring-3 windows are restored in z-order through the window registry, but they
+  still draw directly rather than owning compositor surfaces.
 
 ### Neutral
 

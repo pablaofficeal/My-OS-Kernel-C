@@ -69,6 +69,21 @@
 #define SYS_CONSOLE_CLEAR 248
 #define SYS_CONSOLE_DISABLE 249
 #define SYS_DESKTOP_REDRAW 250
+#define SYS_GUI_WINDOW_REGISTER 251
+#define SYS_GUI_WINDOW_UPDATE 252
+#define SYS_GUI_WINDOW_UNREGISTER 253
+#define SYS_GUI_WINDOW_STATE 254
+#define SYS_GUI_WINDOW_REPAINT_DONE 255
+
+#define GUI_WINDOW_STATE_FOCUSED 1
+#define GUI_WINDOW_STATE_REPAINT 2
+
+struct gui_window_request {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+};
 
 #define PROCESS_ENVIRONMENT_LIMIT 16
 #define PROCESS_ENVIRONMENT_NAME_LIMIT 32

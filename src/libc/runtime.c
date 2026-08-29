@@ -239,6 +239,29 @@ void pc_desktop_redraw(void){
     (void)pc_syscall(SYS_DESKTOP_REDRAW,0,0,0);
 }
 
+bool pc_gui_window_register(const struct gui_window_request *request){
+    return request && pc_syscall(SYS_GUI_WINDOW_REGISTER,
+        (uint64_t)(uintptr_t)request,0,0)>=0;
+}
+
+bool pc_gui_window_update(const struct gui_window_request *request){
+    return request && pc_syscall(SYS_GUI_WINDOW_UPDATE,
+        (uint64_t)(uintptr_t)request,0,0)>=0;
+}
+
+void pc_gui_window_unregister(void){
+    (void)pc_syscall(SYS_GUI_WINDOW_UNREGISTER,0,0,0);
+}
+
+uint32_t pc_gui_window_state(void){
+    int64_t state=pc_syscall(SYS_GUI_WINDOW_STATE,0,0,0);
+    return state<0 ? 0 : (uint32_t)state;
+}
+
+void pc_gui_window_repaint_done(void){
+    (void)pc_syscall(SYS_GUI_WINDOW_REPAINT_DONE,0,0,0);
+}
+
 bool pc_console_configure(uint32_t x, uint32_t y,
                           uint32_t width, uint32_t height,
                           uint32_t foreground, uint32_t background){

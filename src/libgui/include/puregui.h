@@ -3,11 +3,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PG_API_VERSION 2
-#define PG_VERSION "V1.0.1"
+#define PG_API_VERSION 3
+#define PG_VERSION "V1.0.2"
 #define PG_VERSION_MAJOR 1
 #define PG_VERSION_MINOR 0
-#define PG_VERSION_PATCH 1
+#define PG_VERSION_PATCH 2
 #define PG_TITLE_CAPACITY 64
 #define PG_TITLEBAR_HEIGHT 26
 #define PG_WINDOW_BORDER 2
@@ -39,6 +39,8 @@ enum pg_event_type {
     PG_EVENT_MOUSE_UP,
     PG_EVENT_MOVE,
     PG_EVENT_MINIMIZE,
+    PG_EVENT_FOCUS,
+    PG_EVENT_REPAINT,
     PG_EVENT_CLOSE
 };
 
@@ -63,6 +65,9 @@ struct pg_window {
     bool dragging;
     bool minimized;
     bool open;
+    bool focused;
+    bool registered;
+    bool repainting;
 };
 
 const char *pg_version(void);

@@ -26,11 +26,12 @@ Introduce PureGUI as two static system libraries:
 
 Public headers live under `/include`. Applications use client-relative
 coordinates and link only the layers they need. The ABI begins at
-`PG_API_VERSION 1`; the current ABI is `PG_API_VERSION 2`, while the packaged
-library release uses the semantic version `V1.0.1`.
+`PG_API_VERSION 1`; the current ABI is `PG_API_VERSION 3`, while the packaged
+library release uses the semantic version `V1.0.2`.
 
-PureGUI deliberately supports one foreground window owned by the running
-application. Version 2 keeps that model and adds title-bar collapse/restore.
+PureGUI routes keyboard input to one focused window while allowing multiple
+registered ring-3 windows. Version 2 added title-bar collapse/restore and
+version 3 adds focus and coordinated repaint events.
 Rendering still uses the existing framebuffer syscalls; the public API does
 not expose that backend so a future compositor can replace it without changing
 application source.
@@ -45,7 +46,7 @@ application source.
 
 ### Negative
 
-- Windows cannot overlap safely and are not independently composited.
+- Windows use coordinated repaint rather than independent composited surfaces.
 - Static linking duplicates the small client runtime in each application.
 - Text uses the current fixed-width system font.
 
@@ -54,8 +55,8 @@ application source.
 - `/bin/gui-demo` acts as executable API documentation.
 - PureGUI API version 2 adds close/minimize window controls and normalized
   minimize events without introducing a window-server dependency.
-- The packaged library version is `V1.0.1`; it adds title-bar dragging and
-  retained terminal text for surface restoration.
+- The packaged library version is `V1.0.2`; it adds managed focus and ordered
+  restoration of multiple ring-3 windows.
 - ADR-007 replaces solid-color cleanup with desktop-owned scene restoration.
 - PureGUI and its applications are compiled with `-mgeneral-regs-only` until
   the kernel provides per-process SIMD/FPU context management.

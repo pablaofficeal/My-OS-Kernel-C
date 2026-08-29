@@ -11,12 +11,29 @@ static uint8_t changed_button(uint8_t changed){
 bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
     if(!window || !event || !window->open) return false;
     *event=(struct pg_event){.type=PG_EVENT_NONE};
-    int32_t key=pc_try_getchar();
-    if(key>=0){
-        event->key=key;
-        event->type=key==27 ? PG_EVENT_CLOSE : PG_EVENT_KEY;
-        if(event->type==PG_EVENT_CLOSE) pg_window_close(window);
+    uint32_t state=pc_gui_window_state();
+    bool focused=(state&GUI_WINDOW_STATE_FOCUSED)!=0;
+    if(state&GUI_WINDOW_STATE_REPAINT){
+        window->focused=focused;
+        window->repainting=true;
+        event->type=PG_EVENT_REPAINT;
         return true;
+    }
+    if(focused!=window->focused){
+        window->focused=focused;
+        if(focused){
+            event->type=PG_EVENT_FOCUS;
+            return true;
+        }
+    }
+    if(focused){
+        int32_t key=pc_try_getchar();
+        if(key>=0){
+            event->key=key;
+            event->type=key==27 ? PG_EVENT_CLOSE : PG_EVENT_KEY;
+            if(event->type==PG_EVENT_CLOSE) pg_window_close(window);
+            return true;
+        }
     }
     struct mouse_state mouse;
     if(!pc_mouse_get(&mouse)) return false;
@@ -34,6 +51,7 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
     window->previous_mouse_x=mouse.x;
     window->previous_mouse_y=mouse.y;
     window->previous_mouse_buttons=mouse.buttons;
+    if(!focused) return false;
     struct pg_rect close={
         window->frame.x+window->frame.width-24,
         window->frame.y+8,14,14
@@ -75,6 +93,8 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
         if(!was_dragging
            && pg_internal_point_inside(mouse.x,mouse.y,&minimize)){
             window->minimized=!window->minimized;
+            (void)pg_internal_update_registered_frame(window);
+            pc_desktop_redraw();
             event->type=PG_EVENT_MINIMIZE;
         }
     }

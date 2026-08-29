@@ -12,6 +12,18 @@ static void update_client_rect(struct pg_window *window){
         -PG_WINDOW_BORDER*2;
 }
 
+bool pg_internal_update_registered_frame(struct pg_window *window){
+    if(!window || !window->registered) return false;
+    struct gui_window_request request={
+        .x=window->frame.x,
+        .y=window->frame.y,
+        .width=window->frame.width,
+        .height=window->minimized
+            ? PG_TITLEBAR_HEIGHT+PG_WINDOW_BORDER*2 : window->frame.height
+    };
+    return pc_gui_window_update(&request);
+}
+
 bool pg_window_init(struct pg_window *window, const char *title,
                     uint32_t x, uint32_t y,
                     uint32_t width, uint32_t height){
@@ -33,7 +45,16 @@ bool pg_window_init(struct pg_window *window, const char *title,
     window->dragging=false;
     window->minimized=false;
     window->open=true;
+    window->focused=true;
+    window->registered=false;
+    window->repainting=false;
     update_client_rect(window);
+    struct gui_window_request request={x,y,width,height};
+    if(!pc_gui_window_register(&request)){
+        window->open=false;
+        return false;
+    }
+    window->registered=true;
     return true;
 }
 
@@ -49,11 +70,6 @@ bool pg_window_center(struct pg_window *window, const char *title,
 void pg_window_begin(struct pg_window *window){
     if(!window || !window->open) return;
     pc_display_begin_update();
-    if(window->minimized){
-        pc_display_end_update();
-        pc_desktop_redraw();
-        pc_display_begin_update();
-    }
     pc_draw_rect(window->frame.x+6,window->frame.y+6,
                  window->frame.width,window->minimized
                     ? PG_TITLEBAR_HEIGHT+PG_WINDOW_BORDER*2
@@ -88,12 +104,21 @@ void pg_window_begin(struct pg_window *window){
 }
 
 void pg_window_end(struct pg_window *window){
-    if(window && window->open) pc_display_end_update();
+    if(!window || !window->open) return;
+    pc_display_end_update();
+    if(window->repainting){
+        window->repainting=false;
+        pc_gui_window_repaint_done();
+    }
 }
 
 void pg_window_close(struct pg_window *window){
     if(!window) return;
     window->open=false;
+    if(window->registered){
+        pc_gui_window_unregister();
+        window->registered=false;
+    }
     pc_desktop_redraw();
 }
 
@@ -108,19 +133,28 @@ bool pg_window_move(struct pg_window *window, uint32_t x, uint32_t y){
     if(y>display.height-window->frame.height)
         y=display.height-window->frame.height;
     if(x==window->frame.x && y==window->frame.y) return true;
-    pc_desktop_redraw();
     window->frame.x=x;
     window->frame.y=y;
     update_client_rect(window);
+    (void)pg_internal_update_registered_frame(window);
+    pc_desktop_redraw();
     return true;
 }
 
 void pg_window_minimize(struct pg_window *window){
-    if(window && window->open) window->minimized=true;
+    if(window && window->open){
+        window->minimized=true;
+        (void)pg_internal_update_registered_frame(window);
+        pc_desktop_redraw();
+    }
 }
 
 void pg_window_restore(struct pg_window *window){
-    if(window && window->open) window->minimized=false;
+    if(window && window->open){
+        window->minimized=false;
+        (void)pg_internal_update_registered_frame(window);
+        pc_desktop_redraw();
+    }
 }
 
 bool pg_window_is_open(const struct pg_window *window){

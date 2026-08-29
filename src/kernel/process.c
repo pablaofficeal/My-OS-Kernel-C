@@ -9,6 +9,7 @@
 #include "../mm/pmm.h"
 #include "../mm/vmm.h"
 #include "../lib/string.h"
+#include "../userspace/window_manager.h"
 
 #define USER_STACK_TOP 0x00007FFFFFF00000ULL
 #define USER_STACK_PAGES 16
@@ -235,6 +236,7 @@ void process_exit_current(int32_t status){
         if(process->pid==1) kernel_panic("PID 1 exited");
         process->exit_code=status;
         process->state=PROCESS_EXITED;
+        window_manager_unregister(process->pid);
         for(uint32_t fd=3;fd<PROCESS_FD_COUNT;fd++){
             if(process->descriptors[fd]>=VFS_FD_BASE){
                 (void)vfs_close(process->descriptors[fd]);
