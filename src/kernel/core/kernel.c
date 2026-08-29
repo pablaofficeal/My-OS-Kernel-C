@@ -12,6 +12,7 @@
 #include "../process/process.h"
 #include "../../mm/pmm.h"
 #include "../../mm/vmm.h"
+#include "../../net/net_service.h"
 extern struct limine_memmap_response *memmap_response_ptr;
 extern struct limine_smp_response *smp_response_ptr;
 extern uint64_t hhdm_offset_global;
@@ -51,12 +52,13 @@ void kernel_main(struct limine_framebuffer *fb) {
     klog(KLOG_INFO, "Initializing PCI MMIO mapper...");
     mmio_init();
     if(mmio_is_ready()){
-        klog(KLOG_OK, "PCI MMIO mapper ready (uncached 4 KiB mappings)");
+        klog(KLOG_OK, "PCI MMIO mapper ready (uncached multi-page mappings)");
     } else {
         klog(KLOG_WARN, "PCI MMIO mapper unavailable; AHCI/xHCI/EHCI disabled");
     }
     syscall_init();
     klog(KLOG_OK, "Syscall int 0x80 ready");
+    (void)net_service_init();
 
     const char *msg="Hello from syscall (Limine)!\n";
     klog(KLOG_INFO, "Testing syscall WRITE...");

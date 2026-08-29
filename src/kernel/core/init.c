@@ -6,6 +6,7 @@
 #include "../process/process.h"
 #include "../../drivers/serial/serial.h"
 #include "../../userspace/userspace.h"
+#include "../../net/net_service.h"
 
 static void boot_log_pause(void){
     volatile uint64_t dummy=0;
@@ -43,6 +44,10 @@ void init_process_start(uint32_t detected_cpu_count){
     scheduler_create_thread(userspace_input_thread, 0, "init-input", 1, 0);
     scheduler_create_thread(userspace_keyboard_thread, 0, "desktop-keyboard", 1, 0);
     scheduler_create_thread(userspace_log_thread, 0, "kernel-log", 3, 0);
+    if(net_service_is_ready()){
+        if(scheduler_create_thread(net_service_thread,0,"net-rx",2,0)<0)
+            klog(KLOG_WARN,"net: failed to create polling thread");
+    }
     klog(KLOG_OK, "sched: init threads created, starting scheduler");
     serial_write_string("[SCHED] start\n");
     scheduler_start();

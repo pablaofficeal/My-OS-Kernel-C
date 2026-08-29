@@ -35,6 +35,9 @@ C_SOURCES := \
 	kernel/diagnostics/panic.c \
 	drivers/input/keyboard.c \
 	drivers/pci/pci.c \
+	drivers/net/e1000_82540em.c \
+	net/net_device.c \
+	net/net_service.c \
 	drivers/storage/ata_pio.c \
 	drivers/storage/ahci.c \
 	drivers/storage/block_device.c \
