@@ -48,7 +48,8 @@ static uint32_t htop_icon_y=ICON_Y;
 static uint32_t terminal_icon_y=ICON_Y;
 static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
 static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
-static uint32_t installer_icon_x=256,installer_icon_y=ICON_Y;
+static uint32_t settings_icon_x=256,settings_icon_y=ICON_Y;
+static uint32_t installer_icon_x=328,installer_icon_y=ICON_Y;
 static bool installer_icon_visible=true;
 static bool external_program_active;
 static uint32_t desktop_redraw_requested;
@@ -133,6 +134,7 @@ static void draw_desktop_icons(void){
     draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
     draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
     draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
+    draw_app_icon(settings_icon_x,settings_icon_y,"{}", "Settings",0x94E2D5);
     if(installer_icon_visible)
         draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
 }
@@ -383,27 +385,29 @@ static void handle_desktop_mouse(void){
                                             desktop_width,desktop_height)
             || redraw;
     }
-    uint32_t *icon_positions[7]={
+    uint32_t *icon_positions[8]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
         &clock_icon_x,
         &calculator_icon_x,
         &calendar_icon_x,
+        &settings_icon_x,
         &installer_icon_x
     };
-    uint32_t *icon_y_positions[7]={
+    uint32_t *icon_y_positions[8]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
         &clock_icon_y,
         &calculator_icon_y,
         &calendar_icon_y,
+        &settings_icon_y,
         &installer_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<7;index++){
-            if(index==6 && !installer_icon_visible) continue;
+        for(int8_t index=0;index<8;index++){
+            if(index==7 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
                     *icon_positions[index],*icon_y_positions[index],
@@ -445,7 +449,9 @@ static void handle_desktop_mouse(void){
             else if(icon==1) monitor_run();
             else if(icon==2)
                 (void)userspace_run_program("/bin/program/terminal");
-            else if(icon==6) launch_installer();
+            else if(icon==6)
+                (void)userspace_run_program("/bin/program/settings");
+            else if(icon==7) launch_installer();
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;
