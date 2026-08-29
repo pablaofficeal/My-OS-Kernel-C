@@ -269,6 +269,8 @@ bool intel_ax201_init(void){
     }
 
     klogf(KLOG_OK, "ax201: hardware detected: %s at %02x:%02x.%u", adapter.hw_info, adapter.pci.bus, adapter.pci.slot, adapter.pci.function);
+    klog(KLOG_INFO, "ax201: hardware bring-up deferred until firmware transport is implemented");
+    return false;
 
     uint32_t bar0 = pci_read_config32(adapter.pci.bus, adapter.pci.slot, adapter.pci.function, 0x10);
     if(!bar0 || bar0 == 0xFFFFFFFFU || (bar0 & 1U)){
