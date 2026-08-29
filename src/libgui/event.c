@@ -15,7 +15,7 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
     if(key>=0){
         event->key=key;
         event->type=key==27 ? PG_EVENT_CLOSE : PG_EVENT_KEY;
-        if(event->type==PG_EVENT_CLOSE) window->open=false;
+        if(event->type==PG_EVENT_CLOSE) pg_window_close(window);
         return true;
     }
     struct mouse_state mouse;
@@ -57,15 +57,10 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
     }
     if(event->type==PG_EVENT_MOUSE_MOVE && window->dragging
        && (mouse.buttons&1)){
-        struct pg_rect previous=window->frame;
         int32_t next_x=mouse.x-window->drag_offset_x;
         int32_t next_y=mouse.y-window->drag_offset_y;
         if(next_x<0) next_x=0;
         if(next_y<0) next_y=0;
-        pc_display_begin_update();
-        pc_draw_rect(previous.x,previous.y,previous.width+6,
-                     previous.height+6,window->theme.desktop);
-        pc_display_end_update();
         if(pg_window_move(window,(uint32_t)next_x,(uint32_t)next_y))
             event->type=PG_EVENT_MOVE;
     }
@@ -74,7 +69,7 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
         window->dragging=false;
         if(!was_dragging && pg_internal_point_inside(mouse.x,mouse.y,&close)){
             event->type=PG_EVENT_CLOSE;
-            window->open=false;
+            pg_window_close(window);
             return true;
         }
         if(!was_dragging

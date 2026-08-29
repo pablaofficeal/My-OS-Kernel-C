@@ -56,6 +56,7 @@ application source.
   minimize events without introducing a window-server dependency.
 - The packaged library version is `V1.0.1`; it adds title-bar dragging and
   retained terminal text for surface restoration.
+- ADR-007 replaces solid-color cleanup with desktop-owned scene restoration.
 - PureGUI and its applications are compiled with `-mgeneral-regs-only` until
   the kernel provides per-process SIMD/FPU context management.
 

@@ -97,11 +97,11 @@ static int32_t start_program(struct terminal_window *terminal,
     if(pid<0) return -1;
     int32_t status=0;
     if(pc_wait(pid,&status,false)<0){
-        (void)terminal_window_repaint(terminal);
+        (void)terminal_window_restore(terminal);
         pc_write("shell: wait failed\n");
         return -2;
     }
-    (void)terminal_window_repaint(terminal);
+    (void)terminal_window_restore(terminal);
     if(status){
         pc_write("shell: program exited with status ");
         pc_write_i64(status);

@@ -50,9 +50,9 @@ void pg_window_begin(struct pg_window *window){
     if(!window || !window->open) return;
     pc_display_begin_update();
     if(window->minimized){
-        pc_draw_rect(window->frame.x,window->frame.y,
-                     window->frame.width+6,window->frame.height+6,
-                     window->theme.desktop);
+        pc_display_end_update();
+        pc_desktop_redraw();
+        pc_display_begin_update();
     }
     pc_draw_rect(window->frame.x+6,window->frame.y+6,
                  window->frame.width,window->minimized
@@ -92,7 +92,9 @@ void pg_window_end(struct pg_window *window){
 }
 
 void pg_window_close(struct pg_window *window){
-    if(window) window->open=false;
+    if(!window) return;
+    window->open=false;
+    pc_desktop_redraw();
 }
 
 bool pg_window_move(struct pg_window *window, uint32_t x, uint32_t y){
@@ -105,6 +107,8 @@ bool pg_window_move(struct pg_window *window, uint32_t x, uint32_t y){
         x=display.width-window->frame.width;
     if(y>display.height-window->frame.height)
         y=display.height-window->frame.height;
+    if(x==window->frame.x && y==window->frame.y) return true;
+    pc_desktop_redraw();
     window->frame.x=x;
     window->frame.y=y;
     update_client_rect(window);

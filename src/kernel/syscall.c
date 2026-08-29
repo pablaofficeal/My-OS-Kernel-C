@@ -21,6 +21,7 @@
 #include "../kernel/scheduler.h"
 #include "../kernel/process.h"
 #include "../mm/pmm.h"
+#include "../userspace/userspace.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -211,6 +212,9 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_CONSOLE_DISABLE:
             gop_console_disable();
+            return 0;
+        case SYS_DESKTOP_REDRAW:
+            userspace_redraw_desktop();
             return 0;
         case SYS_GETPID:
             return process_current_pid();

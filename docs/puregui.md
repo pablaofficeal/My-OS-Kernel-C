@@ -64,7 +64,7 @@ void _start(void){
 | `pg_window_begin` | Starts an atomic framebuffer update and draws window chrome. |
 | `pg_window_end` | Finishes the update started by `pg_window_begin`. |
 | `pg_window_close` | Marks a window closed without terminating the process. |
-| `pg_window_move` | Moves and clamps an open window to the display; the application redraws after the matching move event. |
+| `pg_window_move` | Asks the desktop to restore its scene, then moves and clamps an open window to the display; the application redraws after the matching move event. |
 | `pg_window_minimize` | Collapses an open window to its title bar. |
 | `pg_window_restore` | Restores a minimized window and its client area. |
 | `pg_window_is_open` | Reports whether the window remains active. |
@@ -95,6 +95,8 @@ processes; emitting SSE instructions otherwise terminates a process with the
 ## Current limitations
 
 - One foreground application window is supported at a time.
+- Window movement coordinates with the desktop redraw contract, preserving
+  the top bar, icons, native windows and overlays.
 - Minimize currently collapses a window to its title bar; a system taskbar is
   not implemented yet.
 - There is no compositor, overlapping-window damage tracking or shared surface.

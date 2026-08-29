@@ -202,6 +202,10 @@ void pc_display_clear(uint32_t color){
     (void)pc_syscall(SYS_CLEAR,color,0,0);
 }
 
+void pc_desktop_redraw(void){
+    (void)pc_syscall(SYS_DESKTOP_REDRAW,0,0,0);
+}
+
 bool pc_console_configure(uint32_t x, uint32_t y,
                           uint32_t width, uint32_t height,
                           uint32_t foreground, uint32_t background){

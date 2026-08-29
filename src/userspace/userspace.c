@@ -234,6 +234,8 @@ static void redraw_scene(void){
     mouse_end_framebuffer_update();
 }
 
+void userspace_redraw_desktop(void){ redraw_scene(); }
+
 static void redraw_icon_move(
     uint32_t old_x,
     uint32_t old_y,
