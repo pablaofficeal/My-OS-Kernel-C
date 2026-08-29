@@ -152,8 +152,20 @@ void scheduler_set_affinity(int tid, int16_t core){
 }
 int scheduler_get_core_count(void){ return (int)core_count; }
 
+static void wake_sleeping_threads(void){
+    uint64_t now=timer_ticks();
+    for(int i=0;i<SCHEDULER_MAX_THREADS;i++){
+        if(threads[i].state==THREAD_BLOCKED && threads[i].wake_tick!=0
+           && now>=threads[i].wake_tick){
+            threads[i].state=THREAD_READY;
+            threads[i].wake_tick=0;
+        }
+    }
+}
+
 static struct thread *pick_next(void){
     if(!current) return NULL;
+    wake_sleeping_threads();
     int start = -1;
     for(int i=0;i<SCHEDULER_MAX_THREADS;i++) if(&threads[i]==current) { start=i; break; }
     if(start<0) start=0;
@@ -270,13 +282,7 @@ static void scheduler_tick(void){
     if(current->ticks_remaining==0){
         need_resched = true;
     }
-    uint64_t now = timer_ticks();
-    for(int i=0;i<SCHEDULER_MAX_THREADS;i++){
-        if(threads[i].state==THREAD_BLOCKED && threads[i].wake_tick!=0 && now>=threads[i].wake_tick){
-            threads[i].state=THREAD_READY;
-            threads[i].wake_tick=0;
-        }
-    }
+    wake_sleeping_threads();
 }
 
 static void scheduler_schedule(void){
