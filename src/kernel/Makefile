@@ -68,7 +68,7 @@ ASM_SOURCES := \
 	arch/x86_64/user.asm
 C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
 CPP_OBJECTS := $(CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
-ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.o)
+ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.asm.o)
 OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
 
 .PHONY: all
@@ -91,6 +91,6 @@ $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CPPFLAGS) $(DEPFLAGS) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.asm
+$(OBJ_DIR)/%.asm.o: $(ROOT_DIR)/src/%.asm
 	@mkdir -p $(@D)
 	$(NASM) -f elf64 $< -o $@
