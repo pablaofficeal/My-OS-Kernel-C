@@ -1,20 +1,40 @@
 #include "editor.h"
 #include "../../libc/include/purec.h"
 
-#define NANO_BUFFER_CAPACITY 4096
+#define NANO_INITIAL_CAPACITY 4096
 #define NANO_READ_CHUNK 256
 
-static char editor_buffer[NANO_BUFFER_CAPACITY];
+static char *editor_buffer;
 static uint32_t editor_length;
+static uint32_t editor_capacity;
 static bool editor_dirty;
 static const char *editor_path;
 
 static void write_buffer(void){
-    char character[2]={'\0','\0'};
-    for(uint32_t index=0;index<editor_length;index++){
-        character[0]=editor_buffer[index];
-        pc_write(character);
+    if(editor_length)
+        (void)pc_syscall(SYS_WRITE,(uint64_t)(uintptr_t)editor_buffer,
+                         editor_length,1);
+}
+
+static bool reserve_buffer(uint32_t required){
+    if(required<=editor_capacity) return true;
+    uint32_t capacity=editor_capacity
+        ? editor_capacity : NANO_INITIAL_CAPACITY;
+    while(capacity<required){
+        if(capacity>UINT32_MAX/2){
+            capacity=required;
+            break;
+        }
+        capacity*=2;
     }
+    uint32_t increase=capacity-editor_capacity;
+    void *allocation=pc_heap_grow(increase);
+    if(!allocation) return false;
+    if(editor_buffer
+       && allocation!=(void*)(editor_buffer+editor_capacity)) return false;
+    if(!editor_buffer) editor_buffer=(char*)allocation;
+    editor_capacity=capacity;
+    return true;
 }
 
 static void redraw(const char *status){
@@ -42,7 +62,8 @@ static int load_file(void){
             return -1;
         }
         if(!count) break;
-        if(editor_length+(uint32_t)count>NANO_BUFFER_CAPACITY){
+        if((uint32_t)count>UINT32_MAX-editor_length
+           || !reserve_buffer(editor_length+(uint32_t)count)){
             (void)pc_file_close(descriptor);
             return -2;
         }
@@ -61,11 +82,17 @@ static bool save_file(void){
 
 int nano_run(const char *path){
     editor_path=path;
+    editor_buffer=0;
     editor_length=0;
+    editor_capacity=0;
     editor_dirty=false;
+    if(!reserve_buffer(NANO_INITIAL_CAPACITY)){
+        pc_write("nano: cannot allocate editor buffer\n");
+        return 1;
+    }
     int loaded=load_file();
     if(loaded<0){
-        pc_write(loaded==-2 ? "nano: file exceeds 4096 bytes\n"
+        pc_write(loaded==-2 ? "nano: not enough memory to load file\n"
                             : "nano: cannot read file\n");
         return 1;
     }
@@ -98,8 +125,9 @@ int nano_run(const char *path){
         if(character=='\r') character='\n';
         if(character!='\n' && character!='\t'
            && (character<' ' || character>'~')) continue;
-        if(editor_length>=NANO_BUFFER_CAPACITY){
-            redraw("Buffer is full.");
+        if(editor_length==UINT32_MAX
+           || !reserve_buffer(editor_length+1)){
+            redraw("Not enough memory to grow the buffer.");
             continue;
         }
         editor_buffer[editor_length++]=character;

@@ -151,6 +151,11 @@ int32_t pc_listenv(struct process_environment_variable *variables,
         (uint64_t)(uintptr_t)variables,capacity,0);
 }
 
+void *pc_heap_grow(uint64_t size){
+    int64_t result=pc_syscall(SYS_HEAP_GROW,size,0,0);
+    return result<0 ? 0 : (void*)(uintptr_t)result;
+}
+
 int32_t pc_file_open(const char *path){
     return (int32_t)pc_syscall(SYS_FILE_OPEN,(uint64_t)(uintptr_t)path,0,0);
 }

@@ -241,6 +241,10 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         case SYS_GETPID:
             return process_current_pid();
+        case SYS_HEAP_GROW: {
+            uint64_t address=process_heap_grow(a1);
+            return address ? (int64_t)address : -1;
+        }
         case SYS_EXEC:
             if(!readable_string((const char*)(uintptr_t)a1)
                || (a2 && !readable_string((const char*)(uintptr_t)a2)))

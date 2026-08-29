@@ -37,6 +37,9 @@ must reference present ring-3 pages and output buffers must also be writable.
   environment. Names are limited to 31 characters and values to 127.
 - `SYS_ENV_LIST`: copies a bounded list of environment entries. A child gets a
   private copy of its parent's environment during `SYS_EXEC`.
+- `SYS_HEAP_GROW`: grows the calling process heap by `a1` bytes and returns the
+  previous break. A zero-size call queries the current break. Heap pages are
+  user-writable, non-executable and released with the process address space.
 - `SYS_INSTALL_START`: starts the privileged asynchronous UEFI install worker.
 - `SYS_INSTALL_STATUS`: returns the real install stage, progress and result.
 - `SYS_INSTALL_LOG`: returns the bounded history of install stages and their

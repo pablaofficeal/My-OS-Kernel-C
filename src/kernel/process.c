@@ -13,6 +13,7 @@
 
 #define USER_STACK_TOP 0x00007FFFFFF00000ULL
 #define USER_STACK_PAGES 16
+#define USER_HEAP_GUARD_PAGES 1
 #define USER_PROCESS_PRIORITY 1
 
 extern void arch_enter_user(uint64_t instruction_pointer,
@@ -121,6 +122,15 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
         return -1;
     }
     uint64_t stack_base=USER_STACK_TOP-USER_STACK_PAGES*PMM_PAGE_SIZE;
+    uint64_t heap_base=loaded.highest_address
+        +USER_HEAP_GUARD_PAGES*PMM_PAGE_SIZE;
+    uint64_t heap_limit=stack_base-USER_HEAP_GUARD_PAGES*PMM_PAGE_SIZE;
+    if(heap_base>=heap_limit){
+        vmm_destroy_address_space(process->address_space);
+        process->address_space=0;
+        process->state=PROCESS_FREE;
+        return -1;
+    }
     if(!vmm_map_new_pages(process->address_space,stack_base,USER_STACK_PAGES,
                           VMM_PAGE_USER|VMM_PAGE_WRITABLE|VMM_PAGE_NX)){
         vmm_destroy_address_space(process->address_space);
@@ -134,6 +144,10 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
     process->state=PROCESS_READY;
     process->entry=loaded.entry;
     process->user_stack_top=USER_STACK_TOP-16;
+    process->heap_base=heap_base;
+    process->heap_break=heap_base;
+    process->heap_mapped_end=heap_base;
+    process->heap_limit=heap_limit;
     environment_initialize(process,parent);
     if(command_line){
         strncpy(process->command_line,command_line,
@@ -229,6 +243,27 @@ bool process_has_capability(uint32_t capability){
 uint64_t process_current_address_space(void){
     struct process *process=process_current();
     return process ? process->address_space : vmm_kernel_address_space();
+}
+
+uint64_t process_heap_grow(uint64_t size){
+    struct process *process=process_current();
+    if(!process || !process_current_is_user()) return 0;
+    if(!size) return process->heap_break;
+    if(size>process->heap_limit-process->heap_break) return 0;
+    uint64_t previous_break=process->heap_break;
+    uint64_t requested_break=previous_break+size;
+    uint64_t requested_mapping=(requested_break+PMM_PAGE_SIZE-1)
+        &~(PMM_PAGE_SIZE-1);
+    while(process->heap_mapped_end<requested_mapping){
+        if(!vmm_map_new_pages(process->address_space,
+                              process->heap_mapped_end,1,
+                              VMM_PAGE_USER|VMM_PAGE_WRITABLE|VMM_PAGE_NX)){
+            return 0;
+        }
+        process->heap_mapped_end+=PMM_PAGE_SIZE;
+    }
+    process->heap_break=requested_break;
+    return previous_break;
 }
 
 void process_exit_current(int32_t status){

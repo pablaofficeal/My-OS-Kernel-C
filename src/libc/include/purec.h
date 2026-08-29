@@ -38,6 +38,7 @@ int32_t pc_setenv(const char *name, const char *value);
 int32_t pc_unsetenv(const char *name);
 int32_t pc_listenv(struct process_environment_variable *variables,
                    uint32_t capacity);
+void *pc_heap_grow(uint64_t size);
 bool pc_file_exists(const char *path);
 int32_t pc_file_open(const char *path);
 int32_t pc_file_read(int32_t descriptor, void *buffer, uint32_t capacity);

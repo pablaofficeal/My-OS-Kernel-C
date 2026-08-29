@@ -32,6 +32,10 @@ struct process {
     uint64_t address_space;
     uint64_t entry;
     uint64_t user_stack_top;
+    uint64_t heap_base;
+    uint64_t heap_break;
+    uint64_t heap_mapped_end;
+    uint64_t heap_limit;
     int32_t thread_id;
     int32_t waiter_thread_id;
     uint32_t capabilities;
@@ -51,6 +55,7 @@ int32_t process_current_pid(void);
 bool process_current_is_user(void);
 bool process_has_capability(uint32_t capability);
 uint64_t process_current_address_space(void);
+uint64_t process_heap_grow(uint64_t size);
 void process_exit_current(int32_t status) __attribute__((noreturn));
 int32_t process_fd_install(int32_t kernel_descriptor);
 int32_t process_fd_resolve(int32_t descriptor);
