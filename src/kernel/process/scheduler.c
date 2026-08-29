@@ -12,6 +12,8 @@ static uint32_t next_id = 1;
 static bool initialized = false;
 static volatile bool need_resched = false;
 static uint32_t core_count = 1;
+static volatile uint64_t total_ticks;
+static volatile uint64_t idle_ticks;
 static void thread_trampoline(void);
 static struct thread *pick_next(void);
 static uint64_t create_initial_stack(struct thread *thread);
@@ -142,6 +144,14 @@ uint32_t scheduler_thread_count(void){
     }
     return cnt;
 }
+uint64_t scheduler_thread_runtime_ticks(int tid){
+    for(int i=0;i<SCHEDULER_MAX_THREADS;i++)
+        if(threads[i].id==(uint32_t)tid
+           && threads[i].state!=THREAD_FREE) return threads[i].runtime_ticks;
+    return 0;
+}
+uint64_t scheduler_total_ticks(void){ return total_ticks; }
+uint64_t scheduler_idle_ticks(void){ return idle_ticks; }
 void scheduler_set_affinity(int tid, int16_t core){
     for(int i=0;i<SCHEDULER_MAX_THREADS;i++) if(threads[i].id==(uint32_t)tid){
         if(core>=0 && (uint32_t)core>=core_count) return;
@@ -169,14 +179,8 @@ static struct thread *pick_next(void){
     int start = -1;
     for(int i=0;i<SCHEDULER_MAX_THREADS;i++) if(&threads[i]==current) { start=i; break; }
     if(start<0) start=0;
-    for(int prio=0;prio<8;prio++){
-        for(int iter=1; iter<SCHEDULER_MAX_THREADS; iter++){
-            int idx = (start+iter)%SCHEDULER_MAX_THREADS;
-            if(threads[idx].state==THREAD_READY){
-                if(threads[idx].priority==prio) return &threads[idx];
-            }
-        }
-    }
+    /* Strict priority selection starved lower-priority work whenever a
+       CPU-bound higher-priority task stayed runnable. */
     for(int iter=1; iter<SCHEDULER_MAX_THREADS; iter++){
         int idx = (start+iter)%SCHEDULER_MAX_THREADS;
         if(threads[idx].state==THREAD_READY) return &threads[idx];
@@ -278,6 +282,9 @@ void scheduler_exit(void){
 
 static void scheduler_tick(void){
     if(!initialized || !current) return;
+    total_ticks++;
+    current->runtime_ticks++;
+    if(current->id==0) idle_ticks++;
     if(current->ticks_remaining>0) current->ticks_remaining--;
     if(current->ticks_remaining==0){
         need_resched = true;
@@ -297,7 +304,10 @@ void scheduler_on_timer_interrupt(void){
 }
 
 void scheduler_start(void){
-    if(!initialized) return;
+    if(!initialized) for(;;) __asm__ volatile("cli; hlt");
     klogf(KLOG_INFO, "sched: starting with %u threads", scheduler_thread_count());
     scheduler_yield();
+    /* The boot context is threads[0].  It must be the real idle task; falling
+       through here used to start a second desktop/input polling loop. */
+    for(;;) __asm__ volatile("sti; hlt":::"memory");
 }

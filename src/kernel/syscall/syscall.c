@@ -531,6 +531,13 @@ int64_t syscall_handler(struct syscall_regs *r){
             info->framebuffer_bytes=gop_get_framebuffer_size_bytes();
             return 0;
         }
+        case SYS_PROCESS_LIST: {
+            if(a2>PROCESS_MAX_COUNT) return -1;
+            struct process_monitor_info *entries=
+                (struct process_monitor_info*)(uintptr_t)a1;
+            if(a2 && !writable(entries,a2*sizeof(*entries))) return -1;
+            return process_monitor_list(entries,(uint32_t)a2);
+        }
         case SYS_DISK_STATS: {
             struct disk_monitor_info *info=(struct disk_monitor_info*)(uintptr_t)a1;
             if(!writable(info,sizeof(*info))) return -1;

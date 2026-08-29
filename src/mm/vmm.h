@@ -19,4 +19,5 @@ bool vmm_map_new_pages(uint64_t address_space, uint64_t virtual_address,
 uint64_t vmm_translate(uint64_t address_space, uint64_t virtual_address);
 bool vmm_user_range_accessible(uint64_t address_space, uint64_t address,
                                uint64_t size, bool writable);
+uint64_t vmm_user_page_count(uint64_t address_space);
 void vmm_switch_address_space(uint64_t address_space);

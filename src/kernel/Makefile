@@ -45,12 +45,10 @@ C_SOURCES := \
 	fs/vfs.c \
 	userspace/display.c \
 	userspace/fs.c \
-	userspace/system.c \
 	userspace/audio.c \
 	userspace/audio_overlay.c \
 	userspace/userspace.c \
 	userspace/window_manager.c \
-	userspace/monitor/monitor.c \
 	userspace/apps/datetime_service.c \
 	userspace/apps/clock_app.c \
 	userspace/apps/calendar_app.c \

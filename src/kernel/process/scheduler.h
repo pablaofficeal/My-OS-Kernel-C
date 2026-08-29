@@ -5,7 +5,7 @@
 
 #define SCHEDULER_MAX_THREADS 16
 #define SCHEDULER_STACK_SIZE 16384
-#define SCHEDULER_TIME_SLICE_MS 10
+#define SCHEDULER_TIME_SLICE_MS 5
 
 struct process;
 
@@ -27,6 +27,7 @@ struct thread {
     uint32_t id;
     char name[32];
     uint32_t ticks_remaining;
+    uint64_t runtime_ticks;
     uint64_t wake_tick;
     uint64_t address_space;
     struct process *process;
@@ -45,10 +46,13 @@ void scheduler_sleep(uint32_t milliseconds);
 void scheduler_block(void);
 void scheduler_unblock(int tid);
 void scheduler_exit(void);
-void scheduler_start(void);
+void scheduler_start(void) __attribute__((noreturn));
 struct thread *scheduler_current_thread(void);
 int scheduler_current_tid(void);
 uint32_t scheduler_thread_count(void);
+uint64_t scheduler_thread_runtime_ticks(int tid);
+uint64_t scheduler_total_ticks(void);
+uint64_t scheduler_idle_ticks(void);
 void scheduler_set_affinity(int tid, int16_t core);
 int scheduler_get_core_count(void);
 

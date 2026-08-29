@@ -38,6 +38,8 @@ struct process {
     uint64_t heap_limit;
     int32_t thread_id;
     int32_t waiter_thread_id;
+    uint64_t runtime_ticks;
+    uint64_t sampled_runtime_ticks;
     uint32_t capabilities;
     int32_t descriptors[PROCESS_FD_COUNT];
     char command_line[PROCESS_COMMAND_LINE_CAPACITY];
@@ -70,3 +72,6 @@ int32_t process_environment_set(const char *name, const char *value);
 int32_t process_environment_unset(const char *name);
 int32_t process_environment_list(struct process_environment_entry *entries,
                                  uint32_t capacity);
+struct process_monitor_info;
+int32_t process_monitor_list(struct process_monitor_info *entries,
+                             uint32_t capacity);

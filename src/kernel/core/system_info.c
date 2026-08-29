@@ -1,5 +1,6 @@
 #include "system_info.h"
 #include "../../drivers/interrupts/timer.h"
+#include "../process/scheduler.h"
 
 #include <stddef.h>
 
@@ -10,8 +11,8 @@ static uint64_t usable_ram_bytes;
 static uint64_t total_ram_bytes;
 static uint64_t tsc_frequency_hz=3000000000;
 static uint64_t boot_tsc;
-static uint64_t cpu_sample_tsc;
-static uint64_t cpu_sample_idle_tsc;
+static uint64_t cpu_sample_ticks;
+static uint64_t cpu_sample_idle_ticks;
 static uint32_t logical_processors=1;
 
 static uint64_t read_tsc(void){
@@ -125,8 +126,8 @@ void system_info_init(const struct limine_memmap_response *memory_map){
     detect_logical_processors();
     detect_tsc_frequency();
     detect_usable_ram(memory_map);
-    cpu_sample_tsc=boot_tsc;
-    cpu_sample_idle_tsc=timer_idle_tsc();
+    cpu_sample_ticks=0;
+    cpu_sample_idle_ticks=0;
 }
 
 const char *system_info_cpu_name(void){ return cpu_name; }
@@ -145,12 +146,12 @@ uint64_t system_info_uptime_ms(void){
 }
 
 uint32_t system_info_cpu_usage_percent(void){
-    uint64_t now=read_tsc();
-    uint64_t idle=timer_idle_tsc();
-    uint64_t elapsed=now-cpu_sample_tsc;
-    uint64_t idle_elapsed=idle-cpu_sample_idle_tsc;
-    cpu_sample_tsc=now;
-    cpu_sample_idle_tsc=idle;
+    uint64_t now=scheduler_total_ticks();
+    uint64_t idle=scheduler_idle_ticks();
+    uint64_t elapsed=now-cpu_sample_ticks;
+    uint64_t idle_elapsed=idle-cpu_sample_idle_ticks;
+    cpu_sample_ticks=now;
+    cpu_sample_idle_ticks=idle;
     if(!elapsed) return 0;
     if(idle_elapsed>elapsed) idle_elapsed=elapsed;
     return 100U-(uint32_t)((idle_elapsed*100)/elapsed);

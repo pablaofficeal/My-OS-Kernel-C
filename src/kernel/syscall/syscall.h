@@ -75,6 +75,7 @@
 #define SYS_GUI_WINDOW_STATE 254
 #define SYS_GUI_WINDOW_REPAINT_DONE 255
 #define SYS_HEAP_GROW 256
+#define SYS_PROCESS_LIST 257
 
 #define GUI_WINDOW_STATE_FOCUSED 1
 #define GUI_WINDOW_STATE_REPAINT 2
@@ -118,6 +119,23 @@ struct memory_monitor_info {
     uint64_t used_bytes;
     uint64_t available_bytes;
     uint64_t framebuffer_bytes;
+};
+
+#define PROCESS_MONITOR_NAME_CAPACITY 32
+#define PROCESS_MONITOR_STATE_READY 1
+#define PROCESS_MONITOR_STATE_RUNNING 2
+#define PROCESS_MONITOR_STATE_EXITED 3
+
+struct process_monitor_info {
+    uint32_t pid;
+    uint32_t parent_pid;
+    uint32_t state;
+    int32_t exit_code;
+    uint32_t cpu_percent;
+    uint32_t reserved;
+    uint64_t runtime_ms;
+    uint64_t resident_bytes;
+    char name[PROCESS_MONITOR_NAME_CAPACITY];
 };
 
 struct disk_monitor_info {

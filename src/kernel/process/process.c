@@ -1,6 +1,7 @@
 #include "process.h"
 #include "elf.h"
 #include "scheduler.h"
+#include "../syscall/syscall.h"
 #include "../diagnostics/klog.h"
 #include "../diagnostics/panic.h"
 #include "program_alias.h"
@@ -21,6 +22,7 @@ extern void arch_enter_user(uint64_t instruction_pointer,
 
 static struct process processes[PROCESS_MAX_COUNT];
 static uint32_t next_pid=1;
+static uint64_t process_sample_tick;
 
 static bool environment_name_valid(const char *name){
     if(!name || !name[0]) return false;
@@ -271,6 +273,8 @@ void process_exit_current(int32_t status){
     if(process){
         if(process->pid==1) kernel_panic("PID 1 exited");
         process->exit_code=status;
+        process->runtime_ticks=scheduler_thread_runtime_ticks(
+            process->thread_id);
         process->state=PROCESS_EXITED;
         window_manager_unregister(process->pid);
         for(uint32_t fd=3;fd<PROCESS_FD_COUNT;fd++){
@@ -285,6 +289,40 @@ void process_exit_current(int32_t status){
     }
     scheduler_exit();
     __builtin_unreachable();
+}
+
+int32_t process_monitor_list(struct process_monitor_info *entries,
+                             uint32_t capacity){
+    uint64_t now=scheduler_total_ticks();
+    uint64_t elapsed=now-process_sample_tick;
+    uint32_t count=0;
+    for(uint32_t index=0;index<PROCESS_MAX_COUNT;index++){
+        struct process *process=&processes[index];
+        if(process->state==PROCESS_FREE) continue;
+        uint64_t runtime=process->state==PROCESS_EXITED
+            ? process->runtime_ticks
+            : scheduler_thread_runtime_ticks(process->thread_id);
+        if(count<capacity){
+            struct process_monitor_info *entry=&entries[count];
+            memset(entry,0,sizeof(*entry));
+            entry->pid=process->pid;
+            entry->parent_pid=process->parent_pid;
+            entry->state=(uint32_t)process->state;
+            entry->exit_code=process->exit_code;
+            entry->runtime_ms=runtime;
+            entry->resident_bytes=vmm_user_page_count(process->address_space)
+                *PMM_PAGE_SIZE;
+            uint64_t delta=runtime-process->sampled_runtime_ticks;
+            entry->cpu_percent=elapsed
+                ? (uint32_t)((delta*100)/elapsed) : 0;
+            if(entry->cpu_percent>100) entry->cpu_percent=100;
+            strncpy(entry->name,process->name,sizeof(entry->name)-1);
+        }
+        process->sampled_runtime_ticks=runtime;
+        count++;
+    }
+    process_sample_tick=now;
+    return (int32_t)count;
 }
 
 int32_t process_fd_install(int32_t kernel_descriptor){

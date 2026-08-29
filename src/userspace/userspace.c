@@ -1,7 +1,6 @@
 #include "userspace.h"
 #include "apps/desktop_apps.h"
 #include "apps/audio_panel.h"
-#include "monitor/monitor.h"
 #include "window_manager.h"
 #include "syscall.h"
 #include "audio.h"
@@ -281,7 +280,6 @@ static void draw_desktop(void){
 static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
-    if(monitor_window_is_visible()) monitor_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
     draw_power_menu();
@@ -382,13 +380,6 @@ static void handle_desktop_mouse(void){
         );
         redraw=redraw || app_redraw;
     }
-    if(!consumed && monitor_window_is_visible()){
-        consumed=monitor_window_contains_point(mouse.x,mouse.y);
-        redraw=monitor_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                            pressed,released,
-                                            desktop_width,desktop_height)
-            || redraw;
-    }
     uint32_t *icon_positions[8]={
         &explorer_icon_x,
         &htop_icon_x,
@@ -450,7 +441,8 @@ static void handle_desktop_mouse(void){
         if(!icon_drag_moved){
             if(icon==0)
                 (void)userspace_run_program("/bin/program/files");
-            else if(icon==1) monitor_run();
+            else if(icon==1)
+                (void)userspace_run_program("/bin/program/monitor");
             else if(icon==2)
                 (void)userspace_run_program("/bin/program/terminal");
             else if(icon==6)
@@ -526,7 +518,6 @@ void userspace_input_thread(void *arg){
         }
         if(handle_special_keyboard()) redraw_managed_scene(0);
         handle_desktop_mouse();
-        monitor_window_update();
         desktop_apps_update();
         scheduler_sleep(1);
     }
@@ -632,7 +623,6 @@ void userspace_run(void){
         char c;
         while(!window_manager_has_focus() && keyboard_try_getc(&c))
             (void)desktop_apps_handle_key(c);
-        monitor_window_update();
         desktop_apps_update();
 
         __asm__ volatile("pause");

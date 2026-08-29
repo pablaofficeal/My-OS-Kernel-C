@@ -38,6 +38,10 @@ int32_t pc_setenv(const char *name, const char *value);
 int32_t pc_unsetenv(const char *name);
 int32_t pc_listenv(struct process_environment_variable *variables,
                    uint32_t capacity);
+int32_t pc_process_list(struct process_monitor_info *processes,
+                        uint32_t capacity);
+bool pc_cpu_info(struct cpu_monitor_info *info);
+bool pc_memory_info(struct memory_monitor_info *info);
 void *pc_heap_grow(uint64_t size);
 bool pc_file_exists(const char *path);
 int32_t pc_file_open(const char *path);

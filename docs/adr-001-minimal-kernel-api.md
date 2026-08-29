@@ -16,7 +16,8 @@ Expose framebuffer information and drawing operations through syscall numbers
 `SYS_SCROLL_RECT_UP`, `SYS_SET_FONT_FACE` and `SYS_GET_FONT_FACE`.
 
 Userspace modules must call `src/userspace/display.*` and
-`src/userspace/system.*` instead of including GOP or system-info internals.
+Standalone ring-3 programs use `libpurec` monitoring calls instead of including
+GOP, PMM, scheduler, or system-info internals.
 
 ## Consequences
 Positive:

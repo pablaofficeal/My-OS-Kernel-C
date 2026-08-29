@@ -56,6 +56,13 @@ defaults to `/bin/program:/bin`, and also accepts absolute executable paths.
 
 Traditional commands such as `/bin/program/ls`, `/bin/program/cat` and
 `/bin/program/install` are aliases of the trusted `/bin/program/system` module.
+
+`/bin/program/monitor` is a standalone ring-3 PureGUI application. It obtains
+global CPU/RAM data through `SYS_CPU_INFO` and `SYS_MEMORY_INFO`, and bounded
+process snapshots through `SYS_PROCESS_LIST` (257). Each process record reports
+PID/PPID, lifecycle state, recent CPU percentage, accumulated runtime and
+resident user-page bytes. Monitoring UI and refresh work are not linked into
+the kernel.
 They remain separate executable paths while sharing one ring-3 implementation.
 
 ## File Descriptors
