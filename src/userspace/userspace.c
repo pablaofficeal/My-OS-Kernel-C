@@ -255,9 +255,13 @@ static void draw_desktop(void){
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
     if(!icon_layout_ready){
-        explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
+        explorer_icon_x=desktop_width>700 ? 420 : desktop_width-212;
         htop_icon_x=explorer_icon_x+72;
         terminal_icon_x=htop_icon_x+72;
+        if(desktop_width<=700){
+            settings_icon_y=130;
+            installer_icon_y=130;
+        }
         if(desktop_width<=560){
             clock_icon_y=130;
             calculator_icon_y=130;
