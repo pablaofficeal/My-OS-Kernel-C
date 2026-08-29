@@ -126,13 +126,10 @@ int64_t syscall_handler(struct syscall_regs *r){
     uint64_t a1 = r->rbx;
     uint64_t a2 = r->rcx;
     uint64_t a3 = r->rdx;
-    // uint64_t a4 = r->rsi;
-    // uint64_t a5 = r->rdi;
     switch(n){
         case SYS_WRITE: {
             const char *s = (const char*)(uintptr_t)a1;
             uint64_t len = a2;
-            // fd в a3 игнорируем, пишем в serial+gop
             if(!readable(s,len)) return -1;
             for(uint64_t i=0;i<len;i++){
                 serial_putc(s[i]);
@@ -148,7 +145,6 @@ int64_t syscall_handler(struct syscall_regs *r){
             return 0;
         }
         case SYS_DRAW_RECT: {
-            // a1=x, a2=y, a3=w, rsi=h, rdi=color (передаем через rsi/rdi)
             uint32_t x=(uint32_t)a1, y=(uint32_t)a2, w=(uint32_t)a3, h=(uint32_t)r->rsi;
             uint32_t c=(uint32_t)r->rdi;
             gop_draw_rect(x,y,w,h,c);
@@ -647,10 +643,6 @@ int64_t syscall_handler(struct syscall_regs *r){
 void syscall_init(void){
     static bool filesystem_checked;
     static bool audio_checked;
-    // IDT 0x80 уже настроен в idt_init с DPL3 (0xEE)
-    // используем klog если уже инициализирован, иначе fallback на serial
-    // klog_inited проверяется через verbose флаг (если false после init, всё равно работает)
-    // просто пишем DEBUG чтобы не спамить primary screen дважды (boot.c уже логирует)
     klog(KLOG_DEBUG, "syscall: int 0x80 handler ready (DPL3)");
     if(!audio_checked){
         audio_checked=true;
@@ -690,7 +682,6 @@ void syscall_init(void){
         klog(KLOG_DEBUG,"usb stages: 1=pci 2=running 3=port 4=addressed 5=bulk-endpoints 6=scsi 7=ready");
         if(vfs_mount_root()){
             klogf(KLOG_OK,"vfs: root mounted from %s",vfs_root_device_name());
-            // Читаем конфиги созданные установщиком (если есть) – для проверки инсталла
             {
                 int32_t fd=vfs_open("/purec/install.cfg");
                 if(fd>=0){
@@ -698,12 +689,8 @@ void syscall_init(void){
                     int32_t r=vfs_read(fd,cfg_buf,sizeof(cfg_buf)-1);
                     (void)vfs_close(fd);
                     if(r>0){
-                        // лог без экрана? показываем кратко
                         klogf(KLOG_INFO,"config: /purec/install.cfg (%d bytes)",r);
-                        // подробный дамп только в dmesg через serial? уже в klog
-                        // печатаем построчно для читаемости
                         cfg_buf[r]=0;
-                        // разбиваем по \n
                         char *p=cfg_buf;
                         while(*p){
                             char line[128]={0};
@@ -721,7 +708,6 @@ void syscall_init(void){
                     (void)vfs_close(fd);
                     if(r>0){
                         hn[r]=0;
-                        // trim newline
                         for(int i=0;i<r;i++) if(hn[i]=='\n'||hn[i]=='\r'){ hn[i]=0; break; }
                         klogf(KLOG_INFO,"config: hostname='%s'",hn);
                     }
