@@ -5,6 +5,8 @@
 #include "../usb/ehci.h"
 #include "../../lib/string.h"
 #include "../../kernel/klog.h"
+#include "../../kernel/scheduler.h"
+#include "../timer.h"
 
 #define BLOCK_TRANSPORT_NONE 0
 
@@ -12,6 +14,17 @@ static uint8_t active_transport;
 static uint32_t active_index;
 static bool initialization_complete;
 static bool initialization_result;
+static volatile bool usb_rescan_busy;
+static uint64_t next_hotplug_scan;
+
+static void usb_rescan_lock(void){
+    while(__atomic_test_and_set(&usb_rescan_busy,__ATOMIC_ACQUIRE))
+        scheduler_yield();
+}
+
+static void usb_rescan_unlock(void){
+    __atomic_clear(&usb_rescan_busy,__ATOMIC_RELEASE);
+}
 
 bool block_device_init(void){
     if(initialization_complete) return initialization_result;
@@ -53,10 +66,38 @@ bool block_device_init(void){
 }
 
 uint32_t block_device_rescan_usb(void){
+    char selected_serial[STORAGE_SERIAL_CAPACITY]={0};
+    bool restore_usb=active_transport==STORAGE_TRANSPORT_USB_MSC
+        || active_transport==STORAGE_TRANSPORT_USB_EHCI;
+    if(restore_usb){
+        uint32_t count=block_device_count();
+        for(uint32_t index=0;index<count;index++){
+            struct storage_device_info info;
+            if(block_device_get_info(index,&info) && info.selected){
+                strncpy(selected_serial,info.serial,sizeof(selected_serial)-1);
+                break;
+            }
+        }
+    }
+    usb_rescan_lock();
     uint32_t fixed_count=ata_pio_device_count()+ahci_device_count();
     (void)xhci_rescan(fixed_count);
     (void)ehci_rescan(fixed_count+xhci_device_count());
-    if(active_transport==BLOCK_TRANSPORT_NONE){
+    bool restored_usb=false;
+    if(restore_usb){
+        active_transport=BLOCK_TRANSPORT_NONE;
+        uint32_t count=block_device_count();
+        for(uint32_t index=0;index<count;index++){
+            struct storage_device_info info;
+            if(block_device_get_info(index,&info)
+               && strcmp(info.serial,selected_serial)==0){
+                (void)block_device_select(index);
+                restored_usb=true;
+                break;
+            }
+        }
+    }
+    if(active_transport==BLOCK_TRANSPORT_NONE && (!restore_usb || restored_usb)){
         if(xhci_device_count()){
             active_transport=STORAGE_TRANSPORT_USB_MSC;
             active_index=0;
@@ -67,7 +108,19 @@ uint32_t block_device_rescan_usb(void){
             (void)ehci_select_device(0);
         }
     }
-    return xhci_device_count()+ehci_device_count();
+    uint32_t result=xhci_device_count()+ehci_device_count();
+    usb_rescan_unlock();
+    return result;
+}
+
+void block_device_poll_usb_hotplug(void){
+    uint64_t now=timer_ticks();
+    if(now<next_hotplug_scan) return;
+    next_hotplug_scan=now+1000;
+    if(!xhci_topology_changed() && !ehci_topology_changed()) return;
+    klog(KLOG_INFO,"usb: port topology changed, rescanning controllers");
+    uint32_t count=block_device_rescan_usb();
+    klogf(KLOG_INFO,"usb: hotplug rescan complete, storage devices=%u",count);
 }
 
 uint32_t block_device_count(void){
@@ -170,16 +223,36 @@ bool block_device_select(uint32_t index){
 }
 
 bool block_device_read(uint32_t lba, void *buffer){
-    if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_read_sector(lba,buffer);
-    if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_read_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_USB_EHCI){
+        usb_rescan_lock();
+        bool result=ehci_read_sector(lba,buffer);
+        usb_rescan_unlock();
+        return result;
+    }
+    if(active_transport==STORAGE_TRANSPORT_USB_MSC){
+        usb_rescan_lock();
+        bool result=xhci_read_sector(lba,buffer);
+        usb_rescan_unlock();
+        return result;
+    }
     if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_read_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_read_sector(lba,buffer);
     return false;
 }
 
 bool block_device_write(uint32_t lba, const void *buffer){
-    if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_write_sector(lba,buffer);
-    if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_write_sector(lba,buffer);
+    if(active_transport==STORAGE_TRANSPORT_USB_EHCI){
+        usb_rescan_lock();
+        bool result=ehci_write_sector(lba,buffer);
+        usb_rescan_unlock();
+        return result;
+    }
+    if(active_transport==STORAGE_TRANSPORT_USB_MSC){
+        usb_rescan_lock();
+        bool result=xhci_write_sector(lba,buffer);
+        usb_rescan_unlock();
+        return result;
+    }
     if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_write_sector(lba,buffer);
     if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_write_sector(lba,buffer);
     return false;

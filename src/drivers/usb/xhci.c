@@ -162,7 +162,26 @@ static uint8_t selected_device=XHCI_NO_DEVICE;
 static uint32_t bot_tag=1;
 static bool mapping_ready;
 static bool probe_complete;
+static uint64_t known_port_bitmap;
 static struct xhci_probe_stats probe_stats;
+
+static uint64_t connected_port_bitmap(void){
+    if(!operational) return 0;
+    uint8_t ports=probe_stats.max_ports>64 ? 64
+        : (uint8_t)probe_stats.max_ports;
+    uint64_t bitmap=0;
+    volatile uint8_t *port_base=(volatile uint8_t*)(void*)operational+0x400;
+    for(uint8_t port=1;port<=ports;port++){
+        volatile uint32_t *status=(volatile uint32_t*)(void*)
+            (port_base+(port-1)*0x10);
+        if(status[0]&XHCI_PORT_CONNECTED) bitmap|=1ULL<<(port-1);
+    }
+    return bitmap;
+}
+
+bool xhci_topology_changed(void){
+    return operational && connected_port_bitmap()!=known_port_bitmap;
+}
 
 static inline uint64_t rdtsc(void){
     uint32_t low,high;
@@ -1270,20 +1289,21 @@ bool xhci_init(uint32_t linux_name_base){
     } else {
         klogf(KLOG_INFO,"xhci: controllers=%u connected=%u disks=%u mice=%u",probe_stats.controllers,probe_stats.connected_ports,device_count,probe_stats.hid_mice);
     }
+    known_port_bitmap=connected_port_bitmap();
     return device_count>0;
 }
 
 bool xhci_rescan(uint32_t linux_name_base){
-    if(device_count){
-        return true;
-    }
     if(!mapping_ready){
         klog(KLOG_ERROR,"xhci: rescan mapping not ready");
         return false;
     }
     selected_device=XHCI_NO_DEVICE;
+    usb_mouse_detach();
     slot_count=0;
     device_count=0;
+    memset(devices,0,sizeof(devices));
+    memset(device_context_base,0,sizeof(device_context_base));
     probe_stats.connected_ports=0;
     probe_stats.addressed_devices=0;
     probe_stats.mass_storage_devices=0;
@@ -1323,6 +1343,7 @@ bool xhci_rescan(uint32_t linux_name_base){
         break;
     }
     klog_set_screen_enabled(was_screen);
+    known_port_bitmap=connected_port_bitmap();
     // краткий итог остаётся на экране userspace через syscall klog, но usbscan сам выводит детали
     klogf(KLOG_INFO,"xhci: rescan done disks=%u connected=%u addressed=%u error=%u stage=%u",device_count,probe_stats.connected_ports,probe_stats.addressed_devices,probe_stats.last_error,probe_stats.last_stage);
     return device_count>0;

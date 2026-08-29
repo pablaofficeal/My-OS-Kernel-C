@@ -10,6 +10,7 @@
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/mouse/usb_mouse.h"
 #include "../drivers/timer.h"
+#include "../drivers/storage/block_device.h"
 #include "../kernel/klog.h"
 #include "../kernel/boot_diag.h"
 #include "../kernel/panic.h"
@@ -432,6 +433,7 @@ void userspace_input_thread(void *arg){
     klog(KLOG_INFO, "sched: input thread started (mouse polling + desktop)");
     for(;;){
         ps2_mouse_poll();
+        block_device_poll_usb_hotplug();
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
@@ -536,6 +538,7 @@ void userspace_run(void){
     // Fallback single-threaded loop (when scheduler not available)
     for(;;){
         ps2_mouse_poll();
+        block_device_poll_usb_hotplug();
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
