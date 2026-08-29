@@ -1,8 +1,8 @@
 #include "fat32.h"
 
 #include "../drivers/storage/block_device.h"
-#include "../kernel/klog.h"
-#include "../kernel/scheduler.h"
+#include "../kernel/diagnostics/klog.h"
+#include "../kernel/process/scheduler.h"
 #include "../lib/string.h"
 #include <stddef.h>
 #include "../boot/install_source.h"
@@ -1313,6 +1313,33 @@ static bool write_zero_range(uint32_t first_lba, uint32_t count){
     return true;
 }
 
+static bool write_zero_range_progress(
+    uint32_t first_lba,
+    uint32_t count,
+    fat32_progress_callback callback,
+    uint32_t progress_start,
+    uint32_t progress_end,
+    const char *stage
+){
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    uint32_t last_progress=UINT32_MAX;
+    for(uint32_t index=0;index<count;index++){
+        if((index&0x3FU)==0) scheduler_yield();
+        if(callback && count){
+            uint32_t progress=progress_start
+                +(uint32_t)(((uint64_t)index
+                             *(progress_end-progress_start))/count);
+            if(progress!=last_progress){
+                callback(progress,stage);
+                last_progress=progress;
+            }
+        }
+        if(!block_device_write(first_lba+index,sector_buffer)) return false;
+    }
+    if(callback) callback(progress_end,stage);
+    return true;
+}
+
 static void build_format_boot_sector(const struct fat32_format_layout *layout,
                                      uint32_t hidden_sectors,
                                      const uint8_t volume_label[11]){
@@ -1579,7 +1606,11 @@ static bool write_gpt_layout(uint32_t total_sectors, const char *serial){
 
 static bool write_format_metadata_at(uint32_t part_lba,
                                      const struct fat32_format_layout *layout,
-                                     const uint8_t volume_label[11]){
+                                     const uint8_t volume_label[11],
+                                     fat32_progress_callback callback,
+                                     uint32_t progress_start,
+                                     uint32_t progress_end,
+                                     const char *stage){
     uint32_t fat_start = part_lba + FAT32_ESP_RESERVED;
     uint32_t data_start = fat_start + FAT32_FORMAT_FAT_COUNT * layout->fat_size;
     klogf(KLOG_INFO,"write_format_at: part %u fat %u data %u fat_size %u spc %u",part_lba,fat_start,data_start,layout->fat_size,layout->sectors_per_cluster);
@@ -1587,7 +1618,10 @@ static bool write_format_metadata_at(uint32_t part_lba,
         klogf(KLOG_ERROR,"write_format_at: zero reserved %u count %u failed",part_lba,FAT32_ESP_RESERVED);
         return false;
     }
-    if(!write_zero_range(fat_start, FAT32_FORMAT_FAT_COUNT * layout->fat_size)){
+    if(!write_zero_range_progress(
+            fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size,
+            callback,progress_start,progress_end,stage
+        )){
         klogf(KLOG_ERROR,"write_format_at: zero FAT %u count %u failed",fat_start,FAT32_FORMAT_FAT_COUNT*layout->fat_size);
         return false;
     }
@@ -1655,7 +1689,13 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
+    "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
+    "    module_path: boot():/lib/libpuregui.a\n"
+    "    module_path: boot():/lib/libpguiw.a\n"
+    "    module_path: boot():/include/puregui.h\n"
+    "    module_path: boot():/include/pguiw.h\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel2.elf\n"
@@ -1666,7 +1706,13 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
-    "    module_path: boot():/lib/libpurec.a\n";
+    "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/gui-demo\n"
+    "    module_path: boot():/lib/libpurec.a\n"
+    "    module_path: boot():/lib/libpuregui.a\n"
+    "    module_path: boot():/lib/libpguiw.a\n"
+    "    module_path: boot():/include/puregui.h\n"
+    "    module_path: boot():/include/pguiw.h\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1681,16 +1727,63 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
     return entry.size==expected_size?0:FS_ERROR_IO;
 }
 
+static int32_t install_gui_development_payload(void){
+    const void *core_library,*widget_library,*core_header,*widget_header;
+    uint64_t core_library_size,widget_library_size;
+    uint64_t core_header_size,widget_header_size;
+    if(!boot_get_module("/lib/libpuregui.a",&core_library,
+                        &core_library_size)
+       || !boot_get_module("/lib/libpguiw.a",&widget_library,
+                           &widget_library_size)
+       || !boot_get_module("/include/puregui.h",&core_header,
+                           &core_header_size)
+       || !boot_get_module("/include/pguiw.h",&widget_header,
+                           &widget_header_size)){
+        klog(KLOG_ERROR,"install: missing PureGUI development module");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(core_library_size>UINT32_MAX || widget_library_size>UINT32_MAX
+       || core_header_size>UINT32_MAX || widget_header_size>UINT32_MAX)
+        return FS_ERROR_UNSUPPORTED;
+    int32_t status=write_lfn_file(
+        "/lib","libpuregui.a","/lib/libpur~1.a","libpur~1.a",
+        core_library,(uint32_t)core_library_size
+    );
+    if(status<0) return status;
+    status=fat32_write_file("/lib/libpguiw.a",widget_library,
+                            (uint32_t)widget_library_size);
+    if(status<0) return status;
+    status=fat32_write_file("/include/puregui.h",core_header,
+                            (uint32_t)core_header_size);
+    if(status<0) return status;
+    status=fat32_write_file("/include/pguiw.h",widget_header,
+                            (uint32_t)widget_header_size);
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpuregui.a",
+                                 (uint32_t)core_library_size);
+    if(status<0) return status;
+    status=verify_installed_file("/lib/libpguiw.a",
+                                 (uint32_t)widget_library_size);
+    if(status<0) return status;
+    status=verify_installed_file("/include/puregui.h",
+                                 (uint32_t)core_header_size);
+    if(status<0) return status;
+    return verify_installed_file("/include/pguiw.h",
+                                 (uint32_t)widget_header_size);
+}
+
 static int32_t install_program_payload(void){
     if(create_directory_checked("/bin")<0
        || create_directory_checked("/bin/program")<0
        || create_directory_checked("/game")<0
-       || create_directory_checked("/lib")<0) return FS_ERROR_IO;
+       || create_directory_checked("/lib")<0
+       || create_directory_checked("/include")<0) return FS_ERROR_IO;
     const void *init_image,*installer_image,*snake_image,*terminal_image;
-    const void *nano_image,*system_image,*library_image;
+    const void *gui_demo_image;
+    const void *nano_image,*system_image,*files_image,*library_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
-    uint64_t system_size;
-    uint64_t library_size;
+    uint64_t system_size,files_size;
+    uint64_t library_size,gui_demo_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -1715,11 +1808,19 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /bin/program/system");
         return FS_ERROR_NOT_FOUND;
     }
+    if(!boot_get_module("/bin/program/files",&files_image,&files_size)){
+        klog(KLOG_ERROR,"install: missing /bin/program/files");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
+        klog(KLOG_ERROR,"install: missing /bin/gui-demo");
+        return FS_ERROR_NOT_FOUND;
+    }
     if(!boot_get_module("/lib/libpurec.a",&library_image,&library_size)){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || library_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -1761,18 +1862,35 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write system %d",status);
         return status;
     }
+    status=fat32_write_file("/bin/program/files",files_image,
+                            (uint32_t)files_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write files %d",status);
+        return status;
+    }
+    status=fat32_write_file("/bin/gui-demo",gui_demo_image,
+                            (uint32_t)gui_demo_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write gui-demo %d",status);
+        return status;
+    }
     status=fat32_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
     }
-    return status;
+    if(status<0) return status;
+    status=verify_installed_file("/bin/gui-demo",(uint32_t)gui_demo_size);
+    if(status<0) return status;
+    status=verify_installed_file("/bin/program/files",(uint32_t)files_size);
+    if(status<0) return status;
+    return install_gui_development_payload();
 }
 
 static int32_t install_uefi_payload(void){
     static const char *directories[]={
         "/EFI","/EFI/BOOT","/EFI/limine","/boot","/boot/limine","/limine",
-        "/bin","/bin/program","/game","/lib"
+        "/bin","/bin/program","/game","/lib","/include"
     };
     for(uint8_t index=0;index<sizeof(directories)/sizeof(directories[0]);index++){
         int32_t status=create_directory_checked(directories[index]);
@@ -1964,8 +2082,10 @@ int32_t fat32_format_uefi_device_progress(
         return FS_ERROR_IO;
     }
     if(callback) callback(18,"Formatting EFI system partition");
-    if(!write_format_metadata_at(FAT32_ESP_START_LBA,&esp_layout,
-                                 esp_volume_label)){
+    if(!write_format_metadata_at(
+            FAT32_ESP_START_LBA,&esp_layout,esp_volume_label,
+            callback,18,40,"Formatting EFI system partition"
+        )){
         klogf(KLOG_ERROR,"fat32_uefi: ESP format failed");
         return FS_ERROR_IO;
     }
@@ -1983,8 +2103,10 @@ int32_t fat32_format_uefi_device_progress(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
-    if(!write_format_metadata_at(data_start,&data_layout,
-                                 required_volume_label)){
+    if(!write_format_metadata_at(
+            data_start,&data_layout,required_volume_label,
+            callback,70,85,"Formatting PureC system partition"
+        )){
         klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
         return FS_ERROR_IO;
     }

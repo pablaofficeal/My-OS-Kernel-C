@@ -1,6 +1,6 @@
 #include "fs.h"
 #include "syscall.h"
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 
 int32_t fs_open(const char *path){
     return (int32_t)userspace_syscall(SYS_OPEN,(uint64_t)path,0,0);

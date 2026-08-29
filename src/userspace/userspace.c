@@ -1,20 +1,21 @@
 #include "userspace.h"
 #include "apps/desktop_apps.h"
 #include "apps/audio_panel.h"
-#include "explorer/explorer.h"
-#include "monitor/monitor.h"
+#include "window_manager.h"
 #include "syscall.h"
 #include "audio.h"
 #include "display.h"
-#include "../drivers/keyboard.h"
+#include "../drivers/input/keyboard.h"
 #include "../drivers/mouse/ps2_mouse.h"
 #include "../drivers/mouse/usb_mouse.h"
-#include "../drivers/timer.h"
-#include "../kernel/klog.h"
-#include "../kernel/boot_diag.h"
-#include "../kernel/panic.h"
-#include "../kernel/scheduler.h"
-#include "../kernel/syscall.h"
+#include "../drivers/interrupts/timer.h"
+#include "../drivers/storage/block_device.h"
+#include "../kernel/diagnostics/klog.h"
+#include "../kernel/diagnostics/boot_diag.h"
+#include "../kernel/diagnostics/panic.h"
+#include "../kernel/process/process.h"
+#include "../kernel/process/scheduler.h"
+#include "../kernel/syscall/syscall.h"
 #include "../lib/string.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -32,8 +33,6 @@
 #define ICON_Y           48
 #define ICON_W           58
 #define ICON_H           72
-#define ICON_DIRTY_W     72
-#define ICON_DIRTY_H     72
 #define PERSISTENT_LOG_CHUNK (64 * 1024)
 #define PERSISTENT_LOG_MAX_BYTES 0xFFFFFFFFULL
 #define PERSISTENT_LOG_PATH "/kernel.log"
@@ -48,9 +47,16 @@ static uint32_t htop_icon_y=ICON_Y;
 static uint32_t terminal_icon_y=ICON_Y;
 static uint32_t clock_icon_x=40,calculator_icon_x=112,calendar_icon_x=184;
 static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICON_Y;
-static uint32_t installer_icon_x=256,installer_icon_y=ICON_Y;
+static uint32_t settings_icon_x=256,settings_icon_y=ICON_Y;
+static uint32_t installer_icon_x=328,installer_icon_y=ICON_Y;
+static uint32_t disks_icon_x=400,disks_icon_y=130;
 static bool installer_icon_visible=true;
 static bool external_program_active;
+static uint32_t desktop_redraw_requested;
+static uint32_t desktop_redraw_completed;
+static uint32_t desktop_redraw_requester;
+static bool desktop_redraw_busy;
+static int32_t detached_programs[WINDOW_MANAGER_CAPACITY];
 static uint8_t previous_mouse_buttons;
 static bool power_menu_visible;
 static int8_t dragged_icon=-1;
@@ -60,6 +66,11 @@ static bool icon_drag_moved;
 static bool icon_layout_ready;
 static char persistent_log_buffer[PERSISTENT_LOG_CHUNK];
 static void redraw_scene(void);
+static void redraw_managed_scene(uint32_t excluded_pid);
+static int32_t userspace_run_detached(const char *path,
+                                      const char *arguments);
+static int32_t userspace_run_program_with_args(const char *path,
+                                               const char *arguments);
 
 static bool external_program_has_input_focus(void){
     return __atomic_load_n(&external_program_active,__ATOMIC_ACQUIRE);
@@ -123,8 +134,10 @@ static void draw_desktop_icons(void){
     draw_app_icon(clock_icon_x,clock_icon_y,"12","Clock",0x89DCEB);
     draw_app_icon(calculator_icon_x,calculator_icon_y,"+", "Calc",0xA6E3A1);
     draw_app_icon(calendar_icon_x,calendar_icon_y,"28","Calendar",0xF9E2AF);
+    draw_app_icon(settings_icon_x,settings_icon_y,"{}", "Settings",0x94E2D5);
     if(installer_icon_visible)
         draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
+    draw_app_icon(disks_icon_x,disks_icon_y,"HD","Disks",0xF9E2AF);
 }
 
 static bool installation_present(void){
@@ -136,8 +149,7 @@ static bool installation_present(void){
 }
 
 static void launch_installer(void){
-    (void)userspace_run_program("/bin/installer");
-    installer_icon_visible=!installation_present();
+    (void)userspace_run_detached("/bin/installer",0);
 }
 
 static bool installer_requires_restart(int32_t status){
@@ -148,14 +160,50 @@ static bool installer_requires_restart(int32_t status){
         && install.state!=0;
 }
 
-int32_t userspace_run_program(const char *path){
-    if(!path || external_program_has_input_focus()) return -1;
-    set_external_program_input_focus(true);
+static int32_t detached_program_slot(void){
+    for(uint32_t index=0;index<WINDOW_MANAGER_CAPACITY;index++){
+        if(detached_programs[index]<=0) return (int32_t)index;
+    }
+    return -1;
+}
+
+static int32_t userspace_run_detached(const char *path,
+                                      const char *arguments){
+    int32_t slot=detached_program_slot();
+    if(slot<0) return -1;
+    int32_t pid=(int32_t)userspace_syscall(
+        SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
+    if(pid>=0) detached_programs[slot]=pid;
+    return pid;
+}
+
+static void reap_detached_programs(void){
+    for(uint32_t index=0;index<WINDOW_MANAGER_CAPACITY;index++){
+        if(detached_programs[index]<=0) continue;
+        int32_t status=0;
+        int64_t result=userspace_syscall(SYS_WAIT,
+            (uint64_t)detached_programs[index],(uint64_t)&status,1);
+        if(result>0){
+            detached_programs[index]=0;
+            installer_icon_visible=!installation_present();
+        }
+    }
+}
+
+static int32_t userspace_run_program_with_args(const char *path,
+                                               const char *arguments){
+    if(!path) return -1;
     bool supervise_installer=strcmp(path,"/bin/installer")==0;
+    if(!supervise_installer) return userspace_run_detached(path,arguments);
+    if(external_program_has_input_focus()) return -1;
+    set_external_program_input_focus(true);
+    window_manager_set_suspended(true);
+    (void)userspace_syscall(SYS_CONSOLE_DISABLE,0,0,0);
     bool installer_pinned=false;
     int32_t status=-1;
     for(;;){
-        int64_t pid=userspace_syscall(SYS_EXEC,(uint64_t)path,0,0);
+        int64_t pid=userspace_syscall(
+            SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
         if(pid<0){
             if(supervise_installer
                && (installer_pinned || installer_requires_restart(-1))){
@@ -177,8 +225,13 @@ int32_t userspace_run_program(const char *path){
         scheduler_sleep(20);
     }
     set_external_program_input_focus(false);
-    redraw_scene();
+    window_manager_set_suspended(false);
+    redraw_managed_scene(0);
     return status;
+}
+
+int32_t userspace_run_program(const char *path){
+    return userspace_run_program_with_args(path,0);
 }
 
 static void draw_power_button(void){
@@ -203,9 +256,13 @@ static void draw_desktop(void){
     if(desktop_width==0) desktop_width=1280;
     if(desktop_height==0) desktop_height=800;
     if(!icon_layout_ready){
-        explorer_icon_x=desktop_width>560 ? 348 : desktop_width-212;
+        explorer_icon_x=desktop_width>700 ? 420 : desktop_width-212;
         htop_icon_x=explorer_icon_x+72;
         terminal_icon_x=htop_icon_x+72;
+        if(desktop_width<=700){
+            settings_icon_y=130;
+            installer_icon_y=130;
+        }
         if(desktop_width<=560){
             clock_icon_y=130;
             calculator_icon_y=130;
@@ -225,30 +282,53 @@ static void draw_desktop(void){
 static void redraw_scene(void){
     mouse_begin_framebuffer_update();
     draw_desktop();
-    if(monitor_window_is_visible()) monitor_window_draw();
-    if(explorer_window_is_visible()) explorer_window_draw();
     if(desktop_apps_is_visible()) desktop_apps_draw();
     audio_panel_draw(desktop_width);
     draw_power_menu();
     mouse_end_framebuffer_update();
 }
 
-static void redraw_icon_move(
-    uint32_t old_x,
-    uint32_t old_y,
-    uint32_t new_x,
-    uint32_t new_y
-){
-    mouse_begin_framebuffer_update();
-    display_draw_rect(old_x,old_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
-    display_draw_rect(new_x,new_y,ICON_DIRTY_W,ICON_DIRTY_H,DESKTOP_BG);
-    draw_desktop_icons();
-    if(monitor_window_is_visible()) monitor_window_draw();
-    if(explorer_window_is_visible()) explorer_window_draw();
-    if(desktop_apps_is_visible()) desktop_apps_draw();
-    audio_panel_draw(desktop_width);
-    draw_power_menu();
-    mouse_end_framebuffer_update();
+static void wait_for_managed_repaint(void){
+    for(uint32_t attempt=0;
+        attempt<250 && window_manager_repaint_pending();attempt++)
+        scheduler_sleep(1);
+    if(window_manager_repaint_pending()) window_manager_cancel_repaint();
+}
+
+static void redraw_managed_scene(uint32_t excluded_pid){
+    redraw_scene();
+    window_manager_request_repaint(excluded_pid);
+    wait_for_managed_repaint();
+}
+
+static bool service_desktop_redraw(void){
+    uint32_t requested=__atomic_load_n(&desktop_redraw_requested,
+                                       __ATOMIC_ACQUIRE);
+    uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
+                                       __ATOMIC_RELAXED);
+    if(requested==completed) return false;
+    redraw_managed_scene(desktop_redraw_requester);
+    __atomic_store_n(&desktop_redraw_completed,requested,__ATOMIC_RELEASE);
+    return true;
+}
+
+void userspace_redraw_desktop(void){
+    while(__atomic_test_and_set(&desktop_redraw_busy,__ATOMIC_ACQUIRE))
+        scheduler_sleep(1);
+    desktop_redraw_requester=(uint32_t)process_current_pid();
+    uint32_t ticket=__atomic_add_fetch(&desktop_redraw_requested,1,
+                                       __ATOMIC_ACQ_REL);
+    for(;;){
+        uint32_t completed=__atomic_load_n(&desktop_redraw_completed,
+                                           __ATOMIC_ACQUIRE);
+        if((int32_t)(completed-ticket)>=0) break;
+        scheduler_sleep(1);
+    }
+    __atomic_clear(&desktop_redraw_busy,__ATOMIC_RELEASE);
+}
+
+static void redraw_icon_move(void){
+    redraw_managed_scene(0);
 }
 
 static void handle_desktop_mouse(void){
@@ -287,6 +367,13 @@ static void handle_desktop_mouse(void){
         }
     }
 
+    if(!consumed){
+        bool focus_changed=false;
+        consumed=window_manager_handle_pointer(mouse.x,mouse.y,pressed,
+                                                &focus_changed);
+        if(focus_changed) redraw_managed_scene(0);
+    }
+
     if(!consumed && desktop_apps_is_visible()){
         bool app_redraw=false;
         consumed=desktop_apps_handle_mouse(
@@ -295,40 +382,31 @@ static void handle_desktop_mouse(void){
         );
         redraw=redraw || app_redraw;
     }
-    if(!consumed && explorer_window_is_visible()){
-        consumed=explorer_window_contains_point(mouse.x,mouse.y);
-        redraw=explorer_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                             pressed,released,
-                                             desktop_width,desktop_height);
-    }
-    if(!consumed && monitor_window_is_visible()){
-        consumed=monitor_window_contains_point(mouse.x,mouse.y);
-        redraw=monitor_window_handle_mouse(mouse.x,mouse.y,mouse.buttons,
-                                            pressed,released,
-                                            desktop_width,desktop_height)
-            || redraw;
-    }
-    uint32_t *icon_positions[7]={
+    uint32_t *icon_positions[9]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
         &clock_icon_x,
         &calculator_icon_x,
         &calendar_icon_x,
-        &installer_icon_x
+        &settings_icon_x,
+        &installer_icon_x,
+        &disks_icon_x
     };
-    uint32_t *icon_y_positions[7]={
+    uint32_t *icon_y_positions[9]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
         &clock_icon_y,
         &calculator_icon_y,
         &calendar_icon_y,
-        &installer_icon_y
+        &settings_icon_y,
+        &installer_icon_y,
+        &disks_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<7;index++){
-            if(index==6 && !installer_icon_visible) continue;
+        for(int8_t index=0;index<9;index++){
+            if(index==7 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
                     *icon_positions[index],*icon_y_positions[index],
@@ -358,28 +436,30 @@ static void handle_desktop_mouse(void){
         *icon_y_positions[dragged_icon]=(uint32_t)next_y;
         if(old_x!=*icon_positions[dragged_icon]
            || old_y!=*icon_y_positions[dragged_icon]){
-            redraw_icon_move(
-                old_x,old_y,
-                *icon_positions[dragged_icon],
-                *icon_y_positions[dragged_icon]
-            );
+            redraw_icon_move();
         }
     }
     if(released && dragged_icon>=0){
         int8_t icon=dragged_icon;
         dragged_icon=-1;
         if(!icon_drag_moved){
-            if(icon==0) explorer_open(desktop_width,desktop_height);
-            else if(icon==1) monitor_run();
+            if(icon==0)
+                (void)userspace_run_program("/bin/program/files");
+            else if(icon==1)
+                (void)userspace_run_program("/bin/program/monitor");
             else if(icon==2)
                 (void)userspace_run_program("/bin/program/terminal");
-            else if(icon==6) launch_installer();
+            else if(icon==6)
+                (void)userspace_run_program("/bin/program/settings");
+            else if(icon==7) launch_installer();
+            else if(icon==8)
+                (void)userspace_run_program("/bin/program/disks");
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;
     }
     previous_mouse_buttons=mouse.buttons;
-    if(redraw) redraw_scene();
+    if(redraw) redraw_managed_scene(0);
 }
 
 static bool handle_special_keyboard(void){
@@ -432,20 +512,21 @@ void userspace_input_thread(void *arg){
     klog(KLOG_INFO, "sched: input thread started (mouse polling + desktop)");
     for(;;){
         ps2_mouse_poll();
+        block_device_poll_usb_hotplug();
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        reap_detached_programs();
+        (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_sleep(10);
             continue;
         }
-        if(handle_special_keyboard()) redraw_scene();
+        if(!window_manager_has_focus() && handle_special_keyboard())
+            redraw_managed_scene(0);
         handle_desktop_mouse();
-        monitor_window_update();
         desktop_apps_update();
-        scheduler_yield();
-        // Small pause to avoid 100% busy
-        __asm__ volatile("pause");
+        scheduler_sleep(1);
     }
 }
 
@@ -453,18 +534,15 @@ void userspace_keyboard_thread(void *arg){
     (void)arg;
     klog(KLOG_INFO, "sched: desktop keyboard thread started");
     for(;;){
-        if(external_program_has_input_focus()){
+        if(external_program_has_input_focus() || window_manager_has_focus()){
             scheduler_sleep(10);
             continue;
         }
         char c;
-        while(!external_program_has_input_focus() && keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c))
-                (void)explorer_window_handle_key(c);
-        }
-        // Yield so input thread can run even while terminal is idle
-        scheduler_yield();
-        for(volatile uint32_t wait=0;wait<5000;wait++) __asm__ volatile("pause");
+        while(!external_program_has_input_focus()
+              && !window_manager_has_focus() && keyboard_try_getc(&c))
+            (void)desktop_apps_handle_key(c);
+        scheduler_sleep(1);
     }
 }
 
@@ -536,22 +614,23 @@ void userspace_run(void){
     // Fallback single-threaded loop (when scheduler not available)
     for(;;){
         ps2_mouse_poll();
+        block_device_poll_usb_hotplug();
         usb_mouse_poll();
         keyboard_poll();
         userspace_audio_update();
+        reap_detached_programs();
+        (void)service_desktop_redraw();
         if(external_program_has_input_focus()){
             scheduler_yield();
             continue;
         }
-        if(handle_special_keyboard()) redraw_scene();
+        if(!window_manager_has_focus() && handle_special_keyboard())
+            redraw_managed_scene(0);
         handle_desktop_mouse();
 
         char c;
-        while(keyboard_try_getc(&c)){
-            if(!desktop_apps_handle_key(c))
-                (void)explorer_window_handle_key(c);
-        }
-        monitor_window_update();
+        while(!window_manager_has_focus() && keyboard_try_getc(&c))
+            (void)desktop_apps_handle_key(c);
         desktop_apps_update();
 
         __asm__ volatile("pause");

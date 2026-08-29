@@ -24,11 +24,26 @@ file probing, input, mouse and framebuffer primitives. Static linking is used
 because the current ELF loader has no dynamic relocation support.
 
 Expose the installer as a desktop icon only while `/purec/install.cfg` is
-absent. Starting it opens a standalone console program that lists real block
-devices, accepts a numbered selection and requires the explicit `ERASE`
+absent. The icon starts the standalone installer, which creates a terminal-style
+PureGUI window through the shared terminal window adapter. It clears only that
+window's console region instead of the complete framebuffer. It lists real
+block devices, accepts a numbered selection and requires the explicit `ERASE`
 confirmation. Disk formatting runs in a kernel worker and reports real FAT32
-stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG`; the ring-3 installer
-prints the progress and stage log without blocking the worker.
+stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG` without blocking
+window events or progress output.
+
+The installer presents the latest kernel percentage as a persistent progress
+bar. A separate activity spinner refreshes during long USB operations where the
+real percentage has not advanced; it never substitutes an invented percentage.
+The worker holds an exclusive block-device transaction guard for the complete
+format and copy sequence. USB hotplug rescans are deferred until that guard is
+released, preventing controller re-enumeration between sector operations. On a
+failure the kernel preserves the real percentage and prefixes the last stage
+instead of replacing it with a misleading `100%` state.
+
+The install worker uses background scheduler priority 3. The installer UI
+sleeps while polling progress, allowing disk work to run without competing in
+the interactive priority-1 round-robin queue on single-core hardware.
 
 ## Consequences
 

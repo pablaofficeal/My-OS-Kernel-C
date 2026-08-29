@@ -1,5 +1,5 @@
 #include "include/purec.h"
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 
 int64_t pc_syscall(uint64_t number, uint64_t argument1,
                    uint64_t argument2, uint64_t argument3){
@@ -121,6 +121,10 @@ int32_t pc_try_getchar(void){
     return (int32_t)pc_syscall(SYS_TRY_GETCHAR,0,0,0);
 }
 
+int32_t pc_try_get_special(void){
+    return (int32_t)pc_syscall(SYS_TRY_GET_SPECIAL,0,0,0);
+}
+
 int32_t pc_get_command_line(char *buffer, uint32_t capacity){
     return (int32_t)pc_syscall(SYS_GET_COMMAND_LINE,
         (uint64_t)(uintptr_t)buffer,capacity,0);
@@ -151,6 +155,38 @@ int32_t pc_listenv(struct process_environment_variable *variables,
         (uint64_t)(uintptr_t)variables,capacity,0);
 }
 
+int32_t pc_process_list(struct process_monitor_info *processes,
+                        uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_PROCESS_LIST,
+        (uint64_t)(uintptr_t)processes,capacity,0);
+}
+
+bool pc_cpu_info(struct cpu_monitor_info *info){
+    return info && pc_syscall(SYS_CPU_INFO,(uint64_t)(uintptr_t)info,0,0)>=0;
+}
+
+bool pc_memory_info(struct memory_monitor_info *info){
+    return info
+        && pc_syscall(SYS_MEMORY_INFO,(uint64_t)(uintptr_t)info,0,0)>=0;
+}
+
+int32_t pc_ping(const char *target, uint16_t sequence, uint32_t timeout_ms,
+                struct network_ping_result *result){
+    if(!target || !result) return -1;
+    struct network_ping_request request={
+        .timeout_ms=timeout_ms,
+        .sequence=sequence
+    };
+    pc_copy(request.target,target,sizeof(request.target));
+    return (int32_t)pc_syscall(SYS_NET_PING,
+        (uint64_t)(uintptr_t)&request,(uint64_t)(uintptr_t)result,0);
+}
+
+void *pc_heap_grow(uint64_t size){
+    int64_t result=pc_syscall(SYS_HEAP_GROW,size,0,0);
+    return result<0 ? 0 : (void*)(uintptr_t)result;
+}
+
 int32_t pc_file_open(const char *path){
     return (int32_t)pc_syscall(SYS_FILE_OPEN,(uint64_t)(uintptr_t)path,0,0);
 }
@@ -167,6 +203,39 @@ int32_t pc_file_close(int32_t descriptor){
 int32_t pc_file_write(const char *path, const void *buffer, uint32_t size){
     return (int32_t)pc_syscall(SYS_FILE_WRITE,(uint64_t)(uintptr_t)path,
         (uint64_t)(uintptr_t)buffer,size);
+}
+
+int32_t pc_directory_list(const char *path,
+                          struct fs_directory_entry *entries,
+                          uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_DIR_LIST,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)entries,capacity);
+}
+
+int32_t pc_file_create(const char *path){
+    return (int32_t)pc_syscall(SYS_FILE_CREATE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_directory_create(const char *path){
+    return (int32_t)pc_syscall(SYS_DIR_CREATE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_file_delete(const char *path){
+    return (int32_t)pc_syscall(SYS_FILE_DELETE,
+        (uint64_t)(uintptr_t)path,0,0);
+}
+
+int32_t pc_file_rename(const char *path, const char *new_name){
+    return (int32_t)pc_syscall(SYS_FILE_RENAME,
+        (uint64_t)(uintptr_t)path,(uint64_t)(uintptr_t)new_name,0);
+}
+
+int32_t pc_file_move(const char *path, const char *destination_directory){
+    return (int32_t)pc_syscall(SYS_FILE_MOVE,
+        (uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)destination_directory,0);
 }
 
 bool pc_file_exists(const char *path){
@@ -200,6 +269,52 @@ void pc_display_end_update(void){
 
 void pc_display_clear(uint32_t color){
     (void)pc_syscall(SYS_CLEAR,color,0,0);
+}
+
+void pc_desktop_redraw(void){
+    (void)pc_syscall(SYS_DESKTOP_REDRAW,0,0,0);
+}
+
+bool pc_gui_window_register(const struct gui_window_request *request){
+    return request && pc_syscall(SYS_GUI_WINDOW_REGISTER,
+        (uint64_t)(uintptr_t)request,0,0)>=0;
+}
+
+bool pc_gui_window_update(const struct gui_window_request *request){
+    return request && pc_syscall(SYS_GUI_WINDOW_UPDATE,
+        (uint64_t)(uintptr_t)request,0,0)>=0;
+}
+
+void pc_gui_window_unregister(void){
+    (void)pc_syscall(SYS_GUI_WINDOW_UNREGISTER,0,0,0);
+}
+
+uint32_t pc_gui_window_state(void){
+    int64_t state=pc_syscall(SYS_GUI_WINDOW_STATE,0,0,0);
+    return state<0 ? 0 : (uint32_t)state;
+}
+
+void pc_gui_window_repaint_done(void){
+    (void)pc_syscall(SYS_GUI_WINDOW_REPAINT_DONE,0,0,0);
+}
+
+bool pc_console_configure(uint32_t x, uint32_t y,
+                          uint32_t width, uint32_t height,
+                          uint32_t foreground, uint32_t background){
+    struct framebuffer_console_request request={
+        .x=x,.y=y,.width=width,.height=height,
+        .foreground=foreground,.background=background
+    };
+    return pc_syscall(SYS_CONSOLE_CONFIGURE,
+        (uint64_t)(uintptr_t)&request,0,0)>=0;
+}
+
+void pc_console_clear(void){
+    (void)pc_syscall(SYS_CONSOLE_CLEAR,0,0,0);
+}
+
+void pc_console_disable(void){
+    (void)pc_syscall(SYS_CONSOLE_DISABLE,0,0,0);
 }
 
 void pc_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
@@ -239,6 +354,16 @@ bool pc_install_log(struct install_log *log){
         (uint64_t)(uintptr_t)log,0,0)>=0;
 }
 
+bool pc_audio_get_status(struct audio_status *status){
+    return status && pc_syscall(SYS_AUDIO_GET_STATUS,(uint64_t)(uintptr_t)status,0,0)>=0;
+}
+int32_t pc_audio_get_volume(void){ return (int32_t)pc_syscall(SYS_AUDIO_GET_VOLUME,0,0,0); }
+bool pc_audio_is_muted(void){ return pc_syscall(SYS_AUDIO_IS_MUTED,0,0,0)!=0; }
+void pc_audio_set_volume(uint32_t v){ (void)pc_syscall(SYS_AUDIO_SET_VOLUME,v,0,0); }
+void pc_audio_set_muted(bool m){ (void)pc_syscall(SYS_AUDIO_SET_MUTED,m?1:0,0,0); }
+void pc_audio_adjust_volume(int32_t d){ (void)pc_syscall(SYS_AUDIO_ADJUST_VOLUME,(uint64_t)(int64_t)d,0,0); }
+bool pc_audio_select_output(uint32_t i){ return pc_syscall(SYS_AUDIO_SELECT_OUTPUT_DEVICE,i,0,0)==0; }
+void pc_audio_play_test(void){ (void)pc_syscall(SYS_AUDIO_PLAY_TEST_SOUND,0,0,0); }
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

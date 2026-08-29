@@ -61,9 +61,7 @@ static struct gdt_ptr gp;
 extern void gdt_flush(uint64_t);
 
 void gdt_init(void) {
-    // null
     gdt.entries[0] = (struct gdt_entry){0,0,0,0,0,0};
-    // code 64-bit: base=0 limit=0 access=0x9A flags=0xA0 (L=1)
     gdt.entries[1] = (struct gdt_entry){0,0,0,0x9A,0xA0,0};
     // kernel data
     gdt.entries[2] = (struct gdt_entry){0,0,0,0x92,0x00,0};

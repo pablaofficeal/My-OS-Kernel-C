@@ -1,5 +1,5 @@
 #include "pmm.h"
-#include "../kernel/klog.h"
+#include "../kernel/diagnostics/klog.h"
 #include "../lib/string.h"
 
 #define PMM_MAX_PHYSICAL_BYTES (32ULL*1024ULL*1024ULL*1024ULL)

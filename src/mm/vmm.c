@@ -1,6 +1,6 @@
 #include "vmm.h"
 #include "pmm.h"
-#include "../kernel/klog.h"
+#include "../kernel/diagnostics/klog.h"
 #include "../lib/string.h"
 
 #define PAGE_ADDRESS_MASK 0x000FFFFFFFFFF000ULL
@@ -162,6 +162,28 @@ bool vmm_user_range_accessible(uint64_t address_space, uint64_t address,
         if(page==last) break;
     }
     return true;
+}
+
+uint64_t vmm_user_page_count(uint64_t address_space){
+    if(!address_space || address_space==kernel_address_space) return 0;
+    uint64_t count=0;
+    uint64_t *pml4=(uint64_t*)pmm_physical_to_virtual(address_space);
+    for(uint16_t pml4_index=0;pml4_index<256;pml4_index++){
+        if(!(pml4[pml4_index]&VMM_PAGE_PRESENT)) continue;
+        uint64_t *pdpt=table_from_entry(pml4[pml4_index]);
+        for(uint16_t pdpt_index=0;pdpt_index<512;pdpt_index++){
+            if(!(pdpt[pdpt_index]&VMM_PAGE_PRESENT)) continue;
+            uint64_t *pd=table_from_entry(pdpt[pdpt_index]);
+            for(uint16_t pd_index=0;pd_index<512;pd_index++){
+                if(!(pd[pd_index]&VMM_PAGE_PRESENT)) continue;
+                uint64_t *pt=table_from_entry(pd[pd_index]);
+                for(uint16_t pt_index=0;pt_index<512;pt_index++)
+                    if((pt[pt_index]&(VMM_PAGE_PRESENT|VMM_PAGE_USER))
+                       ==(VMM_PAGE_PRESENT|VMM_PAGE_USER)) count++;
+            }
+        }
+    }
+    return count;
 }
 
 void vmm_switch_address_space(uint64_t address_space){

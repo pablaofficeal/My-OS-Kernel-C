@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 #include <stdbool.h>
 #include <stdint.h>
 

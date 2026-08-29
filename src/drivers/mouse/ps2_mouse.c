@@ -1,10 +1,10 @@
 #include "ps2_mouse.h"
 #include "usb_mouse.h"
-#include "../pic.h"
-#include "../serial.h"
-#include "../gop.h"
-#include "../vga.h"
-#include "../../kernel/klog.h"
+#include "../interrupts/pic.h"
+#include "../serial/serial.h"
+#include "../display/gop.h"
+#include "../display/vga.h"
+#include "../../kernel/diagnostics/klog.h"
 #include <stdint.h>
 
 #define PS2_DATA   0x60

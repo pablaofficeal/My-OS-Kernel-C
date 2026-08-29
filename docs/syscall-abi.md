@@ -37,6 +37,9 @@ must reference present ring-3 pages and output buffers must also be writable.
   environment. Names are limited to 31 characters and values to 127.
 - `SYS_ENV_LIST`: copies a bounded list of environment entries. A child gets a
   private copy of its parent's environment during `SYS_EXEC`.
+- `SYS_HEAP_GROW`: grows the calling process heap by `a1` bytes and returns the
+  previous break. A zero-size call queries the current break. Heap pages are
+  user-writable, non-executable and released with the process address space.
 - `SYS_INSTALL_START`: starts the privileged asynchronous UEFI install worker.
 - `SYS_INSTALL_STATUS`: returns the real install stage, progress and result.
 - `SYS_INSTALL_LOG`: returns the bounded history of install stages and their
@@ -47,12 +50,19 @@ of the address space remains supervisor-only. The installer module receives
 the storage-administration capability; ordinary processes cannot format disks.
 
 `/bin/init` is mandatory and must receive PID 1. Boot-media applications are
-addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal` and
-`/bin/program/nano`. The minimal shell searches the process `PATH`, which
+addressed as `/bin/installer`, `/bin/snake`, `/bin/program/terminal`,
+`/bin/program/files` and `/bin/program/nano`. The minimal shell searches the process `PATH`, which
 defaults to `/bin/program:/bin`, and also accepts absolute executable paths.
 
 Traditional commands such as `/bin/program/ls`, `/bin/program/cat` and
 `/bin/program/install` are aliases of the trusted `/bin/program/system` module.
+
+`/bin/program/monitor` is a standalone ring-3 PureGUI application. It obtains
+global CPU/RAM data through `SYS_CPU_INFO` and `SYS_MEMORY_INFO`, and bounded
+process snapshots through `SYS_PROCESS_LIST` (257). Each process record reports
+PID/PPID, lifecycle state, recent CPU percentage, accumulated runtime and
+resident user-page bytes. Monitoring UI and refresh work are not linked into
+the kernel.
 They remain separate executable paths while sharing one ring-3 implementation.
 
 ## File Descriptors
@@ -88,6 +98,32 @@ EOF and does not close the descriptor.
 - `SYS_AUDIO_ADJUST_VOLUME`: `a1` is a signed step.
 - `SYS_AUDIO_PLAY_TEST_SOUND`: plays the current backend's test sound.
 - `SYS_AUDIO_UPDATE`: advances non-blocking audio state from the scheduler loop.
+
+## Network diagnostics
+
+- `SYS_NET_PING` (259): `a1` points to a readable bounded
+  `struct network_ping_request`; `a2` points to a writable
+  `struct network_ping_result`.
+- The request contains a null-terminated IPv4 address, hostname or URL, a
+  timeout capped at 30 seconds and an ICMP sequence number.
+- The kernel strips a URL scheme/path, resolves hostnames through the DHCP
+  supplied DNS server and performs one ICMP Echo transaction. It never exposes
+  raw kernel packet buffers to ring 3.
+- Success returns `0`. Negative results distinguish invalid input, missing or
+  unconfigured interfaces, DNS failure, timeout, contention and transmission
+  failure.
+
+## PureGUI window coordination
+
+- `SYS_GUI_WINDOW_REGISTER`: registers the calling PID and its window frame.
+- `SYS_GUI_WINDOW_UPDATE`: updates the registered frame after move or minimize.
+- `SYS_GUI_WINDOW_UNREGISTER`: removes the calling process window.
+- `SYS_GUI_WINDOW_STATE`: returns focused and ordered-repaint flags.
+- `SYS_GUI_WINDOW_REPAINT_DONE`: acknowledges completion of a repaint event.
+
+The registry routes keyboard focus to one process and restores multiple
+direct-framebuffer windows in z-order. Drawing still uses the framebuffer
+syscalls; these calls coordinate ownership and do not expose framebuffer memory.
 
 ## Kernel Virtual Files
 The kernel exposes a small read-only virtual filesystem:

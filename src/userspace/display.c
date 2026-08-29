@@ -1,6 +1,6 @@
 #include "display.h"
 #include "syscall.h"
-#include "../kernel/syscall.h"
+#include "../kernel/syscall/syscall.h"
 #include "../lib/string.h"
 
 static struct display_info cached_info;

@@ -1,3 +1,5 @@
 #pragma once
 
-int shell_run(void);
+struct terminal_window;
+
+int shell_run(struct terminal_window *terminal, const char *initial_command);
