@@ -4,6 +4,10 @@
 #include <stdint.h>
 
 #define PG_API_VERSION 2
+#define PG_VERSION "V1.0.1"
+#define PG_VERSION_MAJOR 1
+#define PG_VERSION_MINOR 0
+#define PG_VERSION_PATCH 1
 #define PG_TITLE_CAPACITY 64
 #define PG_TITLEBAR_HEIGHT 26
 #define PG_WINDOW_BORDER 2
@@ -33,6 +37,7 @@ enum pg_event_type {
     PG_EVENT_MOUSE_MOVE,
     PG_EVENT_MOUSE_DOWN,
     PG_EVENT_MOUSE_UP,
+    PG_EVENT_MOVE,
     PG_EVENT_MINIMIZE,
     PG_EVENT_CLOSE
 };
@@ -52,11 +57,15 @@ struct pg_window {
     char title[PG_TITLE_CAPACITY];
     int32_t previous_mouse_x;
     int32_t previous_mouse_y;
+    int32_t drag_offset_x;
+    int32_t drag_offset_y;
     uint8_t previous_mouse_buttons;
+    bool dragging;
     bool minimized;
     bool open;
 };
 
+const char *pg_version(void);
 struct pg_theme pg_theme_default(void);
 bool pg_window_init(struct pg_window *window, const char *title,
                     uint32_t x, uint32_t y,
@@ -66,6 +75,7 @@ bool pg_window_center(struct pg_window *window, const char *title,
 void pg_window_begin(struct pg_window *window);
 void pg_window_end(struct pg_window *window);
 void pg_window_close(struct pg_window *window);
+bool pg_window_move(struct pg_window *window, uint32_t x, uint32_t y);
 void pg_window_minimize(struct pg_window *window);
 void pg_window_restore(struct pg_window *window);
 bool pg_window_is_open(const struct pg_window *window);

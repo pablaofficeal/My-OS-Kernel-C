@@ -5,7 +5,7 @@
 static bool draw_demo(struct pg_window *window, const struct pg_event *event,
                       const char *message){
     pg_window_begin(window);
-    pg_label(window,24,24,"PureGUI system library");
+    pg_label(window,24,24,"PureGUI " PG_VERSION " system library");
     pg_window_text(window,24,44,
                    "Applications provide text and client coordinates.",
                    window->theme.muted_text);

@@ -1,5 +1,7 @@
 #include "include/puregui.h"
 
+const char *pg_version(void){ return PG_VERSION; }
+
 struct pg_theme pg_theme_default(void){
     struct pg_theme theme={
         .desktop=0x181825,

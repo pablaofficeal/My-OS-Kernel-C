@@ -91,14 +91,17 @@ static void set_variable(const char *assignment){
         pc_write("set: invalid variable or environment is full\n");
 }
 
-static int32_t start_program(const char *path, const char *arguments){
+static int32_t start_program(struct terminal_window *terminal,
+                             const char *path, const char *arguments){
     int32_t pid=pc_exec_with_args(path,arguments);
     if(pid<0) return -1;
     int32_t status=0;
     if(pc_wait(pid,&status,false)<0){
+        (void)terminal_window_repaint(terminal);
         pc_write("shell: wait failed\n");
         return -2;
     }
+    (void)terminal_window_repaint(terminal);
     if(status){
         pc_write("shell: program exited with status ");
         pc_write_i64(status);
@@ -123,14 +126,15 @@ static bool build_program_path(const char *directory, uint32_t length,
     return true;
 }
 
-static void execute_program(const char *name, const char *arguments){
+static void execute_program(struct terminal_window *terminal,
+                            const char *name, const char *arguments){
     char expanded[SHELL_LINE_CAPACITY];
     if(!shell_expand_environment(arguments,expanded,sizeof(expanded))){
         pc_write("shell: expanded arguments are too long\n");
         return;
     }
     if(name[0]=='/'){
-        if(start_program(name,expanded)>=0) return;
+        if(start_program(terminal,name,expanded)>=0) return;
     } else if(name[0] && !name[1] && name[0]=='.'){
         pc_write("shell: executable name required\n");
         return;
@@ -153,12 +157,12 @@ static void execute_program(const char *name, const char *arguments){
                 char candidate[SHELL_PATH_CAPACITY];
                 if(build_program_path(directory,length,name,candidate,
                                       sizeof(candidate))
-                   && start_program(candidate,expanded)>=0) return;
+                   && start_program(terminal,candidate,expanded)>=0) return;
             } else {
                 char candidate[SHELL_PATH_CAPACITY];
                 if(build_program_path("/bin/program",12,name,candidate,
                                       sizeof(candidate))
-                   && start_program(candidate,expanded)>=0) return;
+                   && start_program(terminal,candidate,expanded)>=0) return;
             }
             directory+=length;
             if(*directory==':') directory++;
@@ -167,16 +171,16 @@ static void execute_program(const char *name, const char *arguments){
             char candidate[SHELL_PATH_CAPACITY];
             if(build_program_path("/bin/program",12,name,candidate,
                                   sizeof(candidate))
-               && start_program(candidate,expanded)>=0) return;
+               && start_program(terminal,candidate,expanded)>=0) return;
             if(build_program_path("/bin",4,name,candidate,sizeof(candidate))
-               && start_program(candidate,expanded)>=0) return;
+               && start_program(terminal,candidate,expanded)>=0) return;
         }
     }
     pc_write(name);
     pc_write(": command not found\n");
 }
 
-static bool execute_line(char *line){
+static bool execute_line(struct terminal_window *terminal, char *line){
     char *command;
     const char *arguments;
     split_line(line,&command,&arguments);
@@ -199,7 +203,7 @@ static bool execute_line(char *line){
     else if(pc_strcmp(command,"set")==0) set_variable(arguments);
     else if(pc_strcmp(command,"unset")==0){
         if(pc_unsetenv(arguments)<0) pc_write("unset: variable not found\n");
-    } else execute_program(command,arguments);
+    } else execute_program(terminal,command,arguments);
     return true;
 }
 
@@ -212,6 +216,6 @@ int shell_run(struct terminal_window *terminal){
         build_prompt(prompt,sizeof(prompt));
         if(!terminal_window_read_line(terminal,prompt,line,sizeof(line)))
             return 0;
-        if(!execute_line(line)) return 0;
+        if(!execute_line(terminal,line)) return 0;
     }
 }

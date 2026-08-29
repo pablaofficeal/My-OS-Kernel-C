@@ -24,7 +24,9 @@ x86_64-elf-ld -T linker-userspace.ld -o my-app my-app.o \
 
 The system terminal is a real PureGUI client. Its shell input is handled as
 normalized window events, while the ring-3 console syscalls constrain shell
-and child-process text output to the window client rectangle.
+and child-process text output to the window client rectangle. The console
+backend retains a character grid so the terminal can repaint after a
+full-screen child such as `install`, minimize/restore, or a window move.
 
 ## Minimal application
 
@@ -55,12 +57,14 @@ void _start(void){
 
 | Function | Contract |
 |---|---|
+| `pg_version` | Returns the packaged semantic version string `V1.0.1`. |
 | `pg_theme_default` | Returns the built-in immutable color scheme by value. |
 | `pg_window_init` | Opens a window at screen coordinates; returns `false` for an invalid size, missing display or a window larger than the display. |
 | `pg_window_center` | Opens a centered window with the same validation rules. |
 | `pg_window_begin` | Starts an atomic framebuffer update and draws window chrome. |
 | `pg_window_end` | Finishes the update started by `pg_window_begin`. |
 | `pg_window_close` | Marks a window closed without terminating the process. |
+| `pg_window_move` | Moves and clamps an open window to the display; the application redraws after the matching move event. |
 | `pg_window_minimize` | Collapses an open window to its title bar. |
 | `pg_window_restore` | Restores a minimized window and its client area. |
 | `pg_window_is_open` | Reports whether the window remains active. |
@@ -69,7 +73,7 @@ void _start(void){
 | `pg_window_clear` | Fills the client area with a caller-selected color. |
 | `pg_window_rect` | Draws a clipped rectangle using client-relative coordinates. |
 | `pg_window_text` | Draws clipped fixed-width text using client-relative coordinates. |
-| `pg_window_poll_event` | Returns one normalized keyboard or mouse event; Escape and the close button produce `PG_EVENT_CLOSE`, while the titlebar minimize button toggles the window and produces `PG_EVENT_MINIMIZE`. |
+| `pg_window_poll_event` | Returns one normalized keyboard or mouse event; title-bar dragging produces `PG_EVENT_MOVE`, Escape and the close button produce `PG_EVENT_CLOSE`, and the minimize button produces `PG_EVENT_MINIMIZE`. |
 
 All functions are allocation-free. Invalid window pointers are ignored by
 drawing operations. Applications must pair every `pg_window_begin` with

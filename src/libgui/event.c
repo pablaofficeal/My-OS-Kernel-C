@@ -34,24 +34,55 @@ bool pg_window_poll_event(struct pg_window *window, struct pg_event *event){
     window->previous_mouse_x=mouse.x;
     window->previous_mouse_y=mouse.y;
     window->previous_mouse_buttons=mouse.buttons;
-    if(event->type==PG_EVENT_MOUSE_UP && event->button==1){
-        struct pg_rect close={
-            window->frame.x+window->frame.width-24,
-            window->frame.y+8,14,14
+    struct pg_rect close={
+        window->frame.x+window->frame.width-24,
+        window->frame.y+8,14,14
+    };
+    struct pg_rect minimize={
+        window->frame.x+window->frame.width-44,
+        window->frame.y+8,14,14
+    };
+    if(event->type==PG_EVENT_MOUSE_DOWN && event->button==1){
+        struct pg_rect titlebar={
+            window->frame.x,window->frame.y,
+            window->frame.width,PG_TITLEBAR_HEIGHT+PG_WINDOW_BORDER*2
         };
-        if(pg_internal_point_inside(mouse.x,mouse.y,&close)){
+        if(pg_internal_point_inside(mouse.x,mouse.y,&titlebar)
+           && !pg_internal_point_inside(mouse.x,mouse.y,&close)
+           && !pg_internal_point_inside(mouse.x,mouse.y,&minimize)){
+            window->dragging=true;
+            window->drag_offset_x=mouse.x-(int32_t)window->frame.x;
+            window->drag_offset_y=mouse.y-(int32_t)window->frame.y;
+        }
+    }
+    if(event->type==PG_EVENT_MOUSE_MOVE && window->dragging
+       && (mouse.buttons&1)){
+        struct pg_rect previous=window->frame;
+        int32_t next_x=mouse.x-window->drag_offset_x;
+        int32_t next_y=mouse.y-window->drag_offset_y;
+        if(next_x<0) next_x=0;
+        if(next_y<0) next_y=0;
+        pc_display_begin_update();
+        pc_draw_rect(previous.x,previous.y,previous.width+6,
+                     previous.height+6,window->theme.desktop);
+        pc_display_end_update();
+        if(pg_window_move(window,(uint32_t)next_x,(uint32_t)next_y))
+            event->type=PG_EVENT_MOVE;
+    }
+    if(event->type==PG_EVENT_MOUSE_UP && event->button==1){
+        bool was_dragging=window->dragging;
+        window->dragging=false;
+        if(!was_dragging && pg_internal_point_inside(mouse.x,mouse.y,&close)){
             event->type=PG_EVENT_CLOSE;
             window->open=false;
             return true;
         }
-        struct pg_rect minimize={
-            window->frame.x+window->frame.width-44,
-            window->frame.y+8,14,14
-        };
-        if(pg_internal_point_inside(mouse.x,mouse.y,&minimize)){
+        if(!was_dragging
+           && pg_internal_point_inside(mouse.x,mouse.y,&minimize)){
             window->minimized=!window->minimized;
             event->type=PG_EVENT_MINIMIZE;
         }
     }
+    if(!(mouse.buttons&1)) window->dragging=false;
     return event->type!=PG_EVENT_NONE;
 }

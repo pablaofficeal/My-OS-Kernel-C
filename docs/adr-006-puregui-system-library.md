@@ -26,7 +26,8 @@ Introduce PureGUI as two static system libraries:
 
 Public headers live under `/include`. Applications use client-relative
 coordinates and link only the layers they need. The ABI begins at
-`PG_API_VERSION 1`; close/minimize controls advance it to V1.0.1.
+`PG_API_VERSION 1`; the current ABI is `PG_API_VERSION 2`, while the packaged
+library release uses the semantic version `V1.0.1`.
 
 PureGUI deliberately supports one foreground window owned by the running
 application. Version 2 keeps that model and adds title-bar collapse/restore.
@@ -53,6 +54,8 @@ application source.
 - `/bin/gui-demo` acts as executable API documentation.
 - PureGUI API version 2 adds close/minimize window controls and normalized
   minimize events without introducing a window-server dependency.
+- The packaged library version is `V1.0.1`; it adds title-bar dragging and
+  retained terminal text for surface restoration.
 - PureGUI and its applications are compiled with `-mgeneral-regs-only` until
   the kernel provides per-process SIMD/FPU context management.
 

@@ -27,7 +27,10 @@ bool pg_window_init(struct pg_window *window, const char *title,
     pc_copy(window->title,title ? title : "PureGUI",sizeof(window->title));
     window->previous_mouse_x=-1;
     window->previous_mouse_y=-1;
+    window->drag_offset_x=0;
+    window->drag_offset_y=0;
     window->previous_mouse_buttons=0;
+    window->dragging=false;
     window->minimized=false;
     window->open=true;
     update_client_rect(window);
@@ -90,6 +93,22 @@ void pg_window_end(struct pg_window *window){
 
 void pg_window_close(struct pg_window *window){
     if(window) window->open=false;
+}
+
+bool pg_window_move(struct pg_window *window, uint32_t x, uint32_t y){
+    if(!window || !window->open) return false;
+    struct pc_display_info display;
+    if(!pc_display_get_info(&display) || !display.available
+       || window->frame.width>display.width
+       || window->frame.height>display.height) return false;
+    if(x>display.width-window->frame.width)
+        x=display.width-window->frame.width;
+    if(y>display.height-window->frame.height)
+        y=display.height-window->frame.height;
+    window->frame.x=x;
+    window->frame.y=y;
+    update_client_rect(window);
+    return true;
 }
 
 void pg_window_minimize(struct pg_window *window){

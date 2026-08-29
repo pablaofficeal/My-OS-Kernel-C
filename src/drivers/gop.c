@@ -9,15 +9,22 @@ static uint32_t cur_x=12, cur_y=12;
 static uint32_t fg=0xCDD6F4, bg=0x1E1E2E;
 static enum gop_font_face font_face=GOP_FONT_CLEAN;
 
+#define GOP_CONSOLE_COLUMNS 128
+#define GOP_CONSOLE_ROWS 64
+
 struct gop_console {
     uint32_t x;
     uint32_t y;
     uint32_t width;
     uint32_t height;
-    uint32_t cursor_x;
-    uint32_t cursor_y;
+    uint32_t columns;
+    uint32_t rows;
+    uint32_t cursor_column;
+    uint32_t cursor_row;
     uint32_t foreground;
     uint32_t background;
+    char characters[GOP_CONSOLE_ROWS][GOP_CONSOLE_COLUMNS];
+    bool initialized;
     bool active;
 };
 
@@ -346,20 +353,43 @@ bool gop_console_configure(uint32_t x, uint32_t y,
         return false;
     if(width>gop.width-x) width=gop.width-x;
     if(height>gop.height-y) height=gop.height-y;
-    bool changed=!user_console.active || user_console.x!=x
-        || user_console.y!=y || user_console.width!=width
-        || user_console.height!=height;
     user_console.x=x;
     user_console.y=y;
     user_console.width=width;
     user_console.height=height;
     user_console.foreground=foreground;
     user_console.background=background;
+    user_console.columns=width/8;
+    user_console.rows=height/10;
+    if(user_console.columns>GOP_CONSOLE_COLUMNS)
+        user_console.columns=GOP_CONSOLE_COLUMNS;
+    if(user_console.rows>GOP_CONSOLE_ROWS)
+        user_console.rows=GOP_CONSOLE_ROWS;
+    if(!user_console.columns || !user_console.rows) return false;
     user_console.active=true;
-    if(changed){
-        user_console.cursor_x=x;
-        user_console.cursor_y=y;
+    if(!user_console.initialized){
+        memset(user_console.characters,' ',sizeof(user_console.characters));
+        user_console.cursor_column=0;
+        user_console.cursor_row=0;
+        user_console.initialized=true;
     }
+    if(user_console.cursor_column>=user_console.columns)
+        user_console.cursor_column=user_console.columns-1;
+    if(user_console.cursor_row>=user_console.rows)
+        user_console.cursor_row=user_console.rows-1;
+    gop_draw_rect(x,y,width,height,background);
+    uint32_t saved_fg=fg,saved_bg=bg;
+    fg=foreground;
+    bg=background;
+    for(uint32_t row=0;row<user_console.rows;row++){
+        for(uint32_t column=0;column<user_console.columns;column++){
+            char character=user_console.characters[row][column];
+            if(character!=' ')
+                draw_char(character,x+column*8,y+row*10);
+        }
+    }
+    fg=saved_fg;
+    bg=saved_bg;
     return true;
 }
 
@@ -369,50 +399,62 @@ void gop_console_clear(void){
     if(!user_console.active) return;
     gop_draw_rect(user_console.x,user_console.y,user_console.width,
                   user_console.height,user_console.background);
-    user_console.cursor_x=user_console.x;
-    user_console.cursor_y=user_console.y;
+    memset(user_console.characters,' ',sizeof(user_console.characters));
+    user_console.cursor_column=0;
+    user_console.cursor_row=0;
 }
 
 void gop_console_disable(void){ user_console.active=false; }
 
 void gop_console_putc(char character){
     if(!user_console.active){ gop_putc(character); return; }
-    uint32_t right=user_console.x+user_console.width;
-    uint32_t bottom=user_console.y+user_console.height;
     if(character=='\b'){
-        if(user_console.cursor_x>user_console.x){
-            user_console.cursor_x-=8;
+        if(user_console.cursor_column){
+            user_console.cursor_column--;
+            user_console.characters[user_console.cursor_row]
+                                    [user_console.cursor_column]=' ';
             uint32_t saved_fg=fg,saved_bg=bg;
             fg=user_console.foreground;
             bg=user_console.background;
-            draw_char(' ',user_console.cursor_x,user_console.cursor_y);
+            draw_char(' ',user_console.x+user_console.cursor_column*8,
+                       user_console.y+user_console.cursor_row*10);
             fg=saved_fg;
             bg=saved_bg;
         }
         return;
     }
     if(character=='\n'){
-        user_console.cursor_x=user_console.x;
-        user_console.cursor_y+=10;
+        user_console.cursor_column=0;
+        user_console.cursor_row++;
     } else if(character=='\r'){
-        user_console.cursor_x=user_console.x;
+        user_console.cursor_column=0;
     } else {
-        if(user_console.cursor_x+8>right){
-            user_console.cursor_x=user_console.x;
-            user_console.cursor_y+=10;
+        if(user_console.cursor_column>=user_console.columns){
+            user_console.cursor_column=0;
+            user_console.cursor_row++;
         }
+        if(user_console.cursor_row>=user_console.rows) goto scroll;
+        user_console.characters[user_console.cursor_row]
+                                [user_console.cursor_column]=character;
         uint32_t saved_fg=fg,saved_bg=bg;
         fg=user_console.foreground;
         bg=user_console.background;
-        draw_char(character,user_console.cursor_x,user_console.cursor_y);
+        draw_char(character,user_console.x+user_console.cursor_column*8,
+                   user_console.y+user_console.cursor_row*10);
         fg=saved_fg;
         bg=saved_bg;
-        user_console.cursor_x+=8;
+        user_console.cursor_column++;
     }
-    if(user_console.cursor_y+8>bottom){
+scroll:
+    if(user_console.cursor_row>=user_console.rows){
+        for(uint32_t row=1;row<user_console.rows;row++)
+            memcpy(user_console.characters[row-1],
+                   user_console.characters[row],GOP_CONSOLE_COLUMNS);
+        memset(user_console.characters[user_console.rows-1],' ',
+               GOP_CONSOLE_COLUMNS);
         gop_scroll_rect_up(user_console.x,user_console.y,user_console.width,
                            user_console.height,10,user_console.background);
-        user_console.cursor_y=bottom>=10 ? bottom-10 : user_console.y;
+        user_console.cursor_row=user_console.rows-1;
     }
 }
 void gop_draw_text_at(uint32_t x, uint32_t y, const char *text, uint32_t text_fg, uint32_t text_bg){
