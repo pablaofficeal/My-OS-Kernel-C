@@ -1,5 +1,6 @@
 #include "../../libc/include/purec.h"
 #include "../terminal/window.h"
+#include "progress.h"
 
 #define MAX_INSTALL_DISKS 20
 
@@ -126,26 +127,6 @@ static bool confirm_erase(void) {
     return pc_strcmp(input, "ERASE") == 0;
 }
 
-static void print_progress(uint32_t progress, const char *stage) {
-    pc_write("[");
-    pc_write_u64(progress);
-    pc_write("%] ");
-    pc_write(stage);
-    pc_write("\n");
-}
-
-static void print_status_change(const struct install_status *status,
-                                uint32_t *last_progress,
-                                char last_stage[INSTALL_STAGE_CAPACITY]) {
-    if (status->progress == *last_progress &&
-        pc_strcmp(status->stage, last_stage) == 0) {
-        return;
-    }
-    print_progress(status->progress, status->stage);
-    *last_progress = status->progress;
-    pc_copy(last_stage, status->stage, INSTALL_STAGE_CAPACITY);
-}
-
 static bool write_install_config(void) {
     static const char directory[] = "/purec";
     static const char path[] = "/purec/install.cfg";
@@ -185,8 +166,8 @@ static void wait_for_reboot(void) {
 
 static bool run_installation(bool start_job) {
     struct install_status status;
-    uint32_t last_progress = UINT32_MAX;
-    char last_stage[INSTALL_STAGE_CAPACITY] = {0};
+    struct installer_progress_view progress_view;
+    installer_progress_init(&progress_view);
 
     clear_console();
     pc_write("Pure OS installation\n");
@@ -201,11 +182,6 @@ static bool run_installation(bool start_job) {
             pc_write("\n");
             return false;
         }
-        pc_write("Installing to ");
-        pc_write(disk->name);
-        pc_write(". Do not power off the computer.\n\n");
-    } else {
-        pc_write("An installation is already active. Resuming progress.\n\n");
     }
 
     for (;;) {
@@ -214,7 +190,13 @@ static bool run_installation(bool start_job) {
             pc_write("Cannot read installation status.\n");
             return false;
         }
-        print_status_change(&status, &last_progress, last_stage);
+        if(pg_window_is_minimized(&installer_window.gui)){
+            pc_sleep(20);
+            continue;
+        }
+        installer_progress_update(&progress_view,&status,
+                                  start_job ? disks[selected_disk].name
+                                            : "active installation",false);
         if (status.state == INSTALL_FAILED) {
             pc_write("\nInstallation failed. Error: ");
             pc_write_i64(status.result);
@@ -222,10 +204,22 @@ static bool run_installation(bool start_job) {
             return false;
         }
         if (status.state == INSTALL_COMPLETE) {
+            status.progress=96;
+            pc_copy(status.stage,"Writing installation configuration",
+                    sizeof(status.stage));
+            installer_progress_update(&progress_view,&status,
+                                      start_job ? disks[selected_disk].name
+                                                : "active installation",true);
             if (!write_install_config()) {
                 return false;
             }
-            pc_write("[100%] Installation complete\n");
+            status.progress=100;
+            pc_copy(status.stage,"Installation complete",
+                    sizeof(status.stage));
+            installer_progress_update(&progress_view,&status,
+                                      start_job ? disks[selected_disk].name
+                                                : "active installation",true);
+            pc_write("\nInstallation complete.\n");
             wait_for_reboot();
         }
         pc_sleep(20);

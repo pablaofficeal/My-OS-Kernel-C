@@ -32,6 +32,10 @@ confirmation. Disk formatting runs in a kernel worker and reports real FAT32
 stages through `SYS_INSTALL_STATUS` and `SYS_INSTALL_LOG` without blocking
 window events or progress output.
 
+The installer presents the latest kernel percentage as a persistent progress
+bar. A separate activity spinner refreshes during long USB operations where the
+real percentage has not advanced; it never substitutes an invented percentage.
+
 The install worker uses background scheduler priority 3. The installer UI
 sleeps while polling progress, allowing disk work to run without competing in
 the interactive priority-1 round-robin queue on single-core hardware.
