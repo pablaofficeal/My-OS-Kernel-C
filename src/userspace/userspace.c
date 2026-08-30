@@ -50,6 +50,7 @@ static uint32_t clock_icon_y=ICON_Y,calculator_icon_y=ICON_Y,calendar_icon_y=ICO
 static uint32_t settings_icon_x=256,settings_icon_y=ICON_Y;
 static uint32_t installer_icon_x=328,installer_icon_y=ICON_Y;
 static uint32_t disks_icon_x=400,disks_icon_y=130;
+static uint32_t tetris_icon_x=472,tetris_icon_y=130;
 static bool installer_icon_visible=true;
 static bool external_program_active;
 static uint32_t desktop_redraw_requested;
@@ -138,6 +139,7 @@ static void draw_desktop_icons(void){
     if(installer_icon_visible)
         draw_app_icon(installer_icon_x,installer_icon_y,"OS","Install",0xCBA6F7);
     draw_app_icon(disks_icon_x,disks_icon_y,"HD","Disks",0xF9E2AF);
+    draw_app_icon(tetris_icon_x,tetris_icon_y,"[]","Tetris",0xF38BA8);
 }
 
 static bool installation_present(void){
@@ -382,7 +384,7 @@ static void handle_desktop_mouse(void){
         );
         redraw=redraw || app_redraw;
     }
-    uint32_t *icon_positions[9]={
+    uint32_t *icon_positions[10]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
@@ -391,9 +393,10 @@ static void handle_desktop_mouse(void){
         &calendar_icon_x,
         &settings_icon_x,
         &installer_icon_x,
-        &disks_icon_x
+        &disks_icon_x,
+        &tetris_icon_x
     };
-    uint32_t *icon_y_positions[9]={
+    uint32_t *icon_y_positions[10]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
@@ -402,10 +405,11 @@ static void handle_desktop_mouse(void){
         &calendar_icon_y,
         &settings_icon_y,
         &installer_icon_y,
-        &disks_icon_y
+        &disks_icon_y,
+        &tetris_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<9;index++){
+        for(int8_t index=0;index<10;index++){
             if(index==7 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
@@ -454,6 +458,8 @@ static void handle_desktop_mouse(void){
             else if(icon==7) launch_installer();
             else if(icon==8)
                 (void)userspace_run_program("/bin/program/disks");
+            else if(icon==9)
+                (void)userspace_run_program("/bin/tetris");
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;

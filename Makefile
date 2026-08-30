@@ -61,6 +61,7 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
 	cp "$(PROGRAM_DIR)/installer" "$(ISO_ROOT)/bin/installer"; \
 	cp "$(PROGRAM_DIR)/snake" "$(ISO_ROOT)/bin/snake"; \
+	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/tetris"; \
 	cp "$(PROGRAM_DIR)/terminal" "$(ISO_ROOT)/bin/program/terminal"; \
 	cp "$(PROGRAM_DIR)/nano" "$(ISO_ROOT)/bin/program/nano"; \
 	cp "$(PROGRAM_DIR)/system" "$(ISO_ROOT)/bin/program/system"; \
@@ -69,6 +70,7 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/settings" "$(ISO_ROOT)/bin/program/settings"; \
 	cp "$(PROGRAM_DIR)/monitor" "$(ISO_ROOT)/bin/program/monitor"; \
 	cp "$(PROGRAM_DIR)/disks" "$(ISO_ROOT)/bin/program/disks"; \
+	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/program/tetris"; \
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \

@@ -1686,10 +1686,15 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
     "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/tetris\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/program/settings\n"
+    "    module_path: boot():/bin/program/monitor\n"
+    "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1703,10 +1708,15 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
     "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/tetris\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/program/settings\n"
+    "    module_path: boot():/bin/program/monitor\n"
+    "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1781,9 +1791,11 @@ static int32_t install_program_payload(void){
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -1795,6 +1807,14 @@ static int32_t install_program_payload(void){
     if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
         klog(KLOG_ERROR,"install: missing /bin/snake");
         return FS_ERROR_NOT_FOUND;
+    }
+    // tetris is optional for backward ISO compatibility but preferred
+    bool has_tetris=boot_get_module("/bin/tetris",&tetris_image,&tetris_size);
+    if(!has_tetris) has_tetris=boot_get_module("/bin/program/tetris",&tetris_image,&tetris_size);
+    if(!has_tetris){
+        klog(KLOG_WARN,"install: missing /bin/tetris (will skip tetris payload)");
+        tetris_image=0;
+        tetris_size=0;
     }
     if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
         klog(KLOG_ERROR,"install: missing /bin/program/terminal");
@@ -1812,6 +1832,21 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /bin/program/files");
         return FS_ERROR_NOT_FOUND;
     }
+    if(!boot_get_module("/bin/program/settings",&settings_image,&settings_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/settings (non-fatal)");
+        settings_image=0;
+        settings_size=0;
+    }
+    if(!boot_get_module("/bin/program/monitor",&monitor_image,&monitor_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/monitor (non-fatal)");
+        monitor_image=0;
+        monitor_size=0;
+    }
+    if(!boot_get_module("/bin/program/disks",&disks_image,&disks_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/disks (non-fatal)");
+        disks_image=0;
+        disks_size=0;
+    }
     if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
         klog(KLOG_ERROR,"install: missing /bin/gui-demo");
         return FS_ERROR_NOT_FOUND;
@@ -1820,7 +1855,7 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -1868,6 +1903,44 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write files %d",status);
         return status;
     }
+    if(settings_image && settings_size){
+        status=fat32_write_file("/bin/program/settings",settings_image,(uint32_t)settings_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write settings %d",status);
+            return status;
+        }
+    }
+    if(monitor_image && monitor_size){
+        status=fat32_write_file("/bin/program/monitor",monitor_image,(uint32_t)monitor_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write monitor %d",status);
+            return status;
+        }
+    }
+    if(disks_image && disks_size){
+        status=fat32_write_file("/bin/program/disks",disks_image,(uint32_t)disks_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write disks %d",status);
+            return status;
+        }
+    }
+    if(tetris_image && tetris_size){
+        status=fat32_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write tetris %d",status);
+            return status;
+        }
+        status=fat32_write_file("/bin/program/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write program/tetris %d",status);
+            return status;
+        }
+        status=fat32_write_file("/game/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write game/tetris %d",status);
+            return status;
+        }
+    }
     status=fat32_write_file("/bin/gui-demo",gui_demo_image,
                             (uint32_t)gui_demo_size);
     if(status<0){
@@ -1884,6 +1957,26 @@ static int32_t install_program_payload(void){
     if(status<0) return status;
     status=verify_installed_file("/bin/program/files",(uint32_t)files_size);
     if(status<0) return status;
+    if(settings_image && settings_size){
+        status=verify_installed_file("/bin/program/settings",(uint32_t)settings_size);
+        if(status<0) return status;
+    }
+    if(monitor_image && monitor_size){
+        status=verify_installed_file("/bin/program/monitor",(uint32_t)monitor_size);
+        if(status<0) return status;
+    }
+    if(disks_image && disks_size){
+        status=verify_installed_file("/bin/program/disks",(uint32_t)disks_size);
+        if(status<0) return status;
+    }
+    if(tetris_image && tetris_size){
+        status=verify_installed_file("/bin/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+        status=verify_installed_file("/bin/program/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+        status=verify_installed_file("/game/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+    }
     return install_gui_development_payload();
 }
 
