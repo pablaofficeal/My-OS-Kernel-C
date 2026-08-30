@@ -21,16 +21,16 @@ static uint32_t random_state=0x1234ABCD;
 static uint32_t drop_interval_ms=600;
 static uint32_t drop_timer;
 
-// dynamic layout for huge window
+// layout: huge window, board fills width, HUD at bottom inside window
 static uint32_t g_cell = 28;
-static uint32_t g_preview_cell = 18;
-static uint32_t g_board_x = 20;
-static uint32_t g_board_y = 20;
-static uint32_t g_side_x = 320;
-static uint32_t g_side_y = 20;
-static uint32_t g_side_w = 280;
-static uint32_t g_win_w = 640;
-static uint32_t g_win_h = 620;
+static uint32_t g_preview_cell = 16;
+static uint32_t g_board_x = 12;
+static uint32_t g_board_y = 12;
+static uint32_t g_hud_x = 12;
+static uint32_t g_hud_y = 0;
+static uint32_t g_hud_h = 100;
+static uint32_t g_win_w = 360;
+static uint32_t g_win_h = 700;
 
 static uint32_t piece_colors[7]={
     0x89B4FA,
@@ -90,57 +90,57 @@ static const int8_t SHAPES[7][4][4][2]={
 static void compute_layout(void){
     struct pc_display_info info;
     uint32_t disp_w=1024, disp_h=768;
-    bool have_info=false;
+    bool have=false;
     if(pc_display_get_info(&info) && info.available && info.width>=640 && info.height>=480){
         disp_w=info.width;
         disp_h=info.height;
-        have_info=true;
+        have=true;
     }
-    // candidates from huge to medium
-    const uint32_t cand_cell[5]={30,28,26,24,20};
-    const uint32_t cand_prev[5]={20,18,16,14,12};
-    const uint32_t cand_side_w[5]={280,280,260,260,260};
-    // try biggest that fits
-    for(uint32_t i=0;i<5;i++){
+    const uint32_t cand_cell[6]={32,30,28,26,24,20};
+    const uint32_t cand_prev[6]={18,18,16,16,14,14};
+    const uint32_t margin=12;
+    const uint32_t gap=8;
+    for(uint32_t i=0;i<6;i++){
         uint32_t cell=cand_cell[i];
         uint32_t prev=cand_prev[i];
-        uint32_t side_w=cand_side_w[i];
-        uint32_t board_px_w=BOARD_W*cell;
-        uint32_t board_px_h=BOARD_H*cell;
-        uint32_t client_w=20 + board_px_w + 20 + side_w + 20;
-        uint32_t client_h=20 + board_px_h + 20;
-        uint32_t frame_w=client_w + PG_WINDOW_BORDER*2;
-        uint32_t frame_h=client_h + PG_TITLEBAR_HEIGHT + PG_WINDOW_BORDER*2;
-        uint32_t max_w = have_info ? (disp_w>40?disp_w-40:disp_w) : 800;
-        uint32_t max_h = have_info ? (disp_h>60?disp_h-60:disp_h) : 600;
+        uint32_t board_w = BOARD_W*cell;
+        uint32_t board_h = BOARD_H*cell;
+        uint32_t preview_box = 4*prev + 10;
+        uint32_t hud_h = preview_box + 28; // label 16 + padding 12
+        if(hud_h<84) hud_h=84;
+        uint32_t client_w = board_w + margin*2;
+        uint32_t client_h = board_h + hud_h + gap + margin*2;
+        uint32_t frame_w = client_w + PG_WINDOW_BORDER*2;
+        uint32_t frame_h = client_h + PG_TITLEBAR_HEIGHT + PG_WINDOW_BORDER*2;
+        uint32_t max_w = have ? (disp_w>40?disp_w-40:disp_w) : 800;
+        uint32_t max_h = have ? (disp_h>60?disp_h-60:disp_h) : 600;
         if(frame_w<=max_w && frame_h<=max_h){
             g_cell=cell;
             g_preview_cell=prev;
-            g_side_w=side_w;
-            g_board_x=20;
-            g_board_y=20;
-            g_side_x=g_board_x + board_px_w + 20;
-            g_side_y=g_board_y;
+            g_hud_h=hud_h;
+            g_board_x=margin;
+            g_board_y=margin;
+            g_hud_x=margin;
+            g_hud_y=margin + board_h + gap;
             g_win_w=frame_w;
             g_win_h=frame_h;
             return;
         }
     }
-    // fallback absolute minimum (huge still but smallest)
-    g_cell=20;
-    g_preview_cell=14;
-    g_side_w=260;
-    g_board_x=18;
-    g_board_y=18;
-    g_side_x=g_board_x + BOARD_W*g_cell + 18;
-    g_side_y=g_board_y;
-    uint32_t client_w=18 + BOARD_W*g_cell + 18 + g_side_w + 18;
-    uint32_t client_h=18 + BOARD_H*g_cell + 18;
-    g_win_w=client_w+4;
-    g_win_h=client_h+30;
-    // clamp to display if still too big
-    if(have_info){
-        if(g_win_w>disp_w) g_win_w=disp_w>20?disp_w-20:520;
+    // fallback smallest still huge but fits
+    uint32_t cell=20;
+    uint32_t prev=14;
+    uint32_t board_w=BOARD_W*cell;
+    uint32_t board_h=BOARD_H*cell;
+    uint32_t preview_box=4*prev+10;
+    uint32_t hud_h=preview_box+28;
+    uint32_t client_w=board_w+24;
+    uint32_t client_h=board_h+hud_h+8+24;
+    g_cell=cell; g_preview_cell=prev; g_hud_h=hud_h;
+    g_board_x=12; g_board_y=12; g_hud_x=12; g_hud_y=12+board_h+8;
+    g_win_w=client_w+4; g_win_h=client_h+30;
+    if(have){
+        if(g_win_w>disp_w) g_win_w=disp_w>20?disp_w-20:360;
         if(g_win_h>disp_h) g_win_h=disp_h>20?disp_h-20:560;
     }
 }
@@ -294,74 +294,63 @@ static char *append_u32(char *dst,uint32_t v){
 }
 
 static void draw_board(struct pg_window *window){
-    // outer border
-    pg_window_rect(window,(struct pg_rect){g_board_x-2,g_board_y-2,BOARD_W*g_cell+4,BOARD_H*g_cell+4},window->theme.border);
-    pg_window_rect(window,(struct pg_rect){g_board_x,g_board_y,BOARD_W*g_cell,BOARD_H*g_cell},0x11111B);
-    // subtle grid for huge cells (helps orientation without being a hint)
-    if(g_cell>=24){
-        // vertical lines
+    uint32_t board_w = BOARD_W*g_cell;
+    uint32_t board_h = BOARD_H*g_cell;
+    // board fills window width - huge canvas on full client
+    pg_window_rect(window,(struct pg_rect){g_board_x-2,g_board_y-2,board_w+4,board_h+4},window->theme.border);
+    pg_window_rect(window,(struct pg_rect){g_board_x,g_board_y,board_w,board_h},0x11111B);
+    if(g_cell>=20){
         for(uint32_t x=1;x<BOARD_W;x++){
-            pg_window_rect(window,(struct pg_rect){g_board_x + x*g_cell, g_board_y, 1, BOARD_H*g_cell},0x1E1E2E);
+            pg_window_rect(window,(struct pg_rect){g_board_x + x*g_cell, g_board_y, 1, board_h},0x1E1E2E);
         }
         for(uint32_t y=1;y<BOARD_H;y++){
-            pg_window_rect(window,(struct pg_rect){g_board_x, g_board_y + y*g_cell, BOARD_W*g_cell, 1},0x1E1E2E);
+            pg_window_rect(window,(struct pg_rect){g_board_x, g_board_y + y*g_cell, board_w, 1},0x1E1E2E);
         }
     }
-    // locked blocks
     for(int32_t y=0;y<BOARD_H;y++){
         for(int32_t x=0;x<BOARD_W;x++){
             int8_t cell=board[y][x];
             if(cell==-1) continue;
             uint32_t color=piece_colors[cell];
             pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)y*g_cell+1, g_cell-2, g_cell-2},color);
-            // top highlight
-            uint32_t hl_h = g_cell>=28?4:3;
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)y*g_cell+1, g_cell-2, hl_h},color+0x222222);
-            // bottom shadow
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)(y+1)*g_cell -3, g_cell-2, 2},0x11111B);
+            uint32_t hl = g_cell>=28?4:3;
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)y*g_cell+1, g_cell-2, hl},color+0x222222);
         }
     }
     if(!game_over){
-        // current piece only, no ghost/hint
         for(int32_t i=0;i<4;i++){
             int32_t bx = piece_x + SHAPES[piece_type][piece_rotation][i][0];
             int32_t by = piece_y + SHAPES[piece_type][piece_rotation][i][1];
             if(by<0 || by>=BOARD_H || bx<0 || bx>=BOARD_W) continue;
             uint32_t color=piece_colors[piece_type];
             pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell+1, g_board_y + (uint32_t)by*g_cell+1, g_cell-2, g_cell-2},color);
-            uint32_t hl_h = g_cell>=28?4:3;
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell+1, g_board_y + (uint32_t)by*g_cell+1, g_cell-2, hl_h},color+0x222222);
+            uint32_t hl = g_cell>=28?4:3;
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell+1, g_board_y + (uint32_t)by*g_cell+1, g_cell-2, hl},color+0x222222);
         }
     }
 }
 
-static void draw_side(struct pg_window *window){
-    uint32_t sx=g_side_x;
-    uint32_t sy=g_side_y;
+static void draw_hud(struct pg_window *window){
+    uint32_t board_w = BOARD_W*g_cell;
+    // bottom panel - occupies full width of canvas, at bottom
+    pg_window_rect(window,(struct pg_rect){g_hud_x-1,g_hud_y-1,board_w+2,g_hud_h+2},window->theme.border);
+    pg_window_rect(window,(struct pg_rect){g_hud_x,g_hud_y,board_w,g_hud_h},window->theme.titlebar);
 
-    uint32_t preview_box = 4*g_preview_cell + 12;
-    // ensure box fits side width
-    if(preview_box > g_side_w - 20) preview_box = g_side_w - 20;
-    uint32_t panel_h = preview_box + 98; // 26 title + 6 gap + 12 border + 54 stats
-    // side main panel
-    pg_window_rect(window,(struct pg_rect){sx,sy,g_side_w,panel_h},window->theme.titlebar);
-    pg_window_rect(window,(struct pg_rect){sx,sy,g_side_w,1},window->theme.border);
-    pg_window_rect(window,(struct pg_rect){sx,sy,1,panel_h},window->theme.border);
-    pg_window_rect(window,(struct pg_rect){sx+g_side_w-1,sy,1,panel_h},window->theme.border);
-    pg_window_rect(window,(struct pg_rect){sx,sy+panel_h-1,g_side_w,1},window->theme.border);
+    // left side: NEXT preview at bottom
+    uint32_t preview_box = 4*g_preview_cell + 10;
+    uint32_t box_h = preview_box;
+    uint32_t box_w = preview_box;
+    uint32_t box_x = g_hud_x + 10;
+    uint32_t box_y = g_hud_y + (g_hud_h - box_h)/2;
+    // label NEXT above box, centered
+    pg_window_text(window, box_x + (box_w>32?(box_w-32)/2:0), g_hud_y + 6, "NEXT", window->theme.text);
+    // adjust box_y to be below label
+    box_y = g_hud_y + 20;
+    if(box_y + box_h > g_hud_y + g_hud_h - 6) box_y = g_hud_y + g_hud_h - box_h - 6;
 
-    pg_window_text(window,sx+12,sy+8,"NEXT",window->theme.text);
+    pg_window_rect(window,(struct pg_rect){box_x-2,box_y-2,box_w+4,box_h+4},window->theme.border);
+    pg_window_rect(window,(struct pg_rect){box_x,box_y,box_w,box_h},0x11111B);
 
-    uint32_t bg_w = preview_box;
-    uint32_t bg_h = preview_box;
-    uint32_t bg_x = sx + (g_side_w - bg_w)/2;
-    uint32_t bg_y = sy + 26;
-
-    // border for preview
-    pg_window_rect(window,(struct pg_rect){bg_x-2,bg_y-2,bg_w+4,bg_h+4},window->theme.border);
-    pg_window_rect(window,(struct pg_rect){bg_x,bg_y,bg_w,bg_h},0x11111B);
-
-    // calculate centered offsets for next piece
     int32_t minX=10, maxX=-10, minY=10, maxY=-10;
     for(int32_t i=0;i<4;i++){
         int32_t bx=SHAPES[next_type][0][i][0];
@@ -375,67 +364,74 @@ static void draw_side(struct pg_window *window){
     int32_t h = maxY - minY + 1;
     int32_t offX = (4 - w)/2 - minX;
     int32_t offY = (4 - h)/2 - minY;
-    uint32_t inner_x = bg_x + (bg_w - 4*g_preview_cell)/2;
-    uint32_t inner_y = bg_y + (bg_h - 4*g_preview_cell)/2;
-    uint32_t color = piece_colors[next_type];
+    uint32_t inner_x = box_x + (box_w - 4*g_preview_cell)/2;
+    uint32_t inner_y = box_y + (box_h - 4*g_preview_cell)/2;
+    uint32_t col = piece_colors[next_type];
     for(int32_t i=0;i<4;i++){
         int32_t bx=SHAPES[next_type][0][i][0];
         int32_t by=SHAPES[next_type][0][i][1];
         int32_t px=bx+offX;
         int32_t py=by+offY;
-        if(px<0 || px>=4 || py<0 || py>=4) continue;
-        pg_window_rect(window,(struct pg_rect){inner_x + (uint32_t)px*g_preview_cell+1, inner_y + (uint32_t)py*g_preview_cell+1, g_preview_cell-2, g_preview_cell-2},color);
-        // highlight
-        pg_window_rect(window,(struct pg_rect){inner_x + (uint32_t)px*g_preview_cell+1, inner_y + (uint32_t)py*g_preview_cell+1, g_preview_cell-2, 2},color+0x222222);
+        if(px<0||px>=4||py<0||py>=4) continue;
+        pg_window_rect(window,(struct pg_rect){inner_x + (uint32_t)px*g_preview_cell+1, inner_y + (uint32_t)py*g_preview_cell+1, g_preview_cell-2, g_preview_cell-2},col);
+        pg_window_rect(window,(struct pg_rect){inner_x + (uint32_t)px*g_preview_cell+1, inner_y + (uint32_t)py*g_preview_cell+1, g_preview_cell-2, 2},col+0x222222);
     }
 
-    // stats below preview
-    uint32_t stats_y = bg_y + bg_h + 14;
+    // right side: stats inside same bottom panel
+    uint32_t stats_x = box_x + box_w + 18;
+    // ensure stats fit inside board width
+    uint32_t stats_y = g_hud_y + 18;
+    // if board narrow, move stats to multi-column? keep simple
     {
-        char line[32];
-        char *pos=line;
-        pos=append_text(pos,"Score: "); pos=append_u32(pos,score);
-        pg_window_text(window,sx+14,stats_y,line,window->theme.text);
+        char line[32]; char *p=line;
+        p=append_text(p,"Score: "); p=append_u32(p,score);
+        pg_window_text(window,stats_x,stats_y,line,window->theme.text);
     }
     {
-        char line[32];
-        char *pos=line;
-        pos=append_text(pos,"Lines: "); pos=append_u32(pos,lines);
-        pg_window_text(window,sx+14,stats_y+18,line,window->theme.text);
+        char line[32]; char *p=line;
+        p=append_text(p,"Lines: "); p=append_u32(p,lines);
+        pg_window_text(window,stats_x,stats_y+18,line,window->theme.text);
     }
     {
-        char line[32];
-        char *pos=line;
-        pos=append_text(pos,"Level: "); pos=append_u32(pos,level);
-        pg_window_text(window,sx+14,stats_y+36,line,window->theme.text);
+        char line[32]; char *p=line;
+        p=append_text(p,"Level: "); p=append_u32(p,level);
+        pg_window_text(window,stats_x,stats_y+36,line,window->theme.text);
     }
 
-    // no hints at all - only score
-    (void)stats_y;
+    // no extra hints - only gameplay stats
+}
 
+static void draw_overlays(struct pg_window *window){
+    if(!paused && !game_over) return;
+    uint32_t board_w=BOARD_W*g_cell;
+    uint32_t board_h=BOARD_H*g_cell;
+    // centered overlay over board
+    uint32_t ow = 160;
+    uint32_t oh = 36;
+    uint32_t ox = g_board_x + (board_w - ow)/2;
+    uint32_t oy = g_board_y + (board_h - oh)/2;
     if(paused && !game_over){
-        uint32_t py = sy + panel_h + 12;
-        pg_window_rect(window,(struct pg_rect){sx,py,g_side_w,28},0xF9E2AF);
-        pg_window_rect(window,(struct pg_rect){sx,py,g_side_w,28},0xF9E2AF);
-        // centered text approx
-        uint32_t tx = sx + (g_side_w - 48)/2;
-        pg_window_text(window,tx,py+10,"PAUSED",0x1E1E2E);
+        pg_window_rect(window,(struct pg_rect){ox-2,oy-2,ow+4,oh+4},window->theme.border);
+        pg_window_rect(window,(struct pg_rect){ox,oy,ow,oh},0xF9E2AF);
+        pg_window_text(window,ox+56,oy+14,"PAUSED",0x1E1E2E);
     }
     if(game_over){
-        uint32_t py = sy + panel_h + 12;
-        // if not paused, py same; if paused overdraw?
-        if(paused) py+=36;
-        pg_window_rect(window,(struct pg_rect){sx,py,g_side_w,28},0xF38BA8);
-        uint32_t tx = sx + (g_side_w - 72)/2;
-        pg_window_text(window,tx,py+10,"GAME OVER",0x1E1E2E);
-        pg_window_text(window,sx+12,py+34,"Press R to restart",window->theme.danger);
+        pg_window_rect(window,(struct pg_rect){ox-2,oy-2,ow+4,oh+4},window->theme.border);
+        pg_window_rect(window,(struct pg_rect){ox,oy,ow,oh},0xF38BA8);
+        pg_window_text(window,ox+44,oy+14,"GAME OVER",0x1E1E2E);
+        // hint below overlay
+        uint32_t hx = g_board_x + (board_w - 144)/2;
+        pg_window_text(window,hx,oy+42,"Press R to restart",window->theme.text);
     }
 }
 
 static void redraw(struct pg_window *window){
     pg_window_begin(window);
+    // fill whole client with window bg for canvas effect
+    // board already draws its bg, hud draws its bg
     draw_board(window);
-    draw_side(window);
+    draw_hud(window);
+    draw_overlays(window);
     pg_window_end(window);
 }
 
@@ -520,38 +516,31 @@ static void handle_input(struct pg_window *window, struct pg_event *event){
 static int tetris_main(void){
     compute_layout();
     struct pg_window window;
-    // try to open with computed size, fallback to smaller if fails
     bool opened=false;
-    const uint32_t try_cells[5]={30,28,26,24,20};
-    // if computed already fails, iterate
-    for(int32_t attempt=0;attempt<6;attempt++){
+    const uint32_t try_cells[6]={32,30,28,26,24,20};
+    for(int32_t attempt=0;attempt<7;attempt++){
         if(pg_window_center(&window,"Tetris",g_win_w,g_win_h)){
             opened=true;
             break;
         }
-        // shrink
-        if(attempt<5){
+        if(attempt<6){
             uint32_t cell=try_cells[attempt];
-            // recompute for this cell if not already
             if(cell==g_cell) continue;
-            uint32_t side_w = (cell>=28?280:260);
-            uint32_t board_px_w=BOARD_W*cell;
-            uint32_t board_px_h=BOARD_H*cell;
-            uint32_t client_w=20 + board_px_w + 20 + side_w + 20;
-            uint32_t client_h=20 + board_px_h + 20;
-            g_cell=cell;
-            g_preview_cell=(cell>=30?20:(cell>=28?18:(cell>=26?16:(cell>=24?14:12))));
-            g_side_w=side_w;
-            g_board_x=20;
-            g_board_y=20;
-            g_side_x=g_board_x + board_px_w + 20;
-            g_side_y=20;
-            g_win_w=client_w+4;
-            g_win_h=client_h+30;
+            uint32_t prev = (cell>=30?18:(cell>=28?16:(cell>=24?14:12)));
+            uint32_t board_w=BOARD_W*cell;
+            uint32_t board_h=BOARD_H*cell;
+            uint32_t preview_box=4*prev+10;
+            uint32_t hud_h=preview_box+28;
+            uint32_t margin=12, gap=8;
+            uint32_t client_w=board_w+margin*2;
+            uint32_t client_h=board_h+hud_h+gap+margin*2;
+            g_cell=cell; g_preview_cell=prev; g_hud_h=hud_h;
+            g_board_x=margin; g_board_y=margin;
+            g_hud_x=margin; g_hud_y=margin+board_h+gap;
+            g_win_w=client_w+4; g_win_h=client_h+30;
         } else {
-            // ultimate fallback 520x560
-            g_cell=20; g_preview_cell=14; g_board_x=18; g_board_y=18; g_side_x=238; g_side_y=18; g_side_w=260; g_win_w=520; g_win_h=560;
-            if(pg_window_center(&window,"Tetris",g_win_w,g_win_h)){ opened=true; break;}
+            g_cell=20; g_preview_cell=14; g_board_x=12; g_board_y=12; g_hud_x=12; g_hud_y=12+400+8; g_hud_h=84; g_win_w=224+4; g_win_h=500+30;
+            if(pg_window_center(&window,"Tetris",g_win_w,g_win_h)){ opened=true; break; }
         }
     }
     if(!opened) return 1;
