@@ -21,7 +21,6 @@ static uint32_t random_state=0x1234ABCD;
 static uint32_t drop_interval_ms=600;
 static uint32_t drop_timer;
 
-// layout: huge window, board fills width, HUD at bottom inside window
 static uint32_t g_cell = 28;
 static uint32_t g_preview_cell = 16;
 static uint32_t g_board_x = 12;
@@ -106,10 +105,15 @@ static void compute_layout(void){
         uint32_t board_w = BOARD_W*cell;
         uint32_t board_h = BOARD_H*cell;
         uint32_t preview_box = 4*prev + 10;
-        uint32_t hud_h = preview_box + 28; // label 16 + padding 12
+        uint32_t hud_h = preview_box + 28;
         if(hud_h<84) hud_h=84;
-        uint32_t client_w = board_w + margin*2;
-        uint32_t client_h = board_h + hud_h + gap + margin*2;
+        uint32_t need_h = board_h + hud_h + gap + margin*2;
+        uint32_t need_w_board = board_w + margin*2 + 80;
+        uint32_t square = need_h;
+        if(square < need_w_board) square = need_w_board;
+        if(square < 520) square = 520;
+        uint32_t client_w = square;
+        uint32_t client_h = square;
         uint32_t frame_w = client_w + PG_WINDOW_BORDER*2;
         uint32_t frame_h = client_h + PG_TITLEBAR_HEIGHT + PG_WINDOW_BORDER*2;
         uint32_t max_w = have ? (disp_w>40?disp_w-40:disp_w) : 800;
@@ -118,30 +122,34 @@ static void compute_layout(void){
             g_cell=cell;
             g_preview_cell=prev;
             g_hud_h=hud_h;
-            g_board_x=margin;
-            g_board_y=margin;
-            g_hud_x=margin;
-            g_hud_y=margin + board_h + gap;
+            g_board_x = (client_w - board_w)/2;
+            g_board_y = margin + (client_h - need_h)/2;
+            if(g_board_y < margin) g_board_y = margin;
+            g_hud_x = g_board_x;
+            g_hud_y = g_board_y + board_h + gap;
             g_win_w=frame_w;
             g_win_h=frame_h;
             return;
         }
     }
-    // fallback smallest still huge but fits
     uint32_t cell=20;
     uint32_t prev=14;
     uint32_t board_w=BOARD_W*cell;
     uint32_t board_h=BOARD_H*cell;
     uint32_t preview_box=4*prev+10;
     uint32_t hud_h=preview_box+28;
-    uint32_t client_w=board_w+24;
-    uint32_t client_h=board_h+hud_h+8+24;
+    uint32_t square=520;
+    uint32_t client_w=square;
+    uint32_t client_h=square;
     g_cell=cell; g_preview_cell=prev; g_hud_h=hud_h;
-    g_board_x=12; g_board_y=12; g_hud_x=12; g_hud_y=12+board_h+8;
+    g_board_x=(client_w - board_w)/2;
+    g_board_y=12 + (client_h - (board_h+hud_h+8+24))/2;
+    if(g_board_y<12) g_board_y=12;
+    g_hud_x=g_board_x; g_hud_y=g_board_y+board_h+8;
     g_win_w=client_w+4; g_win_h=client_h+30;
     if(have){
-        if(g_win_w>disp_w) g_win_w=disp_w>20?disp_w-20:360;
-        if(g_win_h>disp_h) g_win_h=disp_h>20?disp_h-20:560;
+        if(g_win_w>disp_w) g_win_w=disp_w>20?disp_w-20:520;
+        if(g_win_h>disp_h) g_win_h=disp_h>20?disp_h-20:520;
     }
 }
 
@@ -296,7 +304,6 @@ static char *append_u32(char *dst,uint32_t v){
 static void draw_board(struct pg_window *window){
     uint32_t board_w = BOARD_W*g_cell;
     uint32_t board_h = BOARD_H*g_cell;
-    // board fills window width - huge canvas on full client
     pg_window_rect(window,(struct pg_rect){g_board_x-2,g_board_y-2,board_w+4,board_h+4},window->theme.border);
     pg_window_rect(window,(struct pg_rect){g_board_x,g_board_y,board_w,board_h},0x11111B);
     if(g_cell>=20){
@@ -332,19 +339,15 @@ static void draw_board(struct pg_window *window){
 
 static void draw_hud(struct pg_window *window){
     uint32_t board_w = BOARD_W*g_cell;
-    // bottom panel - occupies full width of canvas, at bottom
     pg_window_rect(window,(struct pg_rect){g_hud_x-1,g_hud_y-1,board_w+2,g_hud_h+2},window->theme.border);
     pg_window_rect(window,(struct pg_rect){g_hud_x,g_hud_y,board_w,g_hud_h},window->theme.titlebar);
 
-    // left side: NEXT preview at bottom
     uint32_t preview_box = 4*g_preview_cell + 10;
     uint32_t box_h = preview_box;
     uint32_t box_w = preview_box;
     uint32_t box_x = g_hud_x + 10;
     uint32_t box_y = g_hud_y + (g_hud_h - box_h)/2;
-    // label NEXT above box, centered
     pg_window_text(window, box_x + (box_w>32?(box_w-32)/2:0), g_hud_y + 6, "NEXT", window->theme.text);
-    // adjust box_y to be below label
     box_y = g_hud_y + 20;
     if(box_y + box_h > g_hud_y + g_hud_h - 6) box_y = g_hud_y + g_hud_h - box_h - 6;
 
@@ -377,11 +380,8 @@ static void draw_hud(struct pg_window *window){
         pg_window_rect(window,(struct pg_rect){inner_x + (uint32_t)px*g_preview_cell+1, inner_y + (uint32_t)py*g_preview_cell+1, g_preview_cell-2, 2},col+0x222222);
     }
 
-    // right side: stats inside same bottom panel
     uint32_t stats_x = box_x + box_w + 18;
-    // ensure stats fit inside board width
     uint32_t stats_y = g_hud_y + 18;
-    // if board narrow, move stats to multi-column? keep simple
     {
         char line[32]; char *p=line;
         p=append_text(p,"Score: "); p=append_u32(p,score);
@@ -398,14 +398,12 @@ static void draw_hud(struct pg_window *window){
         pg_window_text(window,stats_x,stats_y+36,line,window->theme.text);
     }
 
-    // no extra hints - only gameplay stats
 }
 
 static void draw_overlays(struct pg_window *window){
     if(!paused && !game_over) return;
     uint32_t board_w=BOARD_W*g_cell;
     uint32_t board_h=BOARD_H*g_cell;
-    // centered overlay over board
     uint32_t ow = 160;
     uint32_t oh = 36;
     uint32_t ox = g_board_x + (board_w - ow)/2;
@@ -419,7 +417,6 @@ static void draw_overlays(struct pg_window *window){
         pg_window_rect(window,(struct pg_rect){ox-2,oy-2,ow+4,oh+4},window->theme.border);
         pg_window_rect(window,(struct pg_rect){ox,oy,ow,oh},0xF38BA8);
         pg_window_text(window,ox+44,oy+14,"GAME OVER",0x1E1E2E);
-        // hint below overlay
         uint32_t hx = g_board_x + (board_w - 144)/2;
         pg_window_text(window,hx,oy+42,"Press R to restart",window->theme.text);
     }
@@ -427,8 +424,6 @@ static void draw_overlays(struct pg_window *window){
 
 static void redraw(struct pg_window *window){
     pg_window_begin(window);
-    // fill whole client with window bg for canvas effect
-    // board already draws its bg, hud draws its bg
     draw_board(window);
     draw_hud(window);
     draw_overlays(window);
@@ -532,14 +527,21 @@ static int tetris_main(void){
             uint32_t preview_box=4*prev+10;
             uint32_t hud_h=preview_box+28;
             uint32_t margin=12, gap=8;
-            uint32_t client_w=board_w+margin*2;
-            uint32_t client_h=board_h+hud_h+gap+margin*2;
+            uint32_t need_h = board_h + hud_h + gap + margin*2;
+            uint32_t need_w_board = board_w + margin*2 + 80;
+            uint32_t square = need_h;
+            if(square < need_w_board) square = need_w_board;
+            if(square < 520) square = 520;
+            uint32_t client_w = square;
+            uint32_t client_h = square;
             g_cell=cell; g_preview_cell=prev; g_hud_h=hud_h;
-            g_board_x=margin; g_board_y=margin;
-            g_hud_x=margin; g_hud_y=margin+board_h+gap;
+            g_board_x=(client_w - board_w)/2;
+            g_board_y=margin + (client_h - need_h)/2;
+            if(g_board_y < margin) g_board_y = margin;
+            g_hud_x=g_board_x; g_hud_y=g_board_y+board_h+gap;
             g_win_w=client_w+4; g_win_h=client_h+30;
         } else {
-            g_cell=20; g_preview_cell=14; g_board_x=12; g_board_y=12; g_hud_x=12; g_hud_y=12+400+8; g_hud_h=84; g_win_w=224+4; g_win_h=500+30;
+            g_cell=20; g_preview_cell=14; g_board_x=160; g_board_y=12; g_hud_x=g_board_x; g_hud_y=g_board_y+400+8; g_hud_h=84; g_win_w=524; g_win_h=550;
             if(pg_window_center(&window,"Tetris",g_win_w,g_win_h)){ opened=true; break; }
         }
     }
