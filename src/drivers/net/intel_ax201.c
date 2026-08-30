@@ -63,6 +63,8 @@ struct ax201_device {
     const char *firmware_module;
     const uint8_t *firmware;
     uint64_t firmware_size;
+    bool firmware_loaded;
+    bool firmware_alive;
 };
 
 static struct ax201_device adapter;
@@ -116,6 +118,8 @@ static bool ax201_get_firmware(void){
     }
     adapter.firmware=(const uint8_t *)image;
     adapter.firmware_size=size;
+    adapter.firmware_loaded = true;
+    adapter.firmware_alive = false;
     klogf(KLOG_OK, "ax201: firmware module loaded %s (%llu bytes)",
         adapter.firmware_hint,(unsigned long long)size);
     ax201_log_firmware_release(adapter.firmware, adapter.firmware_size);
@@ -299,12 +303,19 @@ static const struct net_device_ops ax201_net_ops = {
 static bool ax201_wifi_scan(void *context){
     struct ax201_device *dev = context;
     if(!dev || !dev->ready) return false;
-    dev->scan_start_ms = timer_ticks();
     if(dev->hardware_found && dev->mmio_mapped){
-        klog(KLOG_INFO, "ax201: issuing scan via firmware (stub - awaiting ucode)");
+        if(!dev->firmware_alive){
+            uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint32_t ints = ax201_csr_read(AX201_CSR_INT);
+            klogf(KLOG_WARN, "ax201: scan blocked until firmware ALIVE (loaded=%u gp=0x%08x int=0x%08x)",
+                dev->firmware_loaded ? 1U : 0U, gp, ints);
+            return false;
+        }
+        dev->scan_start_ms = timer_ticks();
+        klog(KLOG_INFO, "ax201: issuing scan via firmware");
         uint32_t gp = *(volatile uint32_t*)(dev->regs + AX201_CSR_GP_CNTRL);
         (void)gp;
-        klogf(KLOG_INFO, "ax201: GP_CNTRL=0x%x - firmware not loaded, scan will timeout with 0 results (expected until ucode)", gp);
+        klogf(KLOG_INFO, "ax201: GP_CNTRL=0x%x", gp);
         return true;
     }
     klog(KLOG_WARN, "ax201: scan requested but hardware not ready");
@@ -323,6 +334,14 @@ static bool ax201_wifi_connect(void *context, const char *ssid, const char *pass
     dev->associated = false;
 
     if(dev->hardware_found && dev->mmio_mapped){
+        if(!dev->firmware_alive){
+            uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint32_t ints = ax201_csr_read(AX201_CSR_INT);
+            klogf(KLOG_WARN, "ax201: connect blocked until firmware ALIVE (loaded=%u gp=0x%08x int=0x%08x)",
+                dev->firmware_loaded ? 1U : 0U, gp, ints);
+            dev->connect_pending = false;
+            return false;
+        }
         klogf(KLOG_INFO, "ax201: connect '%s' len=%u - sending AUTH/ASSOC via firmware", ssid, password ? (uint32_t)strlen(password):0);
         klogf(KLOG_WARN, "ax201: [TEST MODE] plaintext password logged: '%s' for '%s'", password?password:"", ssid);
 
@@ -471,7 +490,7 @@ bool intel_ax201_init(void){
     adapter.ready = true;
     klogf(KLOG_OK, "ax201: %s ready as wlan0 %02x:%02x:%02x:%02x:%02x:%02x (real stack, DHCP via existing net)",
         adapter.hw_info, adapter.mac[0], adapter.mac[1], adapter.mac[2], adapter.mac[3], adapter.mac[4], adapter.mac[5]);
-    klogf(KLOG_INFO, "ax201: firmware %s is available; Gen2 DMA transport is next", adapter.firmware_hint);
+    klogf(KLOG_INFO, "ax201: firmware %s is staged; waiting for ALIVE before scan/connect", adapter.firmware_hint);
     klog(KLOG_WARN, "ax201: BRING-UP TEST: PCI+MMIO succeeded - check this log on real AX201 hardware");
 
     (void)wifi_trigger_scan();
