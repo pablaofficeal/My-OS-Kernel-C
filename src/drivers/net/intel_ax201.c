@@ -658,32 +658,35 @@ bool intel_ax201_init(void){
 }
 
 /* -----------------------------------------------------------------------
- * Firmware upload – direct copy of Linux pcie/ctxt-info.c logic
+ * Firmware upload – direct copy of Linux pcie/ctxt-info.c
  * Uses struct iwl_context_info from iwl-context-info.h verbatim.
  * Uses pmm_allocate_contiguous/page instead of dma_alloc_coherent.
  * ----------------------------------------------------------------------- */
-static bool ax201_fw_upload(void){
-    if(!adapter.firmware_loaded || !adapter.firmware || !adapter.regs){
+static bool ax201_fw_upload(void)
+{
+    if (!adapter.firmware_loaded || !adapter.firmware || !adapter.regs) {
         klog(KLOG_ERROR, "ax201: fw_upload: no firmware data or no MMIO");
         return false;
     }
 
-    /* Linux: pmm_allocate_page -> dma_alloc_coherent for ctxt_info */
     uint64_t ctxt_phys = pmm_allocate_page();
-    if(!ctxt_phys){
-        klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate CTXT_INFO page (dma_alloc_coherent)");
+    if (!ctxt_phys) {
+        klog(KLOG_ERROR,
+            "ax201: fw_upload: failed to allocate CTXT_INFO page");
         return false;
     }
     adapter.ctxt_info_phys = ctxt_phys;
 
-    /* Firmware DMA – Linux iwl_pcie_init_fw_sec splits ucode into 32KB chunks
-     * and fills dram.umac_img/lmac_img. We copy Linux approach: contiguous
-     * buffer + 32KB per entry. */
-    uint64_t fw_pages = (adapter.firmware_size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
-    if(fw_pages == 0) fw_pages = 1;
+    uint64_t fw_pages =
+        (adapter.firmware_size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
+    if (fw_pages == 0) {
+        fw_pages = 1;
+    }
+
     uint64_t fw_phys = pmm_allocate_contiguous(fw_pages);
-    if(!fw_phys){
-        klogf(KLOG_ERROR, "ax201: fw_upload: contiguous %llu pages failed – need pmm defrag (Linux: dma_alloc_coherent failed)",
+    if (!fw_phys) {
+        klogf(KLOG_ERROR,
+            "ax201: fw_upload: contiguous %llu pages failed – need pmm defrag",
             (unsigned long long)fw_pages);
         return false;
     }
@@ -691,22 +694,24 @@ static bool ax201_fw_upload(void){
     adapter.fw_dma_pages = fw_pages;
 
     void *fw_virt = pmm_physical_to_virtual(fw_phys);
-    if(!fw_virt){
+    if (!fw_virt) {
         klog(KLOG_ERROR, "ax201: fw_upload: no virtual mapping for DMA buffer");
         return false;
     }
     memcpy(fw_virt, adapter.firmware, adapter.firmware_size);
-    uint64_t tail = fw_pages * PMM_PAGE_SIZE - adapter.firmware_size;
-    if(tail) memset((uint8_t*)fw_virt + adapter.firmware_size, 0, tail);
 
-    /* Allocate dummy RX/TX queues as in Linux pcie/trans.c
-     * Linux: trans_pcie->rxq->bd_dma / used_bd_dma / rb_stts_dma and txqs.cmd */
+    uint64_t tail = fw_pages * PMM_PAGE_SIZE - adapter.firmware_size;
+    if (tail) {
+        memset((uint8_t *)fw_virt + adapter.firmware_size, 0, tail);
+    }
+
     uint64_t rbd_free_phys = pmm_allocate_page();
     uint64_t rbd_used_phys = pmm_allocate_page();
     uint64_t rbd_status_phys = pmm_allocate_page();
     uint64_t cmdq_phys = pmm_allocate_page();
-    if(!rbd_free_phys || !rbd_used_phys || !rbd_status_phys || !cmdq_phys){
-        klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate RX/TX queues (Linux: rxq/txq dma)");
+    if (!rbd_free_phys || !rbd_used_phys || !rbd_status_phys || !cmdq_phys) {
+        klog(KLOG_ERROR,
+            "ax201: fw_upload: failed to allocate RX/TX queues");
         return false;
     }
     memset(pmm_physical_to_virtual(rbd_free_phys), 0, PMM_PAGE_SIZE);
@@ -714,69 +719,80 @@ static bool ax201_fw_upload(void){
     memset(pmm_physical_to_virtual(rbd_status_phys), 0, PMM_PAGE_SIZE);
     memset(pmm_physical_to_virtual(cmdq_phys), 0, PMM_PAGE_SIZE);
 
-    struct iwl_context_info *ctxt = pmm_physical_to_virtual(ctxt_phys);
-    if(!ctxt){
+    struct iwl_context_info *ctxt =
+        pmm_physical_to_virtual(ctxt_phys);
+    if (!ctxt) {
         klog(KLOG_ERROR, "ax201: fw_upload: no virtual mapping for CTXT_INFO");
         return false;
     }
     memset(ctxt, 0, sizeof(*ctxt));
 
-    /* Fill verbatim as in Linux pcie/ctxt-info.c:iwl_pcie_ctxt_info_init */
     uint32_t hw_rev = ax201_csr_read(AX201_CSR_HW_REV);
-    ctxt->version.mac_id = (uint16_t)hw_rev; /* cpu_to_le16 */
+    ctxt->version.mac_id = (uint16_t)hw_rev;
     ctxt->version.version = 0;
-    ctxt->version.size = sizeof(*ctxt) / 4; /* size in DWs – Linux: sizeof(*ctxt_info)/4 */
+    ctxt->version.size = sizeof(*ctxt) / 4;
 
-    /* control_flags: TFD_FORMAT_LONG | RB_CB_SIZE | RB_SIZE – Linux 6.6 */
     uint32_t rb_size = IWL_CTXT_INFO_RB_SIZE_4K;
-    uint32_t cb_size = 8; /* RX_QUEUE_CB_SIZE 512 -> 9, but 8 is enough for 4K */
+    uint32_t cb_size = 8;
     uint32_t control_flags = IWL_CTXT_INFO_TFD_FORMAT_LONG;
-    control_flags |= (cb_size << 4) & IWL_CTXT_INFO_RB_CB_SIZE; /* RB_CB_SIZE is 0x00f0 – 4 bits at 4 */
-    control_flags |= (rb_size << 9) & IWL_CTXT_INFO_RB_SIZE;   /* RB_SIZE is 0x1e00 – 4 bits at 9 */
+    control_flags |= (cb_size << 4) & IWL_CTXT_INFO_RB_CB_SIZE;
+    control_flags |= (rb_size << 9) & IWL_CTXT_INFO_RB_SIZE;
     ctxt->control.control_flags = control_flags;
-    /* reserved already 0 */
 
     ctxt->rbd_cfg.free_rbd_addr = rbd_free_phys;
     ctxt->rbd_cfg.used_rbd_addr = rbd_used_phys;
     ctxt->rbd_cfg.status_wr_ptr = rbd_status_phys;
 
     ctxt->hcmd_cfg.cmd_queue_addr = cmdq_phys;
-    ctxt->hcmd_cfg.cmd_queue_size = 8; /* TFD_QUEUE_CB_SIZE(IWL_CMD_QUEUE_SIZE) Linux = 8 */
+    ctxt->hcmd_cfg.cmd_queue_size = 8;
 
-    /* dram: split firmware into 32KB (FW_PAGING_SIZE) chunks as iwl_pcie_init_fw_sec */
-    const uint64_t chunk = 32*1024;
+    const uint64_t chunk = 32 * 1024;
     uint64_t off = 0;
     int idx = 0;
-    while(off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY){
-        uint64_t cur = adapter.firmware_size - off > chunk ? chunk : adapter.firmware_size - off;
+    while (off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY) {
+        uint64_t cur =
+            adapter.firmware_size - off > chunk ? chunk : adapter.firmware_size - off;
         (void)cur;
         ctxt->dram.umac_img[idx] = fw_phys + off;
-        /* In Linux lmac/virtual also filled for dual-cpu, but for AX201 umac is enough */
         off += chunk;
         idx++;
     }
-    klogf(KLOG_INFO, "ax201: Linux dram: %d entries, %llu bytes in %llu pages", idx, (unsigned long long)adapter.firmware_size, (unsigned long long)fw_pages);
 
-    __asm__ volatile("mfence":::"memory");
+    klogf(KLOG_INFO,
+        "ax201: Linux dram: %d entries, %llu bytes in %llu pages",
+        idx,
+        (unsigned long long)adapter.firmware_size,
+        (unsigned long long)fw_pages);
 
-    /* Linux: iwl_write64(trans, CSR_CTXT_INFO_BA, dma) ; iwl_write_prph(UREG_CPU_INIT_RUN,1) */
-    ax201_csr_write(AX201_CSR_CTXT_INFO_BA,    (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
-    ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI, (uint32_t)(ctxt_phys >> 32));
+    __asm__ volatile("mfence" ::: "memory");
+
+    ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
+        (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
+    ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
+        (uint32_t)(ctxt_phys >> 32));
+
     uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
     (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
-    /* UREG_CPU_INIT_RUN is part of MMIO map, but for AX201 KICK is enough */
+
     ax201_csr_write(AX201_CSR_CTXT_INFO_KICK, 1U);
 
     adapter.ctxt_info_written = true;
+
     klogf(KLOG_OK,
         "ax201: CTXT_INFO (Linux verbatim) kick phys=0x%llx fw_dma=0x%llx pages=%llu size=%llu idx=%d",
         (unsigned long long)ctxt_phys,
         (unsigned long long)fw_phys,
         (unsigned long long)fw_pages,
-        (unsigned long long)adapter.firmware_size, idx);
-    klogf(KLOG_DEBUG, "ax201: Linux ctxt size=%u version=%u mac_id=0x%x flags=0x%x",
-        ctxt->version.size, ctxt->version.version, ctxt->version.mac_id, control_flags);
+        (unsigned long long)adapter.firmware_size,
+        idx);
+    klogf(KLOG_DEBUG,
+        "ax201: Linux ctxt size=%u version=%u mac_id=0x%x flags=0x%x",
+        ctxt->version.size,
+        ctxt->version.version,
+        ctxt->version.mac_id,
+        control_flags);
+
     return true;
 }
 
