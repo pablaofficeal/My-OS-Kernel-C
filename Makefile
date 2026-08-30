@@ -102,4 +102,3 @@ help:
 	@echo "make libraries    собрать только библиотеки"
 	@echo "make programs     собрать библиотеки и ring-3 программы"
 	@echo "make iso          собрать итоговый ISO"
-	@echo "make clean        удалить каталог bin"
