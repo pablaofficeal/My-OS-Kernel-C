@@ -21,8 +21,10 @@ static const uint16_t ax201_device_ids[] = {
     0x06F0, 0xA0F0, 0x02F0, 0x34F0, 0x43F0, 0x4DF0, 0x51F0, 0x51F1, 0x54F0, 0x7A70, 0x7AF0, 0x2723, 0x2725, 0x7360,
 };
 
-#define AX201_FIRMWARE_HINT "iwlwifi-QuZ-a0-hr-b0-77.ucode"
-#define AX201_FIRMWARE_MODULE "/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode"
+#define AX201_FIRMWARE_QUZ_HINT "iwlwifi-QuZ-a0-hr-b0-77.ucode"
+#define AX201_FIRMWARE_QUZ_MODULE "/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode"
+#define AX201_FIRMWARE_SO_HINT "iwlwifi-so-a0-gf-a0-89.ucode"
+#define AX201_FIRMWARE_SO_MODULE "/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
 #define AX201_FIRMWARE_MAGIC 0x0A4C5749U
 
 #define AX201_CSR_HW_IF_CONFIG_REG 0x00
@@ -56,6 +58,8 @@ struct ax201_device {
     char connect_ssid[WIFI_SSID_MAX+1];
     char connect_password[WIFI_PASSWORD_MAX+1];
     bool connect_pending;
+    const char *firmware_hint;
+    const char *firmware_module;
     const uint8_t *firmware;
     uint64_t firmware_size;
 };
@@ -70,8 +74,12 @@ static uint32_t ax201_csr_read(uint32_t offset){
 static bool ax201_get_firmware(void){
     const void *image=0;
     uint64_t size=0;
-    if(!boot_get_module(AX201_FIRMWARE_MODULE,&image,&size) || !image || size<8){
-        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", AX201_FIRMWARE_MODULE);
+    if(!adapter.firmware_module || !adapter.firmware_hint){
+        klog(KLOG_ERROR, "ax201: firmware selector was not initialized");
+        return false;
+    }
+    if(!boot_get_module(adapter.firmware_module,&image,&size) || !image || size<8){
+        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", adapter.firmware_module);
         return false;
     }
     uint32_t magic=*(const uint32_t *)image;
@@ -82,8 +90,29 @@ static bool ax201_get_firmware(void){
     adapter.firmware=(const uint8_t *)image;
     adapter.firmware_size=size;
     klogf(KLOG_OK, "ax201: firmware module loaded %s (%llu bytes)",
-        AX201_FIRMWARE_HINT,(unsigned long long)size);
+        adapter.firmware_hint,(unsigned long long)size);
     return true;
+}
+
+static void ax201_select_firmware(void){
+    switch(adapter.pci.device_id){
+        case 0x51F0:
+        case 0x51F1:
+        case 0x54F0:
+        case 0x7A70:
+        case 0x7AF0:
+            adapter.firmware_hint = AX201_FIRMWARE_SO_HINT;
+            adapter.firmware_module = AX201_FIRMWARE_SO_MODULE;
+            klogf(KLOG_INFO, "ax201: PCI id 0x%04x uses Intel So/AX210-family firmware %s",
+                adapter.pci.device_id, adapter.firmware_hint);
+            return;
+        default:
+            adapter.firmware_hint = AX201_FIRMWARE_QUZ_HINT;
+            adapter.firmware_module = AX201_FIRMWARE_QUZ_MODULE;
+            klogf(KLOG_INFO, "ax201: PCI id 0x%04x uses QuZ/AX201-family firmware %s",
+                adapter.pci.device_id, adapter.firmware_hint);
+            return;
+    }
 }
 
 static bool is_ax201_device(uint16_t dev_id){
@@ -385,6 +414,7 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
     }
 
+    ax201_select_firmware();
     if(!ax201_get_firmware()){
         klog(KLOG_ERROR, "ax201: WLAN transport is unavailable without firmware");
         return false;
@@ -413,7 +443,7 @@ bool intel_ax201_init(void){
     adapter.ready = true;
     klogf(KLOG_OK, "ax201: %s ready as wlan0 %02x:%02x:%02x:%02x:%02x:%02x (real stack, DHCP via existing net)",
         adapter.hw_info, adapter.mac[0], adapter.mac[1], adapter.mac[2], adapter.mac[3], adapter.mac[4], adapter.mac[5]);
-    klogf(KLOG_INFO, "ax201: firmware %s is available; Gen2 DMA transport is next", AX201_FIRMWARE_HINT);
+    klogf(KLOG_INFO, "ax201: firmware %s is available; Gen2 DMA transport is next", adapter.firmware_hint);
     klog(KLOG_WARN, "ax201: BRING-UP TEST: PCI+MMIO succeeded - check this log on real AX201 hardware");
 
     (void)wifi_trigger_scan();

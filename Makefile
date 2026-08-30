@@ -6,8 +6,10 @@ LIB_DIR := $(BIN_DIR)/lib
 ISO_ROOT := $(BIN_DIR)/iso_root
 ISO_IMAGE := $(BIN_DIR)/purec_limine.iso
 LIMINE_CONFIG := $(ROOT_DIR)/src/boot/limine.conf
-AX201_FIRMWARE_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-QuZ-a0-hr-b0-77.ucode.zst
-AX201_FIRMWARE := $(ISO_ROOT)/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode
+AX201_FW_QUZ_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-QuZ-a0-hr-b0-77.ucode.zst
+AX201_FW_QUZ := $(ISO_ROOT)/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode
+AX201_FW_SO_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode.zst
+AX201_FW_SO := $(ISO_ROOT)/firmware/iwlwifi-so-a0-gf-a0-89.ucode
 
 export ROOT_DIR BIN_DIR
 
@@ -40,15 +42,20 @@ iso: kernel programs
 		echo "Limine не найден в /usr или /tmp/limine-pkg" >&2; \
 		exit 1; \
 	fi; \
-	if [ ! -r "$(AX201_FIRMWARE_SOURCE)" ]; then \
-		echo "AX201 firmware is missing: $(AX201_FIRMWARE_SOURCE)" >&2; \
+	if [ ! -r "$(AX201_FW_QUZ_SOURCE)" ]; then \
+		echo "AX201 firmware is missing: $(AX201_FW_QUZ_SOURCE)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -r "$(AX201_FW_SO_SOURCE)" ]; then \
+		echo "AX201/So firmware is missing: $(AX201_FW_SO_SOURCE)" >&2; \
 		exit 1; \
 	fi; \
 	rm -rf "$(ISO_ROOT)"; \
 	mkdir -p "$(ISO_ROOT)/boot/limine" "$(ISO_ROOT)/EFI/BOOT" \
 		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include" \
 		"$(ISO_ROOT)/firmware"; \
-	zstd -q -d -c "$(AX201_FIRMWARE_SOURCE)" > "$(AX201_FIRMWARE)"; \
+	zstd -q -d -c "$(AX201_FW_QUZ_SOURCE)" > "$(AX201_FW_QUZ)"; \
+	zstd -q -d -c "$(AX201_FW_SO_SOURCE)" > "$(AX201_FW_SO)"; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
