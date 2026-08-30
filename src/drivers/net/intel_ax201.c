@@ -234,8 +234,7 @@ static bool ax201_get_firmware(void){
 
 static bool ax201_is_so_family(uint16_t dev_id){
     switch(dev_id){
-        case 0x51F0:
-        case 0x51F1:
+        /* CNVi AX201/AX203 at 00:14.3 use Qu/QuZ HR firmware + ctxt v1 */
         case 0x54F0:
         case 0x7A70:
         case 0x7AF0:
@@ -246,7 +245,14 @@ static bool ax201_is_so_family(uint16_t dev_id){
 }
 
 static void ax201_select_firmware(void){
-    adapter.is_so_family = ax201_is_so_family(adapter.pci.device_id);
+    adapter.is_so_family=ax201_is_so_family(adapter.pci.device_id);
+    if(adapter.mmio_mapped){
+        uint32_t hw_rev=ax201_csr_read(AX201_CSR_HW_REV);
+        uint32_t hw_type=(hw_rev>>8) & 0xFFFU;
+        klogf(KLOG_INFO, "ax201: HW_REV=0x%08x type=0x%03x", hw_rev, hw_type);
+        if(adapter.pci.device_id==0x51F0 || adapter.pci.device_id==0x51F1)
+            adapter.is_so_family=false;
+    }
     if(adapter.is_so_family){
         adapter.firmware_hint = AX201_FIRMWARE_SO_HINT;
         adapter.firmware_module = AX201_FIRMWARE_SO_MODULE;
@@ -426,16 +432,18 @@ static bool ax201_wifi_scan(void *context){
     uint32_t ints = ax201_csr_read(AX201_CSR_INT);
 
     if(!dev->firmware_alive){
-        /* Linux-derived: cannot scan without ALIVE – return error
-         * so UI shows "Failed" instead of fake networks. See dmesg for
-         * cause (RFKILL/firmware/DMA). */
-        klogf(KLOG_ERROR,
-            "ax201: firmware not alive – scan rejected "
-            "(gp=0x%08x int=0x%08x loaded=%u ctxt=%u is_so=%u) – need ALIVE",
-            gp, ints,
-            dev->firmware_loaded    ? 1U : 0U,
-            dev->ctxt_info_written  ? 1U : 0U,
-            dev->is_so_family ? 1U : 0U);
+        static uint64_t last_log_ms;
+        uint64_t now = timer_ticks();
+        if(now - last_log_ms >= 5000ULL){
+            last_log_ms = now;
+            klogf(KLOG_ERROR,
+                "ax201: firmware not alive – scan rejected "
+                "(gp=0x%08x int=0x%08x loaded=%u ctxt=%u is_so=%u) – need ALIVE",
+                gp, ints,
+                dev->firmware_loaded    ? 1U : 0U,
+                dev->ctxt_info_written  ? 1U : 0U,
+                dev->is_so_family ? 1U : 0U);
+        }
         return false;
     }
 
@@ -883,6 +891,17 @@ static bool ax201_fw_upload(void)
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
             (uint32_t)(ctxt_phys >> 32));
 
+        if(iml_phys && iml_len){
+            ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
+                (uint32_t)(iml_phys & 0xFFFFFFFFU));
+            ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
+                (uint32_t)(iml_phys >> 32));
+            ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
+        }
+
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
+            AX201_CSR_AUTO_FUNC_BOOT_ENA);
+
         uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
         gp &= ~AX201_GP_CNTRL_INIT_DONE;
         ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
@@ -894,7 +913,7 @@ static bool ax201_fw_upload(void)
         adapter.ctxt_info_written = true;
 
         klogf(KLOG_OK,
-            "ax201: So v2 CTXT_INFO ready phys=0x%llx (INIT_DONE toggled, no KICK) iml %u",
+            "ax201: So v2 CTXT_INFO ready phys=0x%llx (BOOT_CTRL+INIT_DONE, Linux v2_kick) iml=%u",
             (unsigned long long)ctxt_phys, iml_len);
 
         return true;

@@ -16,6 +16,9 @@ struct asus_bios_args {
     uint32_t arg1;
 } __attribute__((packed));
 
+#define ASUS_EC_WIFI_OFFSET 0xD9U
+#define ASUS_EC_WIFI_ON     0x01U
+
 static bool asus_call_devs_direct(const char *parent, uint32_t dev_id, uint32_t value,
                                   uint32_t *retval){
     struct acpi_aml_method method;
@@ -52,7 +55,7 @@ static bool asus_ec_write_verify(uint8_t offset, uint8_t value){
         return false;
     klogf(KLOG_INFO, "acpi-asus: EC[0x%02x] write %u: %u -> %u",
           offset, value, before, after);
-    return after==value;
+    return after==value && value==ASUS_EC_WIFI_ON;
 }
 
 static bool asus_ec_enable_wifi(void){

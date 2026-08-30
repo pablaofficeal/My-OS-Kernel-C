@@ -94,6 +94,7 @@ bool wifi_trigger_scan(void){
     if(mgr.active->ops && mgr.active->ops->scan){
         bool ok = mgr.active->ops->scan(mgr.active->context);
         if(!ok){
+            mgr.last_scan_ms = timer_ticks();
             klog(KLOG_WARN, "wifi: driver scan failed to start");
             return false;
         }
