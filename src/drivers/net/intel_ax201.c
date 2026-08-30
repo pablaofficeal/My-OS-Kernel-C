@@ -794,14 +794,17 @@ static bool ax201_fw_upload(void)
             (uint32_t)(ctxt_phys >> 32));
 
         uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
-        ax201_csr_write(AX201_CSR_GP_CNTRL,
-            gp | AX201_GP_CNTRL_INIT_DONE);
+        gp &= ~AX201_GP_CNTRL_INIT_DONE;
+        ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
+        timer_sleep(1);
+        gp |= AX201_GP_CNTRL_INIT_DONE;
+        ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
         (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
 
         adapter.ctxt_info_written = true;
 
         klogf(KLOG_OK,
-            "ax201: So v2 CTXT_INFO ready phys=0x%llx (no KICK, INIT_DONE set)",
+            "ax201: So v2 CTXT_INFO ready phys=0x%llx (INIT_DONE toggled, no KICK)",
             (unsigned long long)ctxt_phys);
 
         return true;
