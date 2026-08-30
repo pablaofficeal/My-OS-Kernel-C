@@ -120,8 +120,18 @@ static bool module_path_matches(const char *actual, const char *expected){
     if(strcmp(actual,expected)==0) return true;
     size_t actual_length=strlen(actual);
     size_t expected_length=strlen(expected);
-    return actual_length>=expected_length
-        && strcmp(actual+actual_length-expected_length,expected)==0;
+    if(actual_length>=expected_length
+       && strcmp(actual+actual_length-expected_length,expected)==0) return true;
+
+    const char *actual_name=actual;
+    const char *expected_name=expected;
+    for(const char *p=actual;*p;p++){
+        if(*p=='/' || *p=='\\') actual_name=p+1;
+    }
+    for(const char *p=expected;*p;p++){
+        if(*p=='/' || *p=='\\') expected_name=p+1;
+    }
+    return strcmp(actual_name,expected_name)==0;
 }
 
 bool boot_get_module(const char *path, const void **address, uint64_t *size){
