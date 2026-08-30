@@ -11,6 +11,7 @@
 #include "../../net/link/ethernet.h"
 #include "../../boot/install_source.h"
 #include "iwl-context-info.h"
+#include "iwl-context-info-v2.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -718,6 +719,75 @@ static bool ax201_fw_upload(void)
     memset(pmm_physical_to_virtual(rbd_used_phys), 0, PMM_PAGE_SIZE);
     memset(pmm_physical_to_virtual(rbd_status_phys), 0, PMM_PAGE_SIZE);
     memset(pmm_physical_to_virtual(cmdq_phys), 0, PMM_PAGE_SIZE);
+
+    if (adapter.is_so_family) {
+        uint64_t prph_scratch_phys = pmm_allocate_page();
+        uint64_t prph_info_phys = pmm_allocate_page();
+        if (!prph_scratch_phys || !prph_info_phys) {
+            klog(KLOG_ERROR,
+                "ax201: fw_upload: failed to allocate prph scratch/info for So");
+            return false;
+        }
+        memset(pmm_physical_to_virtual(prph_scratch_phys), 0, PMM_PAGE_SIZE);
+        memset(pmm_physical_to_virtual(prph_info_phys), 0, PMM_PAGE_SIZE);
+
+        struct iwl_prph_scratch *scratch =
+            pmm_physical_to_virtual(prph_scratch_phys);
+        scratch->ctrl_cfg.version.mac_id =
+            (uint16_t)ax201_csr_read(AX201_CSR_HW_REV);
+        scratch->ctrl_cfg.version.version = 0;
+        scratch->ctrl_cfg.version.size = sizeof(*scratch) / 4;
+        scratch->ctrl_cfg.control_flags =
+            IWL_PRPH_SCRATCH_MTR_MODE | IWL_PRPH_MTR_FORMAT_256B;
+
+        struct iwl_context_info_v2 *ctxt_v2 =
+            pmm_physical_to_virtual(ctxt_phys);
+        if (!ctxt_v2) {
+            klog(KLOG_ERROR,
+                "ax201: fw_upload: no virtual mapping for CTXT_INFO v2");
+            return false;
+        }
+        memset(ctxt_v2, 0, sizeof(*ctxt_v2));
+        ctxt_v2->version = 0;
+        ctxt_v2->size = sizeof(*ctxt_v2) / 4;
+        ctxt_v2->prph_info_base_addr = prph_info_phys;
+        ctxt_v2->prph_scratch_base_addr = prph_scratch_phys;
+        ctxt_v2->prph_scratch_size = sizeof(*scratch);
+        ctxt_v2->cr_head_idx_arr_base_addr = rbd_status_phys;
+        ctxt_v2->tr_tail_idx_arr_base_addr = prph_info_phys + 2048;
+        ctxt_v2->cr_tail_idx_arr_base_addr = prph_info_phys + 3072;
+        ctxt_v2->mtr_base_addr = cmdq_phys;
+        ctxt_v2->mcr_base_addr = rbd_used_phys;
+        ctxt_v2->mtr_size = 8;
+        ctxt_v2->mcr_size = 8;
+
+        klogf(KLOG_INFO,
+            "ax201: So v2 context: scratch 0x%llx info 0x%llx",
+            (unsigned long long)prph_scratch_phys,
+            (unsigned long long)prph_info_phys);
+
+        __asm__ volatile("mfence" ::: "memory");
+
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
+            (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
+            (uint32_t)(ctxt_phys >> 32));
+        ax201_csr_write(0x0F0, 0x02);
+
+        uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+        ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
+        (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
+
+        ax201_csr_write(AX201_CSR_CTXT_INFO_KICK, 1U);
+
+        adapter.ctxt_info_written = true;
+
+        klogf(KLOG_OK,
+            "ax201: So v2 CTXT_INFO kick phys=0x%llx",
+            (unsigned long long)ctxt_phys);
+
+        return true;
+    }
 
     struct iwl_context_info *ctxt =
         pmm_physical_to_virtual(ctxt_phys);
