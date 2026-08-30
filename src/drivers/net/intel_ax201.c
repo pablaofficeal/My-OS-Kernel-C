@@ -549,20 +549,24 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
     }
 
+    /* Read MAC first, while NIC is still in initial stable state.
+     * After the CTXT_INFO kick the NIC enters ROM boot mode and
+     * STRAP/OTP registers can return garbage until firmware is up. */
+    if(!ax201_read_mac(adapter.mac)){
+        klog(KLOG_ERROR, "ax201: MAC generation failed");
+        return false;
+    }
+
     ax201_select_firmware();
     if(!ax201_get_firmware()){
         klog(KLOG_WARN,
             "ax201: firmware not available from bootloader; "
             "wlan0 registered in stub mode (scan returns 0 results)");
-        /* FIX: Do not bail out – register the device anyway so the UI
-         * shows the interface and a clean '0 networks' result rather
-         * than no device at all. */
     } else {
-        /* --- Stage 2: Upload firmware via CTXT_INFO v2 --- */
+        /* Upload firmware via CTXT_INFO v2, then wait for ALIVE */
         if(!ax201_fw_upload()){
             klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing in stub mode");
         } else {
-            /* Wait synchronously for ALIVE (NIC typically responds in < 500 ms) */
             if(!ax201_wait_alive_poll()){
                 klog(KLOG_WARN,
                     "ax201: ALIVE not received during init; "
@@ -571,10 +575,6 @@ bool intel_ax201_init(void){
         }
     }
 
-    if(!ax201_read_mac(adapter.mac)){
-        klog(KLOG_ERROR, "ax201: MAC generation failed");
-        return false;
-    }
     memcpy(adapter.net.mac, adapter.mac, 6);
     strncpy(adapter.net.name, "wlan0", sizeof(adapter.net.name)-1);
     adapter.net.mtu = NET_ETHERNET_MTU;
