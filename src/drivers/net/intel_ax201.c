@@ -714,6 +714,9 @@ static bool ax201_fw_upload(void)
         fw_pages = 1;
     }
 
+    uint64_t iml_phys = 0;
+    uint32_t iml_len = 0;
+
     uint64_t fw_phys = pmm_allocate_contiguous(fw_pages);
     if (!fw_phys) {
         klogf(KLOG_ERROR,
@@ -787,10 +790,9 @@ static bool ax201_fw_upload(void)
             "ax201: So scratch dram: %d entries for %llu bytes",
             idx, (unsigned long long)adapter.firmware_size);
 
-        uint32_t iml_len = 0;
+        iml_len = 0;
         const uint8_t *iml_data =
             ax201_find_tlv(adapter.firmware, adapter.firmware_size, 52, &iml_len);
-        uint64_t iml_phys = 0;
         if (iml_data && iml_len) {
             uint64_t iml_pages = (iml_len + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
             iml_phys = pmm_allocate_contiguous(iml_pages);
