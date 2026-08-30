@@ -78,6 +78,11 @@
 #define SYS_PROCESS_LIST 257
 #define SYS_TRY_GET_SPECIAL 258
 #define SYS_NET_PING 259
+#define SYS_WIFI_SCAN 260
+#define SYS_WIFI_LIST 261
+#define SYS_WIFI_CONNECT 262
+#define SYS_WIFI_DISCONNECT 263
+#define SYS_WIFI_STATUS 264
 
 #define NETWORK_PING_TARGET_CAPACITY 128
 
@@ -272,6 +277,53 @@ struct audio_status {
     uint32_t hda_codec;
     uint32_t hda_dac_node;
     uint32_t hda_pin_node;
+};
+
+#define WIFI_SSID_CAPACITY 33
+#define WIFI_PASSWORD_CAPACITY 64
+#define WIFI_BSSID_CAPACITY 6
+#define WIFI_SCAN_MAX 32
+#define WIFI_SECURITY_OPEN 0
+#define WIFI_SECURITY_WEP 1
+#define WIFI_SECURITY_WPA2 2
+#define WIFI_SECURITY_WPA3 3
+#define WIFI_SECURITY_WPA2_WPA3 4
+#define WIFI_STATE_DISCONNECTED 0
+#define WIFI_STATE_SCANNING 1
+#define WIFI_STATE_CONNECTING 2
+#define WIFI_STATE_CONNECTED 3
+#define WIFI_STATE_FAILED 4
+
+struct wifi_network_info {
+    char ssid[WIFI_SSID_CAPACITY];
+    uint8_t bssid[WIFI_BSSID_CAPACITY];
+    int8_t rssi;
+    uint8_t channel;
+    uint8_t security;
+    uint8_t reserved;
+};
+
+struct wifi_status_info {
+    uint32_t state;
+    uint32_t connected;
+    char ssid[WIFI_SSID_CAPACITY];
+    uint8_t bssid[WIFI_BSSID_CAPACITY];
+    int8_t rssi;
+    uint8_t channel;
+    uint8_t security;
+    uint8_t reserved;
+    int32_t last_error;
+    uint32_t ip_address;
+    uint8_t mac[WIFI_BSSID_CAPACITY];
+    char interface_name[16];
+    uint32_t scan_count;
+    uint64_t last_scan_ms;
+    uint32_t has_device;
+};
+
+struct wifi_connect_request {
+    char ssid[WIFI_SSID_CAPACITY];
+    char password[WIFI_PASSWORD_CAPACITY];
 };
 
 struct syscall_regs {

@@ -364,6 +364,21 @@ void pc_audio_set_muted(bool m){ (void)pc_syscall(SYS_AUDIO_SET_MUTED,m?1:0,0,0)
 void pc_audio_adjust_volume(int32_t d){ (void)pc_syscall(SYS_AUDIO_ADJUST_VOLUME,(uint64_t)(int64_t)d,0,0); }
 bool pc_audio_select_output(uint32_t i){ return pc_syscall(SYS_AUDIO_SELECT_OUTPUT_DEVICE,i,0,0)==0; }
 void pc_audio_play_test(void){ (void)pc_syscall(SYS_AUDIO_PLAY_TEST_SOUND,0,0,0); }
+int32_t pc_wifi_scan(void){ return (int32_t)pc_syscall(SYS_WIFI_SCAN,0,0,0); }
+int32_t pc_wifi_list(struct wifi_network_info *networks, uint32_t capacity){
+    return (int32_t)pc_syscall(SYS_WIFI_LIST,(uint64_t)(uintptr_t)networks,capacity,0);
+}
+int32_t pc_wifi_connect(const char *ssid, const char *password){
+    if(!ssid) return -1;
+    struct wifi_connect_request req={0};
+    pc_copy(req.ssid, ssid, sizeof(req.ssid));
+    if(password) pc_copy(req.password, password, sizeof(req.password));
+    return (int32_t)pc_syscall(SYS_WIFI_CONNECT,(uint64_t)(uintptr_t)&req,0,0);
+}
+int32_t pc_wifi_disconnect(void){ return (int32_t)pc_syscall(SYS_WIFI_DISCONNECT,0,0,0); }
+bool pc_wifi_status(struct wifi_status_info *status){
+    return status && pc_syscall(SYS_WIFI_STATUS,(uint64_t)(uintptr_t)status,0,0)>=0;
+}
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

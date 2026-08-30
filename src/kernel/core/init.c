@@ -5,6 +5,8 @@
 #include "../process/scheduler.h"
 #include "../process/process.h"
 #include "../../drivers/serial/serial.h"
+#include "../../drivers/mouse/ps2_mouse.h"
+#include "../../drivers/mouse/usb_mouse.h"
 #include "../../userspace/userspace.h"
 #include "../../net/core/net_service.h"
 
@@ -51,4 +53,10 @@ void init_process_start(uint32_t detected_cpu_count){
     klog(KLOG_OK, "sched: init threads created, starting scheduler");
     serial_write_string("[SCHED] start\n");
     scheduler_start();
+
+    for(;;){
+        ps2_mouse_poll();
+        usb_mouse_poll();
+        scheduler_yield();
+    }
 }
