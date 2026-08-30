@@ -65,9 +65,10 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_INT_ALIVE             0x00010000U  /* firmware ALIVE notification */
 #define AX201_INT_SW_ERR            0x04000000U  /* firmware SW error           */
 
-/* ALIVE polling parameters */
+#define AX201_FW_LOAD_INT_MASK      (AX201_INT_ALIVE | AX201_INT_SW_ERR)
+#define AX201_CSR_RESET_SW          0x00000001U
 #define AX201_ALIVE_POLL_MS         5U
-#define AX201_ALIVE_TIMEOUT_MS      1500U
+#define AX201_ALIVE_TIMEOUT_MS      5000U
 
 /* Soft-scan timeout used when firmware is not alive */
 #define AX201_SOFTSCAN_TIMEOUT_MS   1200U
@@ -108,7 +109,8 @@ static bool initialized;
 static bool ax201_fw_upload(void);
 static bool ax201_wait_alive_poll(void);
 static void ax201_ensure_pci_power(void);
-static bool ax201_request_radio_on(void);
+static bool ax201_prepare_nic_for_fwload(void);
+static void ax201_enable_fw_load_interrupts(void);
 
 static uint32_t ax201_csr_read(uint32_t offset){
     return *(volatile uint32_t *)(adapter.regs + offset);
@@ -118,28 +120,65 @@ static void ax201_csr_write(uint32_t offset, uint32_t value){
 }
 
 static bool ax201_request_radio_on(void){
+    return ax201_prepare_nic_for_fwload();
+}
+
+static bool ax201_nic_reset(void){
     if(!adapter.regs)
         return false;
 
+    ax201_csr_write(AX201_CSR_RESET, AX201_CSR_RESET_SW);
+    for(uint32_t i=0;i<20000U;i++){
+        if((ax201_csr_read(AX201_CSR_RESET) & AX201_CSR_RESET_SW)==0)
+            return true;
+        timer_sleep(1);
+    }
+    klog(KLOG_WARN, "ax201: NIC SW reset timed out");
+    return false;
+}
+
+static bool ax201_prepare_nic_for_fwload(void){
+    if(!adapter.regs)
+        return false;
+
+    (void)ax201_nic_reset();
+
     uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
-    klogf(KLOG_INFO, "ax201: GP_CNTRL before radio on = 0x%08x", gp);
+    klogf(KLOG_INFO, "ax201: GP_CNTRL after reset = 0x%08x", gp);
 
     gp|=AX201_GP_CNTRL_MAC_ACCESS_REQ | AX201_GP_CNTRL_MAC_CLOCK_READY
         | AX201_GP_CNTRL_HW_RADIO_ON;
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
 
-    for(uint32_t i=0;i<2000U;i++){
+    bool clock_ready=false;
+    bool sav=false;
+    for(uint32_t i=0;i<5000U;i++){
         gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
-        if(gp & AX201_GP_CNTRL_MAC_ACCESS_SAV)
+        if(gp & AX201_GP_CNTRL_MAC_CLOCK_READY)
+            clock_ready=true;
+        if(gp & AX201_GP_CNTRL_MAC_ACCESS_SAV){
+            sav=true;
+            break;
+        }
+        if(clock_ready && i>250U)
             break;
         timer_sleep(1);
     }
 
     gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
     bool radio_on=(gp & AX201_GP_CNTRL_HW_RADIO_ON)!=0;
-    klogf(KLOG_INFO, "ax201: GP_CNTRL after radio on = 0x%08x (radio_on=%u sav=%u)",
-          gp, radio_on ? 1U : 0U, (gp & AX201_GP_CNTRL_MAC_ACCESS_SAV) ? 1U : 0U);
+    klogf(KLOG_INFO,
+        "ax201: GP_CNTRL ready = 0x%08x (clock=%u sav=%u radio=%u)",
+        gp,
+        (gp & AX201_GP_CNTRL_MAC_CLOCK_READY) ? 1U : 0U,
+        sav ? 1U : 0U,
+        radio_on ? 1U : 0U);
     return radio_on;
+}
+
+static void ax201_enable_fw_load_interrupts(void){
+    ax201_csr_write(AX201_CSR_INT, 0xFFFFFFFFU);
+    ax201_csr_write(AX201_CSR_INT_MASK, AX201_FW_LOAD_INT_MASK);
 }
 
 static uint32_t ax201_read_le32(const uint8_t *p){
@@ -177,6 +216,7 @@ static void ax201_log_firmware_release(const uint8_t *image, uint64_t size){
     }
 }
 
+#define AX201_TLV_PAGING        7U
 #define AX201_TLV_UMAC_SEC_INIT 17U
 #define AX201_TLV_UMAC_SEC_INST 18U
 #define AX201_TLV_UMAC_SEC_DATA 19U
@@ -199,6 +239,8 @@ static int ax201_collect_fw_sections(
     int *lmac_n,
     struct ax201_fw_section *umac,
     int *umac_n,
+    struct ax201_fw_section *paging,
+    int *paging_n,
     const uint8_t **pnvm,
     uint32_t *pnvm_len,
     const uint8_t **iml,
@@ -206,6 +248,7 @@ static int ax201_collect_fw_sections(
 {
     *lmac_n=0;
     *umac_n=0;
+    if(paging_n) *paging_n=0;
     if(pnvm) *pnvm=NULL;
     if(pnvm_len) *pnvm_len=0;
     if(iml) *iml=NULL;
@@ -240,6 +283,13 @@ static int ax201_collect_fw_sections(
                 (*umac_n)++;
             }
             break;
+        case AX201_TLV_PAGING:
+            if(paging && paging_n && *paging_n<AX201_MAX_FW_SECS && len>0){
+                paging[*paging_n].data=payload;
+                paging[*paging_n].len=len;
+                (*paging_n)++;
+            }
+            break;
         case AX201_TLV_PNVM:
             if(pnvm) *pnvm=payload;
             if(pnvm_len) *pnvm_len=len;
@@ -255,7 +305,7 @@ static int ax201_collect_fw_sections(
         uint32_t aligned=(len+3U)&~3U;
         pos+=8+aligned;
     }
-    return *lmac_n+*umac_n;
+    return *lmac_n+*umac_n+(paging_n ? *paging_n : 0);
 }
 
 static uint64_t ax201_alloc_dma_copy(const uint8_t *src, uint32_t len, const char *what){
@@ -279,26 +329,45 @@ static uint64_t ax201_alloc_dma_copy(const uint8_t *src, uint32_t len, const cha
     return phys;
 }
 
-static int ax201_fill_dram_sections(
+static int ax201_stage_dram_sections(
     struct iwl_context_info_dram *dram,
-    uint64_t fw_phys,
-    const uint8_t *fw_base,
     const struct ax201_fw_section *lmac,
     int lmac_n,
     const struct ax201_fw_section *umac,
-    int umac_n)
+    int umac_n,
+    const struct ax201_fw_section *paging,
+    int paging_n)
 {
-    int idx=0;
+    int staged=0;
+
     for(int i=0;i<lmac_n;i++){
-        dram->lmac_img[idx]=fw_phys+(uint64_t)(lmac[i].data-fw_base);
-        idx++;
+        uint64_t phys=ax201_alloc_dma_copy(lmac[i].data, lmac[i].len, "LMAC");
+        if(!phys)
+            return -1;
+        dram->lmac_img[i]=phys;
+        klogf(KLOG_DEBUG, "ax201: LMAC[%d] len=%u phys=0x%llx",
+            i, lmac[i].len, (unsigned long long)phys);
+        staged++;
     }
-    idx=0;
     for(int i=0;i<umac_n;i++){
-        dram->umac_img[idx]=fw_phys+(uint64_t)(umac[i].data-fw_base);
-        idx++;
+        uint64_t phys=ax201_alloc_dma_copy(umac[i].data, umac[i].len, "UMAC");
+        if(!phys)
+            return -1;
+        dram->umac_img[i]=phys;
+        klogf(KLOG_DEBUG, "ax201: UMAC[%d] len=%u phys=0x%llx",
+            i, umac[i].len, (unsigned long long)phys);
+        staged++;
     }
-    return lmac_n+umac_n;
+    for(int i=0;i<paging_n;i++){
+        uint64_t phys=ax201_alloc_dma_copy(paging[i].data, paging[i].len, "paging");
+        if(!phys)
+            return -1;
+        dram->virtual_img[i]=phys;
+        klogf(KLOG_DEBUG, "ax201: paging[%d] len=%u phys=0x%llx",
+            i, paging[i].len, (unsigned long long)phys);
+        staged++;
+    }
+    return staged;
 }
 
 static const uint8_t *ax201_find_tlv(
@@ -871,6 +940,9 @@ static bool ax201_fw_upload(void)
         return false;
     }
 
+    if(!ax201_prepare_nic_for_fwload())
+        klog(KLOG_WARN, "ax201: NIC not fully ready before firmware upload");
+
     uint64_t ctxt_phys = pmm_allocate_page();
     if (!ctxt_phys) {
         klog(KLOG_ERROR,
@@ -879,36 +951,9 @@ static bool ax201_fw_upload(void)
     }
     adapter.ctxt_info_phys = ctxt_phys;
 
-    uint64_t fw_pages =
-        (adapter.firmware_size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
-    if (fw_pages == 0) {
-        fw_pages = 1;
-    }
-
     uint64_t iml_phys = 0;
     uint32_t iml_len = 0;
-
-    uint64_t fw_phys = pmm_allocate_contiguous(fw_pages);
-    if (!fw_phys) {
-        klogf(KLOG_ERROR,
-            "ax201: fw_upload: contiguous %llu pages failed – need pmm defrag",
-            (unsigned long long)fw_pages);
-        return false;
-    }
-    adapter.fw_dma_phys = fw_phys;
-    adapter.fw_dma_pages = fw_pages;
-
-    void *fw_virt = pmm_physical_to_virtual(fw_phys);
-    if (!fw_virt) {
-        klog(KLOG_ERROR, "ax201: fw_upload: no virtual mapping for DMA buffer");
-        return false;
-    }
-    memcpy(fw_virt, adapter.firmware, adapter.firmware_size);
-
-    uint64_t tail = fw_pages * PMM_PAGE_SIZE - adapter.firmware_size;
-    if (tail) {
-        memset((uint8_t *)fw_virt + adapter.firmware_size, 0, tail);
-    }
+    uint64_t fw_phys = 0;
 
     uint64_t rbd_free_phys = pmm_allocate_page();
     uint64_t rbd_used_phys = pmm_allocate_page();
@@ -926,13 +971,42 @@ static bool ax201_fw_upload(void)
 
     struct ax201_fw_section lmac_secs[AX201_MAX_FW_SECS];
     struct ax201_fw_section umac_secs[AX201_MAX_FW_SECS];
-    int lmac_n=0, umac_n=0;
+    struct ax201_fw_section paging_secs[AX201_MAX_FW_SECS];
+    int lmac_n=0, umac_n=0, paging_n=0;
     const uint8_t *pnvm_data=NULL;
     uint32_t pnvm_len=0;
     const uint8_t *iml_data=NULL;
     ax201_collect_fw_sections(adapter.firmware, adapter.firmware_size,
-        lmac_secs, &lmac_n, umac_secs, &umac_n,
+        lmac_secs, &lmac_n, umac_secs, &umac_n, paging_secs, &paging_n,
         &pnvm_data, &pnvm_len, &iml_data, &iml_len);
+    bool tlv_sections=(lmac_n+umac_n+paging_n)>0;
+
+    if(!tlv_sections){
+        uint64_t fw_pages=
+            (adapter.firmware_size+PMM_PAGE_SIZE-1)/PMM_PAGE_SIZE;
+        if(fw_pages==0)
+            fw_pages=1;
+        fw_phys=pmm_allocate_contiguous(fw_pages);
+        if(!fw_phys){
+            klogf(KLOG_ERROR,
+                "ax201: fw_upload: contiguous %llu pages failed – need pmm defrag",
+                (unsigned long long)fw_pages);
+            return false;
+        }
+        adapter.fw_dma_phys=fw_phys;
+        adapter.fw_dma_pages=fw_pages;
+        void *fw_virt=pmm_physical_to_virtual(fw_phys);
+        if(!fw_virt){
+            klog(KLOG_ERROR, "ax201: fw_upload: no virtual mapping for DMA buffer");
+            return false;
+        }
+        memcpy(fw_virt, adapter.firmware, adapter.firmware_size);
+        uint64_t tail=fw_pages*PMM_PAGE_SIZE-adapter.firmware_size;
+        if(tail)
+            memset((uint8_t *)fw_virt+adapter.firmware_size, 0, tail);
+        klog(KLOG_WARN, "ax201: no TLV sections – using raw firmware DMA fallback");
+    }
+
     if(iml_data && iml_len){
         iml_phys=ax201_alloc_dma_copy(iml_data, iml_len, "IML");
         if(iml_phys){
@@ -970,15 +1044,19 @@ static bool ax201_fw_upload(void)
         const uint64_t chunk = 32 * 1024;
         uint64_t off = 0;
         int idx = 0;
-        if(lmac_n+umac_n>0){
-            idx=ax201_fill_dram_sections(
+        if(tlv_sections){
+            idx=ax201_stage_dram_sections(
                 (struct iwl_context_info_dram *)&scratch->dram,
-                fw_phys, adapter.firmware,
-                lmac_secs, lmac_n, umac_secs, umac_n);
+                lmac_secs, lmac_n, umac_secs, umac_n,
+                paging_secs, paging_n);
+            if(idx<0){
+                klog(KLOG_ERROR, "ax201: So scratch dram staging failed");
+                return false;
+            }
             klogf(KLOG_INFO,
-                "ax201: So scratch dram: %d TLV sections (lmac=%d umac=%d) mac_id=0x%03x",
-                idx, lmac_n, umac_n, scratch->ctrl_cfg.version.mac_id);
-        } else {
+                "ax201: So scratch dram: %d staged sections (lmac=%d umac=%d paging=%d) mac_id=0x%03x",
+                idx, lmac_n, umac_n, paging_n, scratch->ctrl_cfg.version.mac_id);
+        } else if(fw_phys) {
             while (off < adapter.firmware_size && idx < 64) {
                 scratch->dram.umac_img[idx] = fw_phys + off;
                 off += chunk;
@@ -1016,6 +1094,8 @@ static bool ax201_fw_upload(void)
             (unsigned long long)prph_info_phys);
 
         __asm__ volatile("mfence" ::: "memory");
+
+        ax201_enable_fw_load_interrupts();
 
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
             (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
@@ -1078,13 +1158,17 @@ static bool ax201_fw_upload(void)
     ctxt->hcmd_cfg.cmd_queue_size = 8;
 
     int idx = 0;
-    if(lmac_n+umac_n>0){
-        idx=ax201_fill_dram_sections(&ctxt->dram, fw_phys, adapter.firmware,
-            lmac_secs, lmac_n, umac_secs, umac_n);
+    if(tlv_sections){
+        idx=ax201_stage_dram_sections(&ctxt->dram,
+            lmac_secs, lmac_n, umac_secs, umac_n, paging_secs, paging_n);
+        if(idx<0){
+            klog(KLOG_ERROR, "ax201: Qu dram staging failed");
+            return false;
+        }
         klogf(KLOG_INFO,
-            "ax201: Qu dram: %d TLV sections (lmac=%d umac=%d) mac_id=0x%03x",
-            idx, lmac_n, umac_n, ctxt->version.mac_id);
-    } else {
+            "ax201: Qu dram: %d staged sections (lmac=%d umac=%d paging=%d) mac_id=0x%03x",
+            idx, lmac_n, umac_n, paging_n, ctxt->version.mac_id);
+    } else if(fw_phys) {
         const uint64_t chunk = 32 * 1024;
         uint64_t off = 80;
         while (off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY) {
@@ -1093,28 +1177,31 @@ static bool ax201_fw_upload(void)
             idx++;
         }
         klogf(KLOG_WARN,
-            "ax201: Qu dram: no TLV sections, %d chunk entries from offset 80",
+            "ax201: Qu dram: raw fallback, %d chunk entries from offset 80",
             idx);
     }
 
     if(pnvm_data && pnvm_len){
-        ctxt->pnvm_cfg.platform_nvm_addr =
-            fw_phys+(uint64_t)(pnvm_data-adapter.firmware);
-        ctxt->pnvm_cfg.platform_nvm_size = pnvm_len;
-        klogf(KLOG_INFO, "ax201: PNVM TLV 51 len %u at phys 0x%llx",
-            pnvm_len,
-            (unsigned long long)ctxt->pnvm_cfg.platform_nvm_addr);
+        uint64_t pnvm_phys=ax201_alloc_dma_copy(pnvm_data, pnvm_len, "PNVM");
+        if(pnvm_phys){
+            ctxt->pnvm_cfg.platform_nvm_addr=pnvm_phys;
+            ctxt->pnvm_cfg.platform_nvm_size=pnvm_len;
+            klogf(KLOG_INFO, "ax201: PNVM TLV 51 len %u at phys 0x%llx",
+                pnvm_len, (unsigned long long)pnvm_phys);
+        } else {
+            klog(KLOG_WARN, "ax201: PNVM DMA allocation failed");
+        }
     } else {
         klog(KLOG_WARN, "ax201: PNVM TLV 51 not found in firmware");
     }
 
     klogf(KLOG_INFO,
-        "ax201: Linux dram: %d entries, %llu bytes in %llu pages",
-        idx,
-        (unsigned long long)adapter.firmware_size,
-        (unsigned long long)fw_pages);
+        "ax201: Linux dram: %d entries, firmware %llu bytes",
+        idx, (unsigned long long)adapter.firmware_size);
 
     __asm__ volatile("mfence" ::: "memory");
+
+    ax201_enable_fw_load_interrupts();
 
     ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
         (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
@@ -1126,12 +1213,17 @@ static bool ax201_fw_upload(void)
         ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
             (uint32_t)(iml_phys >> 32));
         ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
+            AX201_CSR_AUTO_FUNC_BOOT_ENA);
     }
-    if(iml_phys && iml_len)
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL, AX201_CSR_AUTO_FUNC_BOOT_ENA);
 
     uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
-    ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
+    gp &= ~AX201_GP_CNTRL_INIT_DONE;
+    ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
+    timer_sleep(1);
+    gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+    gp |= AX201_GP_CNTRL_INIT_DONE;
+    ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
     (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
 
     ax201_csr_write(AX201_CSR_CTXT_INFO_KICK, 1U);
@@ -1139,12 +1231,9 @@ static bool ax201_fw_upload(void)
     adapter.ctxt_info_written = true;
 
     klogf(KLOG_OK,
-        "ax201: CTXT_INFO (Linux verbatim) kick phys=0x%llx fw_dma=0x%llx pages=%llu size=%llu idx=%d",
-        (unsigned long long)ctxt_phys,
-        (unsigned long long)fw_phys,
-        (unsigned long long)fw_pages,
-        (unsigned long long)adapter.firmware_size,
-        idx);
+        "ax201: CTXT_INFO kick phys=0x%llx staged=%d iml=%u pnvm=%u",
+        (unsigned long long)ctxt_phys, idx, iml_len,
+        (pnvm_data && pnvm_len) ? pnvm_len : 0U);
     klogf(KLOG_DEBUG,
         "ax201: Linux ctxt size=%u version=%u mac_id=0x%x flags=0x%x",
         ctxt->version.size,
