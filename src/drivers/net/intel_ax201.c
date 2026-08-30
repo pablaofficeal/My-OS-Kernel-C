@@ -766,8 +766,9 @@ static bool ax201_fw_upload(void)
 
         struct iwl_prph_scratch *scratch =
             pmm_physical_to_virtual(prph_scratch_phys);
-        scratch->ctrl_cfg.version.mac_id =
-            (uint16_t)ax201_csr_read(AX201_CSR_HW_REV);
+
+        uint32_t hw_rev_val = ax201_csr_read(AX201_CSR_HW_REV);
+        scratch->ctrl_cfg.version.mac_id = (uint16_t)((hw_rev_val >> 4) & 0xFFF);
         scratch->ctrl_cfg.version.version = 0;
         scratch->ctrl_cfg.version.size = sizeof(*scratch) / 4;
         scratch->ctrl_cfg.control_flags =
@@ -776,8 +777,6 @@ static bool ax201_fw_upload(void)
             IWL_PRPH_SCRATCH_EARLY_DEBUG_EN |
             IWL_PRPH_SCRATCH_EDBG_DEST_DRAM;
 
-        /* So/GF: firmware is described via scratch->dram, not ctxt.
-         * Copy Linux iwl_pcie_init_fw_sec logic: split fw into 32KB chunks. */
         const uint64_t chunk = 32 * 1024;
         uint64_t off = 0;
         int idx = 0;
@@ -787,8 +786,9 @@ static bool ax201_fw_upload(void)
             idx++;
         }
         klogf(KLOG_INFO,
-            "ax201: So scratch dram: %d entries for %llu bytes",
-            idx, (unsigned long long)adapter.firmware_size);
+            "ax201: So scratch dram: %d entries for %llu bytes mac_id=0x%03x",
+            idx, (unsigned long long)adapter.firmware_size,
+            scratch->ctrl_cfg.version.mac_id);
 
         iml_len = 0;
         const uint8_t *iml_data =
@@ -839,9 +839,6 @@ static bool ax201_fw_upload(void)
 
         __asm__ volatile("mfence" ::: "memory");
 
-        /* So/gen2 sequence: write CTXT_INFO addr, set INIT_DONE, NO KICK.
-         * Linux: iwl_write64(CSR_CTXT_INFO_ADDR, dma) +
-         *        iwl_set_bit(CSR_GP_CNTRL, INIT_DONE) */
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
             (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
@@ -909,23 +906,23 @@ static bool ax201_fw_upload(void)
         (unsigned long long)adapter.firmware_size,
         (unsigned long long)fw_pages);
 
-        __asm__ volatile("mfence" ::: "memory");
+    __asm__ volatile("mfence" ::: "memory");
 
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
-            (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
-            (uint32_t)(ctxt_phys >> 32));
-        if (iml_phys && iml_len) {
-            ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
-                (uint32_t)(iml_phys & 0xFFFFFFFFU));
-            ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
-                (uint32_t)(iml_phys >> 32));
-            ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
-            ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
-                AX201_CSR_AUTO_FUNC_BOOT_ENA);
-        }
+    ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
+        (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
+    ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
+        (uint32_t)(ctxt_phys >> 32));
+    if (iml_phys && iml_len) {
+        ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
+            (uint32_t)(iml_phys & 0xFFFFFFFFU));
+        ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
+            (uint32_t)(iml_phys >> 32));
+        ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
+            AX201_CSR_AUTO_FUNC_BOOT_ENA);
+    }
 
-        uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+    uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
     (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
 
