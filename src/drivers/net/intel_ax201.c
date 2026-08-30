@@ -787,6 +787,28 @@ static bool ax201_fw_upload(void)
             "ax201: So scratch dram: %d entries for %llu bytes",
             idx, (unsigned long long)adapter.firmware_size);
 
+        uint32_t iml_len = 0;
+        const uint8_t *iml_data =
+            ax201_find_tlv(adapter.firmware, adapter.firmware_size, 52, &iml_len);
+        uint64_t iml_phys = 0;
+        if (iml_data && iml_len) {
+            uint64_t iml_pages = (iml_len + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
+            iml_phys = pmm_allocate_contiguous(iml_pages);
+            if (!iml_phys) {
+                iml_phys = pmm_allocate_page();
+            }
+            if (iml_phys) {
+                void *iml_virt = pmm_physical_to_virtual(iml_phys);
+                if (iml_virt) {
+                    memcpy(iml_virt, iml_data, iml_len);
+                    klogf(KLOG_INFO, "ax201: So IML TLV 52 len %u at 0x%llx",
+                        iml_len, (unsigned long long)iml_phys);
+                }
+            }
+        } else {
+            klog(KLOG_WARN, "ax201: So IML TLV 52 not found – trying without IML");
+        }
+
         struct iwl_context_info_v2 *ctxt_v2 =
             pmm_physical_to_virtual(ctxt_phys);
         if (!ctxt_v2) {
@@ -834,8 +856,8 @@ static bool ax201_fw_upload(void)
         adapter.ctxt_info_written = true;
 
         klogf(KLOG_OK,
-            "ax201: So v2 CTXT_INFO ready phys=0x%llx (INIT_DONE toggled, no KICK)",
-            (unsigned long long)ctxt_phys);
+            "ax201: So v2 CTXT_INFO ready phys=0x%llx (INIT_DONE toggled, no KICK) iml %u",
+            (unsigned long long)ctxt_phys, iml_len);
 
         return true;
     }
@@ -885,14 +907,23 @@ static bool ax201_fw_upload(void)
         (unsigned long long)adapter.firmware_size,
         (unsigned long long)fw_pages);
 
-    __asm__ volatile("mfence" ::: "memory");
+        __asm__ volatile("mfence" ::: "memory");
 
-    ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
-        (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
-    ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
-        (uint32_t)(ctxt_phys >> 32));
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
+            (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
+            (uint32_t)(ctxt_phys >> 32));
+        if (iml_phys && iml_len) {
+            ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
+                (uint32_t)(iml_phys & 0xFFFFFFFFU));
+            ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
+                (uint32_t)(iml_phys >> 32));
+            ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
+            ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
+                AX201_CSR_AUTO_FUNC_BOOT_ENA);
+        }
 
-    uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+        uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
     (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
 
