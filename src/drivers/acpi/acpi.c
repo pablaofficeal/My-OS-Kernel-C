@@ -12,6 +12,7 @@ static const struct acpi_rsdp *acpi_rsdp;
 static const struct acpi_table_header *acpi_root;
 static bool acpi_root_xsdt;
 static const struct acpi_fadt *acpi_fadt;
+static const struct acpi_table_header *acpi_dsdt;
 static uint32_t acpi_lapic_count;
 
 static void *acpi_map_phys_impl(uint64_t physical_address){
@@ -172,6 +173,7 @@ bool acpi_init(void){
     acpi_root=NULL;
     acpi_root_xsdt=false;
     acpi_fadt=NULL;
+    acpi_dsdt=NULL;
     acpi_lapic_count=0;
 
     if(!rsdp_response_ptr || !rsdp_response_ptr->address){
@@ -200,11 +202,22 @@ bool acpi_init(void){
     acpi_foreach_table(acpi_log_table, NULL);
 
     acpi_fadt=(const struct acpi_fadt *)acpi_find_table("FACP");
-    if(acpi_fadt)
+    if(acpi_fadt){
         klogf(KLOG_INFO, "acpi: FADT rev=%u PM1a_CNT=0x%x",
               acpi_fadt->header.revision, acpi_fadt_pm1a_cnt());
-    else
+        if(acpi_fadt->header.length>=offsetof(struct acpi_fadt, x_dsdt)+8
+           && acpi_fadt->x_dsdt){
+            acpi_dsdt=(const struct acpi_table_header *)acpi_map_phys(acpi_fadt->x_dsdt);
+        } else if(acpi_fadt->dsdt){
+            acpi_dsdt=(const struct acpi_table_header *)acpi_map_phys(acpi_fadt->dsdt);
+        }
+        if(acpi_dsdt && acpi_table_valid(acpi_dsdt, acpi_dsdt->length))
+            klogf(KLOG_INFO, "acpi: DSDT mapped at %p len=%u", acpi_dsdt, acpi_dsdt->length);
+        else
+            acpi_dsdt=NULL;
+    } else {
         klog(KLOG_WARN, "acpi: FADT (FACP) not found");
+    }
 
     acpi_probe_madt();
     return true;
@@ -248,4 +261,8 @@ bool acpi_fadt_get_reset(uint8_t *value, const struct acpi_generic_address **reg
 
 uint32_t acpi_madt_lapic_count(void){
     return acpi_lapic_count;
+}
+
+const struct acpi_table_header *acpi_get_dsdt(void){
+    return acpi_dsdt;
 }

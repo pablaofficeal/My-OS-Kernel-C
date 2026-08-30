@@ -119,3 +119,5 @@ uint32_t acpi_fadt_pm1a_cnt(void);
 bool acpi_fadt_get_reset(uint8_t *value, const struct acpi_generic_address **reg);
 
 uint32_t acpi_madt_lapic_count(void);
+
+const struct acpi_table_header *acpi_get_dsdt(void);

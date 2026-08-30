@@ -1,4 +1,5 @@
 #include "intel_ax201.h"
+#include "../acpi/acpi_asus.h"
 #include "../pci/pci.h"
 #include "../../arch/x86_64/mmio.h"
 #include "../../kernel/diagnostics/klog.h"
@@ -583,6 +584,9 @@ bool intel_ax201_init(void){
     klogf(KLOG_OK, "ax201: hardware detected: %s at %02x:%02x.%u", adapter.hw_info, adapter.pci.bus, adapter.pci.slot, adapter.pci.function);
     klog(KLOG_INFO, "ax201: PCI detection complete; starting MMIO bring-up");
 
+    if(!acpi_asus_rfkill_clear_wifi())
+        klog(KLOG_WARN, "ax201: ASUS ACPI RF-kill clear failed; Wi-Fi may stay blocked");
+
     uint32_t bar0 = pci_read_config32(adapter.pci.bus, adapter.pci.slot, adapter.pci.function, 0x10);
     if(!bar0 || bar0 == 0xFFFFFFFFU || (bar0 & 1U)){
         klog(KLOG_ERROR, "ax201: BAR0 invalid");
@@ -642,6 +646,8 @@ bool intel_ax201_init(void){
             "ax201: firmware not available from bootloader; "
             "wlan0 registered without firmware (scan will fail until ucode loaded)");
     } else {
+        if(!acpi_asus_rfkill_clear_wifi())
+            klog(KLOG_WARN, "ax201: RF-kill still active before firmware upload");
         if(!ax201_fw_upload()){
             klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware (scan will fail until ALIVE)");
         } else {
