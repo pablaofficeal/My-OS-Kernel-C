@@ -122,8 +122,16 @@ void acpi_asus_log_ec_info(void){
 }
 
 bool acpi_asus_rfkill_clear_wifi(void){
+    static bool attempted;
+    static bool cached_result;
+
+    if(attempted)
+        return cached_result;
+
     if(!acpi_asus_init()){
         klog(KLOG_WARN, "acpi-asus: ACPI not ready, cannot clear RF-kill");
+        attempted=true;
+        cached_result=false;
         return false;
     }
 
@@ -132,10 +140,14 @@ bool acpi_asus_rfkill_clear_wifi(void){
 
     if(asus_call_devs_wmi(ASUS_WMI_DEVID_WLAN, 1, &retval)){
         klog(KLOG_OK, "acpi-asus: WLAN enabled via ACPI WMI");
+        attempted=true;
+        cached_result=true;
         return true;
     }
     if(asus_call_devs_wmi(ASUS_WMI_DEVID_WLAN_LED, 1, &retval)){
         klog(KLOG_OK, "acpi-asus: WLAN LED/state via ACPI WMI (0x00010012)");
+        attempted=true;
+        cached_result=true;
         return true;
     }
 
@@ -143,19 +155,27 @@ bool acpi_asus_rfkill_clear_wifi(void){
     for(int i=0;parents[i];i++){
         if(asus_call_devs_direct(parents[i], ASUS_WMI_DEVID_WLAN, 1, &retval)){
             klogf(KLOG_OK, "acpi-asus: WLAN enabled via \\%s.DEVS", parents[i]);
+            attempted=true;
+            cached_result=true;
             return true;
         }
         if(asus_call_devs_direct(parents[i], ASUS_WMI_DEVID_WLAN_LED, 1, &retval)){
             klogf(KLOG_OK, "acpi-asus: WLAN LED via \\%s.DEVS (0x00010012)", parents[i]);
+            attempted=true;
+            cached_result=true;
             return true;
         }
     }
 
     if(asus_ec_enable_wifi()){
         klog(KLOG_OK, "acpi-asus: WLAN enabled via EC RAM write (verified readback)");
+        attempted=true;
+        cached_result=true;
         return true;
     }
 
     klog(KLOG_WARN, "acpi-asus: EC/WMI/namespace did not change RF-kill state");
+    attempted=true;
+    cached_result=false;
     return false;
 }

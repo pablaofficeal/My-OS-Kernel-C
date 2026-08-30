@@ -225,10 +225,23 @@ bool acpi_init(void){
     }
 
     acpi_dsdt=acpi_find_table("DSDT");
+    if(!acpi_dsdt && acpi_fadt){
+        uint64_t dsdt_addr=0;
+        if(acpi_fadt->header.length>=sizeof(struct acpi_fadt)){
+            if(acpi_fadt->x_dsdt)
+                dsdt_addr=acpi_fadt->x_dsdt;
+            else if(acpi_fadt->dsdt)
+                dsdt_addr=(uint64_t)acpi_fadt->dsdt;
+        } else if(acpi_fadt->dsdt){
+            dsdt_addr=(uint64_t)acpi_fadt->dsdt;
+        }
+        if(dsdt_addr)
+            acpi_dsdt=acpi_map_table(dsdt_addr);
+    }
     if(acpi_dsdt)
         klogf(KLOG_INFO, "acpi: DSDT mapped at %p len=%u", acpi_dsdt, acpi_dsdt->length);
     else
-        klog(KLOG_WARN, "acpi: DSDT not found in XSDT/RSDT");
+        klog(KLOG_WARN, "acpi: DSDT not found in XSDT/RSDT or FADT");
 
     acpi_probe_madt();
     return true;

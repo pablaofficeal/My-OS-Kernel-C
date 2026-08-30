@@ -177,6 +177,130 @@ static void ax201_log_firmware_release(const uint8_t *image, uint64_t size){
     }
 }
 
+#define AX201_TLV_UMAC_SEC_INIT 17U
+#define AX201_TLV_UMAC_SEC_INST 18U
+#define AX201_TLV_UMAC_SEC_DATA 19U
+#define AX201_TLV_LMAC_SEC_INIT 20U
+#define AX201_TLV_LMAC_SEC_INST 21U
+#define AX201_TLV_LMAC_SEC_DATA 22U
+#define AX201_TLV_PNVM        51U
+#define AX201_TLV_IML         52U
+#define AX201_MAX_FW_SECS     32U
+
+struct ax201_fw_section {
+    const uint8_t *data;
+    uint32_t len;
+};
+
+static int ax201_collect_fw_sections(
+    const uint8_t *fw,
+    uint64_t fw_size,
+    struct ax201_fw_section *lmac,
+    int *lmac_n,
+    struct ax201_fw_section *umac,
+    int *umac_n,
+    const uint8_t **pnvm,
+    uint32_t *pnvm_len,
+    const uint8_t **iml,
+    uint32_t *iml_len)
+{
+    *lmac_n=0;
+    *umac_n=0;
+    if(pnvm) *pnvm=NULL;
+    if(pnvm_len) *pnvm_len=0;
+    if(iml) *iml=NULL;
+    if(iml_len) *iml_len=0;
+    if(!fw || fw_size<80)
+        return 0;
+
+    uint64_t pos=80;
+    while(pos+8<=fw_size){
+        uint32_t type=ax201_read_le32(fw+pos);
+        uint32_t len=ax201_read_le32(fw+pos+4);
+        if(len>fw_size || pos+8+len>fw_size)
+            break;
+        const uint8_t *payload=fw+pos+8;
+
+        switch(type){
+        case AX201_TLV_LMAC_SEC_INIT:
+        case AX201_TLV_LMAC_SEC_INST:
+        case AX201_TLV_LMAC_SEC_DATA:
+            if(*lmac_n<AX201_MAX_FW_SECS && len>0){
+                lmac[*lmac_n].data=payload;
+                lmac[*lmac_n].len=len;
+                (*lmac_n)++;
+            }
+            break;
+        case AX201_TLV_UMAC_SEC_INIT:
+        case AX201_TLV_UMAC_SEC_INST:
+        case AX201_TLV_UMAC_SEC_DATA:
+            if(*umac_n<AX201_MAX_FW_SECS && len>0){
+                umac[*umac_n].data=payload;
+                umac[*umac_n].len=len;
+                (*umac_n)++;
+            }
+            break;
+        case AX201_TLV_PNVM:
+            if(pnvm) *pnvm=payload;
+            if(pnvm_len) *pnvm_len=len;
+            break;
+        case AX201_TLV_IML:
+            if(iml) *iml=payload;
+            if(iml_len) *iml_len=len;
+            break;
+        default:
+            break;
+        }
+
+        uint32_t aligned=(len+3U)&~3U;
+        pos+=8+aligned;
+    }
+    return *lmac_n+*umac_n;
+}
+
+static uint64_t ax201_alloc_dma_copy(const uint8_t *src, uint32_t len, const char *what){
+    if(!src || !len)
+        return 0;
+    uint64_t pages=(len+PMM_PAGE_SIZE-1)/PMM_PAGE_SIZE;
+    if(pages==0)
+        pages=1;
+    uint64_t phys=pmm_allocate_contiguous(pages);
+    if(!phys)
+        return 0;
+    void *virt=pmm_physical_to_virtual(phys);
+    if(!virt){
+        klogf(KLOG_ERROR, "ax201: no virtual mapping for %s DMA", what);
+        return 0;
+    }
+    memcpy(virt, src, len);
+    uint64_t tail=pages*PMM_PAGE_SIZE-len;
+    if(tail)
+        memset((uint8_t *)virt+len, 0, tail);
+    return phys;
+}
+
+static int ax201_fill_dram_sections(
+    struct iwl_context_info_dram *dram,
+    uint64_t fw_phys,
+    const uint8_t *fw_base,
+    const struct ax201_fw_section *lmac,
+    int lmac_n,
+    const struct ax201_fw_section *umac,
+    int umac_n)
+{
+    int idx=0;
+    for(int i=0;i<lmac_n;i++){
+        dram->lmac_img[idx]=fw_phys+(uint64_t)(lmac[i].data-fw_base);
+        idx++;
+    }
+    idx=0;
+    for(int i=0;i<umac_n;i++){
+        dram->umac_img[idx]=fw_phys+(uint64_t)(umac[i].data-fw_base);
+        idx++;
+    }
+    return lmac_n+umac_n;
+}
+
 static const uint8_t *ax201_find_tlv(
     const uint8_t *fw,
     uint64_t fw_size,
@@ -800,6 +924,25 @@ static bool ax201_fw_upload(void)
     memset(pmm_physical_to_virtual(rbd_status_phys), 0, PMM_PAGE_SIZE);
     memset(pmm_physical_to_virtual(cmdq_phys), 0, PMM_PAGE_SIZE);
 
+    struct ax201_fw_section lmac_secs[AX201_MAX_FW_SECS];
+    struct ax201_fw_section umac_secs[AX201_MAX_FW_SECS];
+    int lmac_n=0, umac_n=0;
+    const uint8_t *pnvm_data=NULL;
+    uint32_t pnvm_len=0;
+    const uint8_t *iml_data=NULL;
+    ax201_collect_fw_sections(adapter.firmware, adapter.firmware_size,
+        lmac_secs, &lmac_n, umac_secs, &umac_n,
+        &pnvm_data, &pnvm_len, &iml_data, &iml_len);
+    if(iml_data && iml_len){
+        iml_phys=ax201_alloc_dma_copy(iml_data, iml_len, "IML");
+        if(iml_phys){
+            klogf(KLOG_INFO, "ax201: IML TLV 52 len %u at 0x%llx",
+                iml_len, (unsigned long long)iml_phys);
+        }
+    } else {
+        klog(KLOG_WARN, "ax201: IML TLV 52 not found – trying without IML");
+    }
+
     if (adapter.is_so_family) {
         uint64_t prph_scratch_phys = pmm_allocate_page();
         uint64_t prph_info_phys = pmm_allocate_page();
@@ -827,35 +970,23 @@ static bool ax201_fw_upload(void)
         const uint64_t chunk = 32 * 1024;
         uint64_t off = 0;
         int idx = 0;
-        while (off < adapter.firmware_size && idx < 64) {
-            scratch->dram.umac_img[idx] = fw_phys + off;
-            off += chunk;
-            idx++;
-        }
-        klogf(KLOG_INFO,
-            "ax201: So scratch dram: %d entries for %llu bytes mac_id=0x%03x",
-            idx, (unsigned long long)adapter.firmware_size,
-            scratch->ctrl_cfg.version.mac_id);
-
-        iml_len = 0;
-        const uint8_t *iml_data =
-            ax201_find_tlv(adapter.firmware, adapter.firmware_size, 52, &iml_len);
-        if (iml_data && iml_len) {
-            uint64_t iml_pages = (iml_len + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
-            iml_phys = pmm_allocate_contiguous(iml_pages);
-            if (!iml_phys) {
-                iml_phys = pmm_allocate_page();
-            }
-            if (iml_phys) {
-                void *iml_virt = pmm_physical_to_virtual(iml_phys);
-                if (iml_virt) {
-                    memcpy(iml_virt, iml_data, iml_len);
-                    klogf(KLOG_INFO, "ax201: So IML TLV 52 len %u at 0x%llx",
-                        iml_len, (unsigned long long)iml_phys);
-                }
-            }
+        if(lmac_n+umac_n>0){
+            idx=ax201_fill_dram_sections(
+                (struct iwl_context_info_dram *)&scratch->dram,
+                fw_phys, adapter.firmware,
+                lmac_secs, lmac_n, umac_secs, umac_n);
+            klogf(KLOG_INFO,
+                "ax201: So scratch dram: %d TLV sections (lmac=%d umac=%d) mac_id=0x%03x",
+                idx, lmac_n, umac_n, scratch->ctrl_cfg.version.mac_id);
         } else {
-            klog(KLOG_WARN, "ax201: So IML TLV 52 not found – trying without IML");
+            while (off < adapter.firmware_size && idx < 64) {
+                scratch->dram.umac_img[idx] = fw_phys + off;
+                off += chunk;
+                idx++;
+            }
+            klogf(KLOG_WARN,
+                "ax201: So scratch dram: no TLV sections, %d chunk entries",
+                idx);
         }
 
         struct iwl_context_info_v2 *ctxt_v2 =
@@ -928,7 +1059,7 @@ static bool ax201_fw_upload(void)
     memset(ctxt, 0, sizeof(*ctxt));
 
     uint32_t hw_rev = ax201_csr_read(AX201_CSR_HW_REV);
-    ctxt->version.mac_id = (uint16_t)hw_rev;
+    ctxt->version.mac_id = (uint16_t)((hw_rev >> 4) & 0xFFF);
     ctxt->version.version = 0;
     ctxt->version.size = sizeof(*ctxt) / 4;
 
@@ -946,16 +1077,35 @@ static bool ax201_fw_upload(void)
     ctxt->hcmd_cfg.cmd_queue_addr = cmdq_phys;
     ctxt->hcmd_cfg.cmd_queue_size = 8;
 
-    const uint64_t chunk = 32 * 1024;
-    uint64_t off = 0;
     int idx = 0;
-    while (off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY) {
-        uint64_t cur =
-            adapter.firmware_size - off > chunk ? chunk : adapter.firmware_size - off;
-        (void)cur;
-        ctxt->dram.umac_img[idx] = fw_phys + off;
-        off += chunk;
-        idx++;
+    if(lmac_n+umac_n>0){
+        idx=ax201_fill_dram_sections(&ctxt->dram, fw_phys, adapter.firmware,
+            lmac_secs, lmac_n, umac_secs, umac_n);
+        klogf(KLOG_INFO,
+            "ax201: Qu dram: %d TLV sections (lmac=%d umac=%d) mac_id=0x%03x",
+            idx, lmac_n, umac_n, ctxt->version.mac_id);
+    } else {
+        const uint64_t chunk = 32 * 1024;
+        uint64_t off = 80;
+        while (off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY) {
+            ctxt->dram.umac_img[idx] = fw_phys + off;
+            off += chunk;
+            idx++;
+        }
+        klogf(KLOG_WARN,
+            "ax201: Qu dram: no TLV sections, %d chunk entries from offset 80",
+            idx);
+    }
+
+    if(pnvm_data && pnvm_len){
+        ctxt->pnvm_cfg.platform_nvm_addr =
+            fw_phys+(uint64_t)(pnvm_data-adapter.firmware);
+        ctxt->pnvm_cfg.platform_nvm_size = pnvm_len;
+        klogf(KLOG_INFO, "ax201: PNVM TLV 51 len %u at phys 0x%llx",
+            pnvm_len,
+            (unsigned long long)ctxt->pnvm_cfg.platform_nvm_addr);
+    } else {
+        klog(KLOG_WARN, "ax201: PNVM TLV 51 not found in firmware");
     }
 
     klogf(KLOG_INFO,
@@ -976,9 +1126,9 @@ static bool ax201_fw_upload(void)
         ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
             (uint32_t)(iml_phys >> 32));
         ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
-            AX201_CSR_AUTO_FUNC_BOOT_ENA);
     }
+    if(iml_phys && iml_len)
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL, AX201_CSR_AUTO_FUNC_BOOT_ENA);
 
     uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
