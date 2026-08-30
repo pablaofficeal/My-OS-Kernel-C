@@ -643,7 +643,8 @@ static bool ax201_fw_upload(void){
     }
     adapter.fw_dma_phys = fw_phys;
 
-    /* Allocate remaining pages; warn if not contiguous (PMM gives best-effort) */
+    /* Allocate remaining pages; track non-contiguous count, log ONE summary */
+    uint64_t gap_count = 0;
     for(uint64_t pg = 1; pg < fw_pages; pg++){
         uint64_t extra = pmm_allocate_page();
         if(!extra){
@@ -653,14 +654,17 @@ static bool ax201_fw_upload(void){
             break;
         }
         if(extra != fw_phys + pg * PMM_PAGE_SIZE){
-            klogf(KLOG_WARN,
-                "ax201: fw_upload: DMA page %llu not contiguous "
-                "(expected 0x%llx got 0x%llx) – firmware may fail to load",
-                (unsigned long long)pg,
-                (unsigned long long)(fw_phys + pg * PMM_PAGE_SIZE),
-                (unsigned long long)extra);
+            gap_count++;
         }
     }
+    if(gap_count){
+        klogf(KLOG_WARN,
+            "ax201: fw_upload: %llu/%llu DMA pages non-contiguous – "
+            "firmware may fail to load (need contiguous DMA allocator)",
+            (unsigned long long)gap_count,
+            (unsigned long long)(fw_pages - 1));
+    }
+
 
     /* Copy firmware image into DMA region */
     void *fw_virt = pmm_physical_to_virtual(fw_phys);
