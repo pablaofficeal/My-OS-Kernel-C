@@ -5,6 +5,8 @@
 #include "../process/scheduler.h"
 #include "../process/process.h"
 #include "../../drivers/serial/serial.h"
+#include "../../drivers/mouse/ps2_mouse.h"
+#include "../../drivers/mouse/usb_mouse.h"
 #include "../../userspace/userspace.h"
 #include "../../net/core/net_service.h"
 
@@ -52,7 +54,9 @@ void init_process_start(uint32_t detected_cpu_count){
     serial_write_string("[SCHED] start\n");
     scheduler_start();
 
-    serial_write_string("[INIT] fallback run\n");
-    userspace_run();
-    kernel_panic("init process returned unexpectedly");
+    for(;;){
+        ps2_mouse_poll();
+        usb_mouse_poll();
+        scheduler_yield();
+    }
 }
