@@ -23,9 +23,15 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_FIRMWARE_HINT "iwlwifi-QuZ-a0-hr-b0-72.ucode"
 
 #define AX201_CSR_HW_IF_CONFIG_REG 0x00
+#define AX201_CSR_INT              0x08
+#define AX201_CSR_INT_MASK         0x0C
+#define AX201_CSR_GPIO_IN          0x18
 #define AX201_CSR_HW_REV           0x28
-#define AX201_CSR_GP_CNTRL         0x1C
+#define AX201_CSR_GP_CNTRL         0x24
 #define AX201_CSR_CTXT_INFO_BA     0x40
+#define AX201_CSR_HW_RF_ID         0x9C
+
+#define AX201_GP_CNTRL_HW_RFKILL   0x08000000U
 
 struct ax201_device {
     volatile uint8_t *regs;
@@ -46,6 +52,10 @@ struct ax201_device {
 
 static struct ax201_device adapter;
 static bool initialized;
+
+static uint32_t ax201_csr_read(uint32_t offset){
+    return *(volatile uint32_t *)(adapter.regs + offset);
+}
 
 static bool is_ax201_device(uint16_t dev_id){
     for(size_t i=0;i<sizeof(ax201_device_ids)/sizeof(ax201_device_ids[0]); i++){
@@ -105,8 +115,8 @@ static void ax201_pci_visitor(const struct pci_device_info *device, void *contex
 
 static bool ax201_read_mac(uint8_t mac[6]){
     if(adapter.regs){
-        uint32_t first = *(volatile uint32_t*)(adapter.regs + AX201_CSR_HW_IF_CONFIG_REG);
-        uint32_t rev = *(volatile uint32_t*)(adapter.regs + AX201_CSR_HW_REV);
+        uint32_t first = ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+        uint32_t rev = ax201_csr_read(AX201_CSR_HW_REV);
         (void)first; (void)rev;
         if(first == 0xFFFFFFFFU && rev == 0xFFFFFFFFU){
             klog(KLOG_WARN, "ax201: MMIO reads all 1s, device power gated or RFKILL");
@@ -269,8 +279,7 @@ bool intel_ax201_init(void){
     }
 
     klogf(KLOG_OK, "ax201: hardware detected: %s at %02x:%02x.%u", adapter.hw_info, adapter.pci.bus, adapter.pci.slot, adapter.pci.function);
-    klog(KLOG_INFO, "ax201: hardware bring-up deferred until firmware transport is implemented");
-    return false;
+    klog(KLOG_INFO, "ax201: PCI detection complete; starting MMIO bring-up");
 
     uint32_t bar0 = pci_read_config32(adapter.pci.bus, adapter.pci.slot, adapter.pci.function, 0x10);
     if(!bar0 || bar0 == 0xFFFFFFFFU || (bar0 & 1U)){
@@ -294,9 +303,21 @@ bool intel_ax201_init(void){
     klogf(KLOG_OK, "ax201: MMIO mapped at %p phys=0x%lx", adapter.regs, (unsigned long)bar_addr);
 
     uint32_t hw_rev = *(volatile uint32_t*)(adapter.regs + AX201_CSR_HW_REV);
-    klogf(KLOG_INFO, "ax201: HW_REV=0x%08x", hw_rev);
+    uint32_t hw_if = ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+    uint32_t hw_rf_id = ax201_csr_read(AX201_CSR_HW_RF_ID);
+    uint32_t gp_ctrl = ax201_csr_read(AX201_CSR_GP_CNTRL);
+    uint32_t gpio_in = ax201_csr_read(AX201_CSR_GPIO_IN);
+    uint32_t interrupt_status = ax201_csr_read(AX201_CSR_INT);
+    uint32_t interrupt_mask = ax201_csr_read(AX201_CSR_INT_MASK);
+    klogf(KLOG_INFO, "ax201: CSR hw_if=0x%08x hw_rev=0x%08x rf_id=0x%08x",
+        hw_if, hw_rev, hw_rf_id);
+    klogf(KLOG_INFO, "ax201: CSR gp_ctrl=0x%08x gpio=0x%08x int=0x%08x mask=0x%08x",
+        gp_ctrl, gpio_in, interrupt_status, interrupt_mask);
     if(hw_rev == 0xFFFFFFFFU){
         klog(KLOG_WARN, "ax201: device reports not ready (RFKILL or power)");
+    }
+    if(gp_ctrl & AX201_GP_CNTRL_HW_RFKILL){
+        klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
     }
 
     if(!ax201_read_mac(adapter.mac)){
