@@ -10,6 +10,8 @@
 #define IWL_PRPH_SCRATCH_MTR_MODE 0x01
 #define IWL_PRPH_SCRATCH_MTR_FORMAT 0x02
 #define IWL_PRPH_MTR_FORMAT_256B 0x02
+#define IWL_PRPH_SCRATCH_EARLY_DEBUG_EN 0x10
+#define IWL_PRPH_SCRATCH_EDBG_DEST_DRAM 0x20
 
 struct iwl_prph_scratch_version {
     uint16_t mac_id;
@@ -52,5 +54,11 @@ struct iwl_prph_scratch_ctrl_cfg {
 
 struct iwl_prph_scratch {
     struct iwl_prph_scratch_ctrl_cfg ctrl_cfg;
-    uint8_t reserved[1024];
+    uint8_t reserved_ctrl[64];
+    struct {
+        uint64_t umac_img[64];
+        uint64_t lmac_img[64];
+        uint64_t virtual_img[64];
+    } dram;
+    uint8_t reserved2[512];
 } __packed;

@@ -738,7 +738,24 @@ static bool ax201_fw_upload(void)
         scratch->ctrl_cfg.version.version = 0;
         scratch->ctrl_cfg.version.size = sizeof(*scratch) / 4;
         scratch->ctrl_cfg.control_flags =
-            IWL_PRPH_SCRATCH_MTR_MODE | IWL_PRPH_MTR_FORMAT_256B;
+            IWL_PRPH_SCRATCH_MTR_MODE |
+            IWL_PRPH_MTR_FORMAT_256B |
+            IWL_PRPH_SCRATCH_EARLY_DEBUG_EN |
+            IWL_PRPH_SCRATCH_EDBG_DEST_DRAM;
+
+        /* So/GF: firmware is described via scratch->dram, not ctxt.
+         * Copy Linux iwl_pcie_init_fw_sec logic: split fw into 32KB chunks. */
+        const uint64_t chunk = 32 * 1024;
+        uint64_t off = 0;
+        int idx = 0;
+        while (off < adapter.firmware_size && idx < 64) {
+            scratch->dram.umac_img[idx] = fw_phys + off;
+            off += chunk;
+            idx++;
+        }
+        klogf(KLOG_INFO,
+            "ax201: So scratch dram: %d entries for %llu bytes",
+            idx, (unsigned long long)adapter.firmware_size);
 
         struct iwl_context_info_v2 *ctxt_v2 =
             pmm_physical_to_virtual(ctxt_phys);
@@ -768,22 +785,23 @@ static bool ax201_fw_upload(void)
 
         __asm__ volatile("mfence" ::: "memory");
 
+        /* So/gen2 sequence: write CTXT_INFO addr, set INIT_DONE, NO KICK.
+         * Linux: iwl_write64(CSR_CTXT_INFO_ADDR, dma) +
+         *        iwl_set_bit(CSR_GP_CNTRL, INIT_DONE) */
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
             (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
         ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
             (uint32_t)(ctxt_phys >> 32));
-        ax201_csr_write(0x0F0, 0x02);
 
         uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
-        ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
+        ax201_csr_write(AX201_CSR_GP_CNTRL,
+            gp | AX201_GP_CNTRL_INIT_DONE);
         (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
-
-        ax201_csr_write(AX201_CSR_CTXT_INFO_KICK, 1U);
 
         adapter.ctxt_info_written = true;
 
         klogf(KLOG_OK,
-            "ax201: So v2 CTXT_INFO kick phys=0x%llx",
+            "ax201: So v2 CTXT_INFO ready phys=0x%llx (no KICK, INIT_DONE set)",
             (unsigned long long)ctxt_phys);
 
         return true;
