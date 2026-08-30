@@ -9,6 +9,7 @@
 #include "../../net/wifi/wifi.h"
 #include "../../net/network/ipv4.h"
 #include "../../net/link/ethernet.h"
+#include "../../boot/install_source.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -20,7 +21,9 @@ static const uint16_t ax201_device_ids[] = {
     0x06F0, 0xA0F0, 0x02F0, 0x34F0, 0x43F0, 0x4DF0, 0x51F0, 0x51F1, 0x54F0, 0x7A70, 0x7AF0, 0x2723, 0x2725, 0x7360,
 };
 
-#define AX201_FIRMWARE_HINT "iwlwifi-QuZ-a0-hr-b0-72.ucode"
+#define AX201_FIRMWARE_HINT "iwlwifi-QuZ-a0-hr-b0-77.ucode"
+#define AX201_FIRMWARE_MODULE "/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode"
+#define AX201_FIRMWARE_MAGIC 0x0A4C5749U
 
 #define AX201_CSR_HW_IF_CONFIG_REG 0x00
 #define AX201_CSR_INT              0x08
@@ -30,6 +33,11 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_GP_CNTRL         0x24
 #define AX201_CSR_CTXT_INFO_BA     0x40
 #define AX201_CSR_HW_RF_ID         0x9C
+#define AX201_CSR_MAC_ADDR_BASE    0x380
+#define AX201_CSR_MAC_ADDR0_OTP    (AX201_CSR_MAC_ADDR_BASE + 0x00)
+#define AX201_CSR_MAC_ADDR1_OTP    (AX201_CSR_MAC_ADDR_BASE + 0x04)
+#define AX201_CSR_MAC_ADDR0_STRAP  (AX201_CSR_MAC_ADDR_BASE + 0x08)
+#define AX201_CSR_MAC_ADDR1_STRAP  (AX201_CSR_MAC_ADDR_BASE + 0x0C)
 
 #define AX201_GP_CNTRL_HW_RFKILL   0x08000000U
 
@@ -48,6 +56,8 @@ struct ax201_device {
     char connect_ssid[WIFI_SSID_MAX+1];
     char connect_password[WIFI_PASSWORD_MAX+1];
     bool connect_pending;
+    const uint8_t *firmware;
+    uint64_t firmware_size;
 };
 
 static struct ax201_device adapter;
@@ -55,6 +65,25 @@ static bool initialized;
 
 static uint32_t ax201_csr_read(uint32_t offset){
     return *(volatile uint32_t *)(adapter.regs + offset);
+}
+
+static bool ax201_get_firmware(void){
+    const void *image=0;
+    uint64_t size=0;
+    if(!boot_get_module(AX201_FIRMWARE_MODULE,&image,&size) || !image || size<8){
+        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", AX201_FIRMWARE_MODULE);
+        return false;
+    }
+    uint32_t magic=*(const uint32_t *)image;
+    if(magic!=AX201_FIRMWARE_MAGIC){
+        klogf(KLOG_ERROR, "ax201: invalid firmware magic=0x%08x size=%llu", magic, (unsigned long long)size);
+        return false;
+    }
+    adapter.firmware=(const uint8_t *)image;
+    adapter.firmware_size=size;
+    klogf(KLOG_OK, "ax201: firmware module loaded %s (%llu bytes)",
+        AX201_FIRMWARE_HINT,(unsigned long long)size);
+    return true;
 }
 
 static bool is_ax201_device(uint16_t dev_id){
@@ -113,6 +142,24 @@ static void ax201_pci_visitor(const struct pci_device_info *device, void *contex
     }
 }
 
+static bool ax201_valid_mac(const uint8_t mac[6]){
+    bool all_zero=true, all_ff=true;
+    for(int i=0;i<6;i++){
+        if(mac[i]) all_zero=false;
+        if(mac[i]!=0xFF) all_ff=false;
+    }
+    return !(mac[0]&1U) && !all_zero && !all_ff;
+}
+
+static void ax201_decode_mac(uint32_t low, uint32_t high, uint8_t mac[6]){
+    mac[0]=(uint8_t)(low>>24);
+    mac[1]=(uint8_t)(low>>16);
+    mac[2]=(uint8_t)(low>>8);
+    mac[3]=(uint8_t)low;
+    mac[4]=(uint8_t)(high>>8);
+    mac[5]=(uint8_t)high;
+}
+
 static bool ax201_read_mac(uint8_t mac[6]){
     if(adapter.regs){
         uint32_t first = ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
@@ -121,6 +168,26 @@ static bool ax201_read_mac(uint8_t mac[6]){
         if(first == 0xFFFFFFFFU && rev == 0xFFFFFFFFU){
             klog(KLOG_WARN, "ax201: MMIO reads all 1s, device power gated or RFKILL");
         }
+
+        uint32_t strap0=ax201_csr_read(AX201_CSR_MAC_ADDR0_STRAP);
+        uint32_t strap1=ax201_csr_read(AX201_CSR_MAC_ADDR1_STRAP);
+        ax201_decode_mac(strap0,strap1,mac);
+        if(ax201_valid_mac(mac)){
+            klogf(KLOG_OK, "ax201: factory MAC from strap %02x:%02x:%02x:%02x:%02x:%02x",
+                mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+            return true;
+        }
+
+        uint32_t otp0=ax201_csr_read(AX201_CSR_MAC_ADDR0_OTP);
+        uint32_t otp1=ax201_csr_read(AX201_CSR_MAC_ADDR1_OTP);
+        ax201_decode_mac(otp0,otp1,mac);
+        if(ax201_valid_mac(mac)){
+            klogf(KLOG_OK, "ax201: factory MAC from OTP %02x:%02x:%02x:%02x:%02x:%02x",
+                mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+            return true;
+        }
+        klogf(KLOG_WARN, "ax201: no valid factory MAC (strap=%08x/%08x otp=%08x/%08x); using temporary address",
+            strap0,strap1,otp0,otp1);
     }
 
     mac[0] = 0x02;
@@ -130,9 +197,7 @@ static bool ax201_read_mac(uint8_t mac[6]){
     mac[4] = (uint8_t)(adapter.pci.device_id & 0xFF);
     mac[5] = (uint8_t)(adapter.pci.device_id >> 8);
     if(mac[0] & 1) mac[0] &= ~1U;
-    bool all_zero=true, all_ff=true;
-    for(int i=0;i<6;i++){ if(mac[i]) all_zero=false; if(mac[i]!=0xFF) all_ff=false; }
-    return !all_zero && !all_ff;
+    return ax201_valid_mac(mac);
 }
 
 static bool ax201_transmit(void *context, const uint8_t *frame, uint16_t length){
@@ -320,6 +385,11 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
     }
 
+    if(!ax201_get_firmware()){
+        klog(KLOG_ERROR, "ax201: WLAN transport is unavailable without firmware");
+        return false;
+    }
+
     if(!ax201_read_mac(adapter.mac)){
         klog(KLOG_ERROR, "ax201: MAC generation failed");
         return false;
@@ -343,7 +413,7 @@ bool intel_ax201_init(void){
     adapter.ready = true;
     klogf(KLOG_OK, "ax201: %s ready as wlan0 %02x:%02x:%02x:%02x:%02x:%02x (real stack, DHCP via existing net)",
         adapter.hw_info, adapter.mac[0], adapter.mac[1], adapter.mac[2], adapter.mac[3], adapter.mac[4], adapter.mac[5]);
-    klogf(KLOG_INFO, "ax201: expects firmware %s - not yet loaded, scan/connect will report until firmware loader added", AX201_FIRMWARE_HINT);
+    klogf(KLOG_INFO, "ax201: firmware %s is available; Gen2 DMA transport is next", AX201_FIRMWARE_HINT);
     klog(KLOG_WARN, "ax201: BRING-UP TEST: PCI+MMIO succeeded - check this log on real AX201 hardware");
 
     (void)wifi_trigger_scan();
