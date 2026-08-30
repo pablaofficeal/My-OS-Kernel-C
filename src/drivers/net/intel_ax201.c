@@ -43,6 +43,10 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_CTXT_INFO_BA_HI   0x044   /* context-info base address (hi 32) */
 #define AX201_CSR_CTXT_INFO_KICK    0x048   /* write 1 to start ROM loader   */
 #define AX201_CSR_HW_RF_ID          0x09C
+#define AX201_CSR_IML_DATA_ADDR     0x0C0
+#define AX201_CSR_IML_SIZE_ADDR     0x0C4
+#define AX201_CSR_CTXT_INFO_BOOT_CTRL 0x0F0
+#define AX201_CSR_AUTO_FUNC_BOOT_ENA  0x02
 #define AX201_CSR_MAC_ADDR_BASE     0x380
 #define AX201_CSR_MAC_ADDR0_OTP     (AX201_CSR_MAC_ADDR_BASE + 0x00)
 #define AX201_CSR_MAC_ADDR1_OTP     (AX201_CSR_MAC_ADDR_BASE + 0x04)
@@ -141,6 +145,32 @@ static void ax201_log_firmware_release(const uint8_t *image, uint64_t size){
     if(out){
         klogf(KLOG_INFO, "ax201: firmware release '%s'", release);
     }
+}
+
+static const uint8_t *ax201_find_tlv(
+    const uint8_t *fw,
+    uint64_t fw_size,
+    uint32_t want_type,
+    uint32_t *out_len)
+{
+    if (!fw || fw_size < 80 || !out_len) {
+        return NULL;
+    }
+    uint64_t pos = 80;
+    while (pos + 8 <= fw_size) {
+        uint32_t type = fw[pos] | (fw[pos+1] << 8) | (fw[pos+2] << 16) | (fw[pos+3] << 24);
+        uint32_t len = fw[pos+4] | (fw[pos+5] << 8) | (fw[pos+6] << 16) | (fw[pos+7] << 24);
+        if (len > fw_size || pos + 8 + len > fw_size) {
+            break;
+        }
+        if (type == want_type) {
+            *out_len = len;
+            return fw + pos + 8;
+        }
+        uint32_t aligned = (len + 3) & ~3U;
+        pos += 8 + aligned;
+    }
+    return NULL;
 }
 
 static bool ax201_get_firmware(void){
@@ -596,7 +626,7 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: try: Fn+F2 / BIOS Wi-Fi Enable, disable Fast Boot, EC reset");
     }
     if(gp_ctrl & AX201_GP_CNTRL_HW_RFKILL){
-        klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
+        klog(KLOG_WARN, "ax201: hardware RF-kill is active (GP_CNTRL 0x08000000) – continuing anyway");
     } else {
         klog(KLOG_INFO, "ax201: RF-kill inactive (radio enabled)");
     }
