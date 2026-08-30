@@ -34,6 +34,7 @@ C_SOURCES := \
 	kernel/diagnostics/boot_diag.c \
 	kernel/diagnostics/panic.c \
 	drivers/input/keyboard.c \
+	drivers/acpi/acpi.c \
 	drivers/pci/pci.c \
 	drivers/net/e1000_82540em.c \
 	drivers/net/intel_ax201.c \

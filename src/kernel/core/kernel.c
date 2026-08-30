@@ -7,6 +7,7 @@
 #include "../diagnostics/boot_diag.h"
 #include "../diagnostics/panic.h"
 #include "../../arch/x86_64/mmio.h"
+#include "../../drivers/acpi/acpi.h"
 #include "../../lib/string.h"
 #include "init.h"
 #include "../process/process.h"
@@ -49,6 +50,12 @@ void kernel_main(struct limine_framebuffer *fb) {
     klog(KLOG_OK, "int3 handled, IDT working");
 
     boot_diag_checkpoint(BOOT_STAGE_SYSCALLS, "initializing syscall layer");
+    klog(KLOG_INFO, "Initializing ACPI...");
+    if(acpi_init()){
+        klog(KLOG_OK, "ACPI tables parsed");
+    } else {
+        klog(KLOG_WARN, "ACPI unavailable; power management may be limited");
+    }
     klog(KLOG_INFO, "Initializing PCI MMIO mapper...");
     mmio_init();
     if(mmio_is_ready()){
