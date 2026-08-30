@@ -29,6 +29,23 @@ static bool ec_wait_status(uint8_t mask, uint8_t expected, uint32_t timeout){
     return false;
 }
 
+static bool ec_wait_ibf_clear(uint32_t timeout){
+    return ec_wait_status(ACPI_EC_STATUS_IBF, 0, timeout);
+}
+
+bool acpi_ec_write_raw(uint8_t cmd, uint8_t offset, uint8_t value){
+    if(!ec_wait_ibf_clear(100000U))
+        return false;
+    ec_outb(ACPI_EC_SC_PORT, cmd);
+    if(!ec_wait_ibf_clear(100000U))
+        return false;
+    ec_outb(ACPI_EC_DATA_PORT, offset);
+    if(!ec_wait_ibf_clear(100000U))
+        return false;
+    ec_outb(ACPI_EC_DATA_PORT, value);
+    return ec_wait_ibf_clear(100000U);
+}
+
 bool acpi_ec_init(void){
     ec_ready=ec_wait_status(ACPI_EC_STATUS_IBF, 0, 100000U);
     if(!ec_ready)
