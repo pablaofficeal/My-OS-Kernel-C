@@ -26,6 +26,7 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_FIRMWARE_SO_HINT "iwlwifi-so-a0-gf-a0-89.ucode"
 #define AX201_FIRMWARE_SO_MODULE "/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
 #define AX201_FIRMWARE_MAGIC 0x0A4C5749U
+#define AX201_FIRMWARE_MAGIC_OFFSET 4U
 
 #define AX201_CSR_HW_IF_CONFIG_REG 0x00
 #define AX201_CSR_INT              0x08
@@ -71,6 +72,30 @@ static uint32_t ax201_csr_read(uint32_t offset){
     return *(volatile uint32_t *)(adapter.regs + offset);
 }
 
+static uint32_t ax201_read_le32(const uint8_t *p){
+    return (uint32_t)p[0]
+        | ((uint32_t)p[1] << 8)
+        | ((uint32_t)p[2] << 16)
+        | ((uint32_t)p[3] << 24);
+}
+
+static void ax201_log_firmware_release(const uint8_t *image, uint64_t size){
+    char release[49];
+    uint64_t pos = AX201_FIRMWARE_MAGIC_OFFSET + 4U;
+    uint32_t out = 0;
+
+    memset(release, 0, sizeof(release));
+    while(pos < size && out < sizeof(release)-1){
+        uint8_t ch = image[pos++];
+        if(ch == 0) break;
+        if(ch < 0x20 || ch > 0x7e) break;
+        release[out++] = (char)ch;
+    }
+    if(out){
+        klogf(KLOG_INFO, "ax201: firmware release '%s'", release);
+    }
+}
+
 static bool ax201_get_firmware(void){
     const void *image=0;
     uint64_t size=0;
@@ -82,15 +107,18 @@ static bool ax201_get_firmware(void){
         klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", adapter.firmware_module);
         return false;
     }
-    uint32_t magic=*(const uint32_t *)image;
+    uint32_t magic=ax201_read_le32((const uint8_t *)image + AX201_FIRMWARE_MAGIC_OFFSET);
     if(magic!=AX201_FIRMWARE_MAGIC){
-        klogf(KLOG_ERROR, "ax201: invalid firmware magic=0x%08x size=%llu", magic, (unsigned long long)size);
+        uint32_t first=ax201_read_le32((const uint8_t *)image);
+        klogf(KLOG_ERROR, "ax201: invalid firmware magic@4=0x%08x first=0x%08x size=%llu",
+            magic, first, (unsigned long long)size);
         return false;
     }
     adapter.firmware=(const uint8_t *)image;
     adapter.firmware_size=size;
     klogf(KLOG_OK, "ax201: firmware module loaded %s (%llu bytes)",
         adapter.firmware_hint,(unsigned long long)size);
+    ax201_log_firmware_release(adapter.firmware, adapter.firmware_size);
     return true;
 }
 
