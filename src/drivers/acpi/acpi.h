@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define ACPI_SIG_LEN 4
+#define ACPI_TABLE_MAX_LENGTH (16U * 1024U * 1024U)
 
 struct acpi_table_header {
     char signature[ACPI_SIG_LEN];

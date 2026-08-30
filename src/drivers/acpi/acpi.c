@@ -34,9 +34,30 @@ static uint8_t acpi_checksum_bytes(const void *data, uint32_t length){
 }
 
 bool acpi_table_valid(const void *table, uint32_t length){
-    if(!table || length<sizeof(struct acpi_table_header))
+    if(!table || length<sizeof(struct acpi_table_header)
+       || length>ACPI_TABLE_MAX_LENGTH)
         return false;
     return acpi_checksum_bytes(table, length)==0;
+}
+
+static bool acpi_header_sane(const struct acpi_table_header *table){
+    if(!table)
+        return false;
+    uint32_t length=table->length;
+    return length>=sizeof(struct acpi_table_header)
+        && length<=ACPI_TABLE_MAX_LENGTH;
+}
+
+static const struct acpi_table_header *acpi_map_table(uint64_t address){
+    if(!address)
+        return NULL;
+    const struct acpi_table_header *table=
+        (const struct acpi_table_header *)acpi_map_phys_impl(address);
+    if(!acpi_header_sane(table))
+        return NULL;
+    if(!acpi_table_valid(table, table->length))
+        return NULL;
+    return table;
 }
 
 static bool acpi_rsdp_valid(const struct acpi_rsdp *rsdp){
@@ -72,6 +93,8 @@ static const struct acpi_table_header *acpi_resolve_root(const struct acpi_rsdp 
                 root=(const struct acpi_table_header *)((uint64_t)(uintptr_t)root
                                                         +hhdm_offset_global);
             }
+            if(!acpi_header_sane(root))
+                continue;
             if(!acpi_table_valid(root, root->length))
                 continue;
             acpi_root_xsdt=(root==xsdt || (xsdt && root==(const struct acpi_table_header *)
@@ -99,14 +122,6 @@ static uint64_t acpi_root_entry_address(const struct acpi_table_header *root, ui
     }
     const uint32_t *array=(const uint32_t *)entries;
     return array[index];
-}
-
-static const struct acpi_table_header *acpi_map_table(uint64_t address){
-    const struct acpi_table_header *table=
-        (const struct acpi_table_header *)acpi_map_phys_impl(address);
-    if(!acpi_table_valid(table, table->length))
-        return NULL;
-    return table;
 }
 
 const struct acpi_table_header *acpi_find_table(const char signature[ACPI_SIG_LEN]){
@@ -205,19 +220,15 @@ bool acpi_init(void){
     if(acpi_fadt){
         klogf(KLOG_INFO, "acpi: FADT rev=%u PM1a_CNT=0x%x",
               acpi_fadt->header.revision, acpi_fadt_pm1a_cnt());
-        if(acpi_fadt->header.length>=offsetof(struct acpi_fadt, x_dsdt)+8
-           && acpi_fadt->x_dsdt){
-            acpi_dsdt=(const struct acpi_table_header *)acpi_map_phys(acpi_fadt->x_dsdt);
-        } else if(acpi_fadt->dsdt){
-            acpi_dsdt=(const struct acpi_table_header *)acpi_map_phys(acpi_fadt->dsdt);
-        }
-        if(acpi_dsdt && acpi_table_valid(acpi_dsdt, acpi_dsdt->length))
-            klogf(KLOG_INFO, "acpi: DSDT mapped at %p len=%u", acpi_dsdt, acpi_dsdt->length);
-        else
-            acpi_dsdt=NULL;
     } else {
         klog(KLOG_WARN, "acpi: FADT (FACP) not found");
     }
+
+    acpi_dsdt=acpi_find_table("DSDT");
+    if(acpi_dsdt)
+        klogf(KLOG_INFO, "acpi: DSDT mapped at %p len=%u", acpi_dsdt, acpi_dsdt->length);
+    else
+        klog(KLOG_WARN, "acpi: DSDT not found in XSDT/RSDT");
 
     acpi_probe_madt();
     return true;
