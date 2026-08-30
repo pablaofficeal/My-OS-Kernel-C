@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define ASUS_WMI_DEVID_WLAN      0x00010011U
+#define ASUS_WMI_DEVID_WLAN_LED  0x00010012U
 #define ASUS_WMI_METHODID_DEVS   0x53564544U /* 'DEVS' */
 
 bool acpi_asus_init(void);

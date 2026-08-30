@@ -16,9 +16,6 @@ struct asus_bios_args {
     uint32_t arg1;
 } __attribute__((packed));
 
-#define ASUS_EC_WIFI_OFFSET 0xD9U
-#define ASUS_EC_WIFI_ON     0x01U
-
 static bool asus_call_devs_direct(const char *parent, uint32_t dev_id, uint32_t value,
                                   uint32_t *retval){
     struct acpi_aml_method method;
@@ -45,24 +42,41 @@ static bool asus_call_devs_wmi(uint32_t dev_id, uint32_t value, uint32_t *retval
                                     &args, sizeof(args), retval);
 }
 
-static bool asus_ec_enable_wifi(void){
-    uint8_t before=0;
-    (void)acpi_ec_read(ASUS_EC_WIFI_OFFSET, &before);
-    klogf(KLOG_INFO, "acpi-asus: EC[0x%02x] before=%u", ASUS_EC_WIFI_OFFSET, before);
+static bool asus_ec_write_verify(uint8_t offset, uint8_t value){
+    uint8_t before=0, after=0;
+    if(!acpi_ec_read(offset, &before))
+        return false;
+    if(!acpi_ec_write(offset, value))
+        return false;
+    if(!acpi_ec_read(offset, &after))
+        return false;
+    klogf(KLOG_INFO, "acpi-asus: EC[0x%02x] write %u: %u -> %u",
+          offset, value, before, after);
+    return after==value;
+}
 
-    /* Vivobook F00A27C2 EC: прямая запись в RAM через порты 0x62/0x66 */
-    if(!acpi_ec_write_raw(0x59U, ASUS_EC_WIFI_OFFSET, ASUS_EC_WIFI_ON)){
-        klog(KLOG_WARN, "acpi-asus: EC raw write (cmd 0x59) failed, trying ACPI 0x81");
-        if(!acpi_ec_write(ASUS_EC_WIFI_OFFSET, ASUS_EC_WIFI_ON)){
-            klog(KLOG_ERROR, "acpi-asus: EC write 0xD9=1 failed");
-            return false;
+static bool asus_ec_enable_wifi(void){
+    static const uint8_t offsets[]={0xD9U, 0x57U, 0x31U, 0x67U, 0x5BU, 0x03U};
+    static const uint8_t values[]={0x01U, 0x00U, 0x80U};
+
+    for(uint32_t oi=0;oi<sizeof(offsets);oi++){
+        uint8_t offset=offsets[oi];
+        uint8_t cur=0;
+        if(acpi_ec_read(offset, &cur))
+            klogf(KLOG_DEBUG, "acpi-asus: EC[0x%02x] probe=%u", offset, cur);
+        for(uint32_t vi=0;vi<sizeof(values);vi++){
+            if(asus_ec_write_verify(offset, values[vi]))
+                return true;
         }
     }
 
-    uint8_t after=0;
-    if(acpi_ec_read(ASUS_EC_WIFI_OFFSET, &after))
-        klogf(KLOG_INFO, "acpi-asus: EC[0x%02x] after=%u", ASUS_EC_WIFI_OFFSET, after);
-    return after==ASUS_EC_WIFI_ON || before!=ASUS_EC_WIFI_ON;
+    /* fallback: raw cmd 0x59 как в заметках, но только если readback изменился */
+    if(acpi_ec_write_raw(0x59U, 0xD9U, 0x01U)){
+        uint8_t after=0;
+        if(acpi_ec_read(0xD9U, &after) && after==0x01U)
+            return true;
+    }
+    return false;
 }
 
 bool acpi_asus_init(void){
@@ -117,6 +131,10 @@ bool acpi_asus_rfkill_clear_wifi(void){
         klog(KLOG_OK, "acpi-asus: WLAN enabled via ACPI WMI");
         return true;
     }
+    if(asus_call_devs_wmi(ASUS_WMI_DEVID_WLAN_LED, 1, &retval)){
+        klog(KLOG_OK, "acpi-asus: WLAN LED/state via ACPI WMI (0x00010012)");
+        return true;
+    }
 
     static const char *parents[]={"ATKD", "ASUS", NULL};
     for(int i=0;parents[i];i++){
@@ -124,13 +142,17 @@ bool acpi_asus_rfkill_clear_wifi(void){
             klogf(KLOG_OK, "acpi-asus: WLAN enabled via \\%s.DEVS", parents[i]);
             return true;
         }
+        if(asus_call_devs_direct(parents[i], ASUS_WMI_DEVID_WLAN_LED, 1, &retval)){
+            klogf(KLOG_OK, "acpi-asus: WLAN LED via \\%s.DEVS (0x00010012)", parents[i]);
+            return true;
+        }
     }
 
     if(asus_ec_enable_wifi()){
-        klog(KLOG_OK, "acpi-asus: WLAN enabled via EC port 0xD9");
+        klog(KLOG_OK, "acpi-asus: WLAN enabled via EC RAM write (verified readback)");
         return true;
     }
 
-    klog(KLOG_WARN, "acpi-asus: failed to clear WLAN RF-kill via WMI/namespace/EC");
+    klog(KLOG_WARN, "acpi-asus: EC/WMI/namespace did not change RF-kill state");
     return false;
 }

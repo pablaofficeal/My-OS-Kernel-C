@@ -54,9 +54,12 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_MAC_ADDR0_STRAP   (AX201_CSR_MAC_ADDR_BASE + 0x08)
 #define AX201_CSR_MAC_ADDR1_STRAP   (AX201_CSR_MAC_ADDR_BASE + 0x0C)
 
-/* GP_CNTRL bits */
-#define AX201_GP_CNTRL_HW_RFKILL    0x08000000U
-#define AX201_GP_CNTRL_INIT_DONE    0x00000004U
+/* GP_CNTRL bits (iwlwifi CSR_GP_CNTRL) */
+#define AX201_GP_CNTRL_MAC_ACCESS_REQ  0x00000001U
+#define AX201_GP_CNTRL_MAC_ACCESS_SAV  0x00000002U
+#define AX201_GP_CNTRL_INIT_DONE       0x00000004U
+#define AX201_GP_CNTRL_MAC_CLOCK_READY 0x00000008U
+#define AX201_GP_CNTRL_HW_RADIO_ON     0x08000000U
 
 /* CSR_INT bits */
 #define AX201_INT_ALIVE             0x00010000U  /* firmware ALIVE notification */
@@ -105,12 +108,38 @@ static bool initialized;
 static bool ax201_fw_upload(void);
 static bool ax201_wait_alive_poll(void);
 static void ax201_ensure_pci_power(void);
+static bool ax201_request_radio_on(void);
 
 static uint32_t ax201_csr_read(uint32_t offset){
     return *(volatile uint32_t *)(adapter.regs + offset);
 }
 static void ax201_csr_write(uint32_t offset, uint32_t value){
     *(volatile uint32_t *)(adapter.regs + offset) = value;
+}
+
+static bool ax201_request_radio_on(void){
+    if(!adapter.regs)
+        return false;
+
+    uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+    klogf(KLOG_INFO, "ax201: GP_CNTRL before radio on = 0x%08x", gp);
+
+    gp|=AX201_GP_CNTRL_MAC_ACCESS_REQ | AX201_GP_CNTRL_MAC_CLOCK_READY
+        | AX201_GP_CNTRL_HW_RADIO_ON;
+    ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
+
+    for(uint32_t i=0;i<2000U;i++){
+        gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+        if(gp & AX201_GP_CNTRL_MAC_ACCESS_SAV)
+            break;
+        timer_sleep(1);
+    }
+
+    gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+    bool radio_on=(gp & AX201_GP_CNTRL_HW_RADIO_ON)!=0;
+    klogf(KLOG_INFO, "ax201: GP_CNTRL after radio on = 0x%08x (radio_on=%u sav=%u)",
+          gp, radio_on ? 1U : 0U, (gp & AX201_GP_CNTRL_MAC_ACCESS_SAV) ? 1U : 0U);
+    return radio_on;
 }
 
 static uint32_t ax201_read_le32(const uint8_t *p){
@@ -629,10 +658,12 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: device reports not ready (RFKILL or power)");
         klog(KLOG_WARN, "ax201: try: Fn+F2 / BIOS Wi-Fi Enable, disable Fast Boot, EC reset");
     }
-    if(gp_ctrl & AX201_GP_CNTRL_HW_RFKILL){
-        klog(KLOG_WARN, "ax201: hardware RF-kill is active (GP_CNTRL 0x08000000) – continuing anyway");
+    if(!(gp_ctrl & AX201_GP_CNTRL_HW_RADIO_ON)){
+        klog(KLOG_WARN, "ax201: hardware radio OFF (GP_CNTRL missing 0x08000000)");
+        if(!ax201_request_radio_on())
+            klog(KLOG_WARN, "ax201: failed to assert HW_RADIO_ON in GP_CNTRL");
     } else {
-        klog(KLOG_INFO, "ax201: RF-kill inactive (radio enabled)");
+        klog(KLOG_INFO, "ax201: hardware radio ON (GP_CNTRL 0x08000000 set)");
     }
 
     if(!ax201_read_mac(adapter.mac)){
@@ -647,7 +678,9 @@ bool intel_ax201_init(void){
             "wlan0 registered without firmware (scan will fail until ucode loaded)");
     } else {
         if(!acpi_asus_rfkill_clear_wifi())
-            klog(KLOG_WARN, "ax201: RF-kill still active before firmware upload");
+            klog(KLOG_WARN, "ax201: ASUS EC/WMI did not confirm RF-kill clear");
+        if(!ax201_request_radio_on())
+            klog(KLOG_WARN, "ax201: GP_CNTRL radio still off before firmware upload");
         if(!ax201_fw_upload()){
             klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware (scan will fail until ALIVE)");
         } else {
