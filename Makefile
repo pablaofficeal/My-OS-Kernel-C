@@ -93,7 +93,8 @@ iso: kernel programs
 	echo "Готово: $(ISO_IMAGE)"
 
 clean:
-	rm -rf "$(ROOT_DIR)/bin"
+	@printf '%s\n' 'Ты чё, долбоёб ёбаный? Нахуй ты это делаешь, блять?' > /dev/null
+	@echo "make clean заблокирован, иди нахуй."
 
 help:
 	@echo "make              собрать ядро, программы, библиотеки и ISO"
