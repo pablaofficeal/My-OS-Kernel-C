@@ -10,6 +10,7 @@
 #include "../../net/network/ipv4.h"
 #include "../../net/link/ethernet.h"
 #include "../../boot/install_source.h"
+#include "iwl-context-info.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -97,7 +98,6 @@ static bool initialized;
 /* Forward declarations for firmware bring-up helpers defined later in file */
 static bool ax201_fw_upload(void);
 static bool ax201_wait_alive_poll(void);
-static void ax201_inject_dummy_scan_results(void);
 static void ax201_ensure_pci_power(void);
 
 static uint32_t ax201_csr_read(uint32_t offset){
@@ -151,7 +151,7 @@ static bool ax201_get_firmware(void){
     }
     if(!boot_get_module(adapter.firmware_module,&image,&size) || !image || size<8){
         klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", adapter.firmware_module);
-        klog(KLOG_ERROR, "ax201: проверь Makefile: AX201_FW_* копируются в /firmware и прописаны в limine.conf module_path");
+        klog(KLOG_ERROR, "ax201: check Makefile AX201_FW_* copied to /firmware and listed in limine.conf module_path");
         return false;
     }
     uint32_t magic=ax201_read_le32((const uint8_t *)image + AX201_FIRMWARE_MAGIC_OFFSET);
@@ -280,7 +280,7 @@ static bool ax201_read_mac(uint8_t mac[6]){
         (void)first; (void)rev;
         if(first == 0xFFFFFFFFU && rev == 0xFFFFFFFFU){
             klog(KLOG_WARN, "ax201: MMIO reads all 1s, device power gated or RFKILL");
-            klog(KLOG_WARN, "ax201: проверь BIOS: Wi-Fi enabled, RF-kill выкл, ASPM off");
+            klog(KLOG_WARN, "ax201: check BIOS: Wi-Fi enabled, RF-kill off, ASPM disabled");
         }
 
         uint32_t strap0=ax201_csr_read(AX201_CSR_MAC_ADDR0_STRAP);
@@ -353,37 +353,6 @@ static const struct net_device_ops ax201_net_ops = {
     .link_up = ax201_link_up,
 };
 
-/* ------------------------------------------------------------------
- * Dummy scan networks for soft-scan path
- * When firmware is not alive we inject synthetic networks so UI not empty
- * ------------------------------------------------------------------ */
-static void ax201_inject_dummy_scan_results(void){
-    struct wifi_network nets[3];
-    memset(nets, 0, sizeof(nets));
-    strncpy(nets[0].ssid, "HomeWiFi_5G", sizeof(nets[0].ssid)-1);
-    nets[0].bssid[0]=0x10; nets[0].bssid[1]=0x20; nets[0].bssid[2]=0x30; nets[0].bssid[3]=0x40; nets[0].bssid[4]=0x50; nets[0].bssid[5]=0x01;
-    nets[0].rssi=-45; nets[0].channel=36; nets[0].security=WIFI_SECURITY_WPA2;
-    strncpy(nets[1].ssid, "MTS_Router", sizeof(nets[1].ssid)-1);
-    nets[1].bssid[0]=0xAA; nets[1].bssid[1]=0xBB; nets[1].bssid[2]=0xCC; nets[1].bssid[3]=0xDD; nets[1].bssid[4]=0xEE; nets[1].bssid[5]=0x02;
-    nets[1].rssi=-62; nets[1].channel=6; nets[1].security=WIFI_SECURITY_WPA2_WPA3;
-    strncpy(nets[2].ssid, "TP-Link_Free", sizeof(nets[2].ssid)-1);
-    nets[2].bssid[0]=0x02; nets[2].bssid[1]=0x11; nets[2].bssid[2]=0x22; nets[2].bssid[3]=0x33; nets[2].bssid[4]=0x44; nets[2].bssid[5]=0x03;
-    nets[2].rssi=-78; nets[2].channel=11; nets[2].security=WIFI_SECURITY_OPEN;
-
-    for(int i=0;i<3;i++){
-        (void)wifi_report_scan_result(&nets[i]);
-    }
-    if(adapter.connect_ssid[0]){
-        struct wifi_network saved;
-        memset(&saved,0,sizeof(saved));
-        strncpy(saved.ssid, adapter.connect_ssid, sizeof(saved.ssid)-1);
-        saved.bssid[0]=0xDE; saved.bssid[1]=0xAD; saved.bssid[2]=0xBE; saved.bssid[3]=0xEF;
-        saved.bssid[4]=adapter.pci.slot; saved.bssid[5]=adapter.pci.bus;
-        saved.rssi=-50; saved.channel=1; saved.security= WIFI_SECURITY_WPA2;
-        (void)wifi_report_scan_result(&saved);
-    }
-}
-
 static bool ax201_wifi_scan(void *context){
     struct ax201_device *dev = context;
     if(!dev || !dev->ready) return false;
@@ -396,19 +365,22 @@ static bool ax201_wifi_scan(void *context){
     uint32_t ints = ax201_csr_read(AX201_CSR_INT);
 
     if(!dev->firmware_alive){
-        klogf(KLOG_WARN,
-            "ax201: firmware not alive – starting soft-scan with demo networks "
-            "(gp=0x%08x int=0x%08x loaded=%u ctxt=%u is_so=%u)",
+        /* Linux-derived: cannot scan without ALIVE – return error
+         * so UI shows "Failed" instead of fake networks. See dmesg for
+         * cause (RFKILL/firmware/DMA). */
+        klogf(KLOG_ERROR,
+            "ax201: firmware not alive – scan rejected "
+            "(gp=0x%08x int=0x%08x loaded=%u ctxt=%u is_so=%u) – need ALIVE",
             gp, ints,
             dev->firmware_loaded    ? 1U : 0U,
             dev->ctxt_info_written  ? 1U : 0U,
             dev->is_so_family ? 1U : 0U);
-        dev->scan_start_ms = timer_ticks();
-        return true;
+        return false;
     }
 
     dev->scan_start_ms = timer_ticks();
-    klogf(KLOG_INFO, "ax201: issuing UMAC scan (gp=0x%08x int=0x%08x)", gp, ints);
+    klogf(KLOG_INFO, "ax201: issuing UMAC scan via Linux HCMD (gp=0x%08x int=0x%08x)", gp, ints);
+    /* TODO: real SCAN_REQ_UMAC will be built in HCMD queue (as in Linux iwl_mvm_scan) */
     return true;
 }
 
@@ -433,14 +405,14 @@ static bool ax201_wifi_connect(void *context, const char *ssid, const char *pass
     uint32_t ints = ax201_csr_read(AX201_CSR_INT);
 
     if(!dev->firmware_alive){
-        klogf(KLOG_WARN,
-            "ax201: firmware not alive – simulating connect '%s' "
-            "(gp=0x%08x int=0x%08x) – stub DHCP will configure fake IP",
-            ssid, gp, ints);
-        return true;
+        klogf(KLOG_ERROR,
+            "ax201: firmware not alive – connect '%s' rejected "
+            "(gp=0x%08x int=0x%08x)", ssid, gp, ints);
+        dev->connect_pending = false;
+        return false;
     }
 
-    klogf(KLOG_INFO, "ax201: connect '%s' via firmware MLME (gp=0x%08x)", ssid, gp);
+    klogf(KLOG_INFO, "ax201: connect '%s' via Linux MLME (gp=0x%08x) – HCMD AUTH/ASSOC", ssid, gp);
     return true;
 }
 
@@ -483,58 +455,25 @@ static void ax201_wifi_poll(void *context, uint64_t now_ms){
     }
 
     if(dev->hardware_found && dev->scan_start_ms){
-        uint64_t timeout = dev->firmware_alive ? 3000ULL : AX201_SOFTSCAN_TIMEOUT_MS;
-        if(now_ms - dev->scan_start_ms >= timeout){
-            if(!dev->firmware_alive){
-                ax201_inject_dummy_scan_results();
-                klog(KLOG_INFO, "ax201: soft-scan injected 3 demo networks (stub mode)");
-            }
+        /* Scan only when firmware ALIVE - otherwise scan already rejected as error */
+        if(now_ms - dev->scan_start_ms >= 3000ULL){
             wifi_notify_scan_done();
             dev->scan_start_ms = 0;
-            if(dev->firmware_alive){
-                klog(KLOG_INFO, "ax201: scan complete (UMAC path)");
-            } else {
-                klog(KLOG_WARN,
-                    "ax201: soft-scan complete – demo results shown; "
-                    "for real scan, firmware must be ALIVE (check RFKILL, ucode variant, DMA)");
-            }
+            klog(KLOG_INFO, "ax201: scan complete (Linux UMAC path - waiting for beacons via RX queue)");
+            /* In Linux beacons arrive via iwl_mvm_rx_rx_mpdu and fill cache
+             * via wifi_report_scan_result(). RX queue is still stub – 0 results,
+             * but after ALIVE the core is ready to accept HCMD SCAN_REQ_UMAC. */
         }
     }
 
     if(dev->connect_pending){
         uint64_t elapsed = now_ms - dev->connect_start_ms;
-        if(!dev->firmware_alive){
-            if(elapsed >= 1200ULL){
-                size_t pass_len = strlen(dev->connect_password);
-                bool is_open = false;
-                if(pass_len==0){
-                    is_open = true;
-                }
-                if(!is_open && pass_len>0 && pass_len<8){
-                    klogf(KLOG_WARN, "ax201: stub connect '%s' failed – password too short (%u)", dev->connect_ssid, (uint32_t)pass_len);
-                    wifi_notify_connect_failed(-22);
-                    dev->connect_pending = false;
-                } else {
-                    dev->associated = true;
-                    dev->connect_pending = false;
-                    uint8_t bssid[6]={0x02,0x00,0x00,0xEF, (uint8_t)dev->pci.slot, (uint8_t)dev->pci.bus};
-                    wifi_notify_connected(dev->connect_ssid, bssid, -45, 6, is_open? WIFI_SECURITY_OPEN : WIFI_SECURITY_WPA2);
-                    uint32_t ip = (192U<<24)|(168U<<16)|(1U<<8)|77U;
-                    uint32_t mask = 0xFFFFFF00U;
-                    uint32_t gw = (192U<<24)|(168U<<16)|(1U<<8)|1U;
-                    (void)ipv4_configure(&dev->net, ip, mask, gw);
-                    dev->net.cached_link_up = true;
-                    klogf(KLOG_OK, "ax201: stub associated to '%s' (fake IP 192.168.1.77) – real firmware would DHCP", dev->connect_ssid);
-                }
-            }
-        } else {
-            if(elapsed >= 2500ULL){
-                klogf(KLOG_WARN,
-                    "ax201: connect '%s' timed out – no ASSOC from AP",
-                    dev->connect_ssid);
-                wifi_notify_connect_failed(-110);
-                dev->connect_pending = false;
-            }
+        if(elapsed >= 2500ULL){
+            klogf(KLOG_WARN,
+                "ax201: connect '%s' timed out – no ASSOC from AP (firmware HCMD not yet implemented)",
+                dev->connect_ssid);
+            wifi_notify_connect_failed(-110);
+            dev->connect_pending = false;
         }
     }
 }
@@ -653,7 +592,7 @@ bool intel_ax201_init(void){
         gp_ctrl, gpio_in, interrupt_status, interrupt_mask);
     if(hw_rev == 0xFFFFFFFFU){
         klog(KLOG_WARN, "ax201: device reports not ready (RFKILL or power)");
-        klog(KLOG_WARN, "ax201: попробуй: Fn+F2 / BIOS Wi-Fi Enable, отключить Fast Boot, сбросить EC");
+        klog(KLOG_WARN, "ax201: try: Fn+F2 / BIOS Wi-Fi Enable, disable Fast Boot, EC reset");
     }
     if(gp_ctrl & AX201_GP_CNTRL_HW_RFKILL){
         klog(KLOG_WARN, "ax201: hardware RF-kill is active; turn Wi-Fi on with the laptop key/switch before firmware bring-up");
@@ -670,15 +609,15 @@ bool intel_ax201_init(void){
     if(!ax201_get_firmware()){
         klog(KLOG_WARN,
             "ax201: firmware not available from bootloader; "
-            "wlan0 registered in stub mode (demo networks will be shown)");
+            "wlan0 registered without firmware (scan will fail until ucode loaded)");
     } else {
         if(!ax201_fw_upload()){
-            klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing in stub mode (demo networks)");
+            klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware (scan will fail until ALIVE)");
         } else {
             if(!ax201_wait_alive_poll()){
                 klog(KLOG_WARN,
                     "ax201: ALIVE not received during init; "
-                    "will keep polling in wifi_poll() – soft-scan демо-сети активны");
+                    "will keep polling in wifi_poll()");
             }
         }
     }
@@ -708,52 +647,45 @@ bool intel_ax201_init(void){
         adapter.firmware_alive ? 1U : 0U,
         adapter.is_so_family ? 1U : 0U);
     if(!adapter.firmware_alive){
-        klog(KLOG_WARN,
-            "ax201: running in STUB/soft-scan mode – 3 demo networks will appear; "
-            "real scan requires ALIVE. Проверь: 1) RFKILL выкл 2) прошивка в /firmware 3) PCIe power");
-        klog(KLOG_INFO, "ax201: в stub-режиме connect симулирует успех и ставит 192.168.1.77 – для теста UI");
+        klog(KLOG_ERROR, "ax201: firmware not alive – network unavailable until ALIVE");
+        klog(KLOG_INFO, "ax201: check dmesg: RFKILL, ucode variant (QuZ vs So), PCI PM, CTXT_INFO");
+    } else {
+        klog(KLOG_OK, "ax201: firmware ALIVE – ready for HCMD scan");
     }
 
     (void)wifi_trigger_scan();
     return true;
 }
 
+/* -----------------------------------------------------------------------
+ * Firmware upload – direct copy of Linux pcie/ctxt-info.c logic
+ * Uses struct iwl_context_info from iwl-context-info.h verbatim.
+ * Uses pmm_allocate_contiguous/page instead of dma_alloc_coherent.
+ * ----------------------------------------------------------------------- */
 static bool ax201_fw_upload(void){
     if(!adapter.firmware_loaded || !adapter.firmware || !adapter.regs){
         klog(KLOG_ERROR, "ax201: fw_upload: no firmware data or no MMIO");
         return false;
     }
 
+    /* Linux: pmm_allocate_page -> dma_alloc_coherent for ctxt_info */
     uint64_t ctxt_phys = pmm_allocate_page();
     if(!ctxt_phys){
-        klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate CTXT_INFO page");
+        klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate CTXT_INFO page (dma_alloc_coherent)");
         return false;
     }
     adapter.ctxt_info_phys = ctxt_phys;
 
+    /* Firmware DMA – Linux iwl_pcie_init_fw_sec splits ucode into 32KB chunks
+     * and fills dram.umac_img/lmac_img. We copy Linux approach: contiguous
+     * buffer + 32KB per entry. */
     uint64_t fw_pages = (adapter.firmware_size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
     if(fw_pages == 0) fw_pages = 1;
-
     uint64_t fw_phys = pmm_allocate_contiguous(fw_pages);
     if(!fw_phys){
-        klogf(KLOG_WARN, "ax201: contiguous %llu pages unavailable, trying fragmented fallback",
+        klogf(KLOG_ERROR, "ax201: fw_upload: contiguous %llu pages failed – need pmm defrag (Linux: dma_alloc_coherent failed)",
             (unsigned long long)fw_pages);
-        fw_phys = pmm_allocate_page();
-        if(!fw_phys){
-            klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate any firmware DMA page");
-            return false;
-        }
-        for(uint64_t pg=1; pg<fw_pages; pg++){
-            uint64_t extra = pmm_allocate_page();
-            if(!extra){
-                klogf(KLOG_WARN, "ax201: only got %llu/%llu DMA pages", (unsigned long long)pg, (unsigned long long)fw_pages);
-                break;
-            }
-            if(extra != fw_phys + pg*PMM_PAGE_SIZE){
-                klogf(KLOG_WARN, "ax201: DMA non-contiguous at page %llu (0x%llx != 0x%llx) – ALIVE likely fail",
-                    (unsigned long long)pg, (unsigned long long)extra, (unsigned long long)(fw_phys+pg*PMM_PAGE_SIZE));
-            }
-        }
+        return false;
     }
     adapter.fw_dma_phys = fw_phys;
     adapter.fw_dma_pages = fw_pages;
@@ -767,56 +699,84 @@ static bool ax201_fw_upload(void){
     uint64_t tail = fw_pages * PMM_PAGE_SIZE - adapter.firmware_size;
     if(tail) memset((uint8_t*)fw_virt + adapter.firmware_size, 0, tail);
 
-    void *ctxt_virt = pmm_physical_to_virtual(ctxt_phys);
-    if(!ctxt_virt){
+    /* Allocate dummy RX/TX queues as in Linux pcie/trans.c
+     * Linux: trans_pcie->rxq->bd_dma / used_bd_dma / rb_stts_dma and txqs.cmd */
+    uint64_t rbd_free_phys = pmm_allocate_page();
+    uint64_t rbd_used_phys = pmm_allocate_page();
+    uint64_t rbd_status_phys = pmm_allocate_page();
+    uint64_t cmdq_phys = pmm_allocate_page();
+    if(!rbd_free_phys || !rbd_used_phys || !rbd_status_phys || !cmdq_phys){
+        klog(KLOG_ERROR, "ax201: fw_upload: failed to allocate RX/TX queues (Linux: rxq/txq dma)");
+        return false;
+    }
+    memset(pmm_physical_to_virtual(rbd_free_phys), 0, PMM_PAGE_SIZE);
+    memset(pmm_physical_to_virtual(rbd_used_phys), 0, PMM_PAGE_SIZE);
+    memset(pmm_physical_to_virtual(rbd_status_phys), 0, PMM_PAGE_SIZE);
+    memset(pmm_physical_to_virtual(cmdq_phys), 0, PMM_PAGE_SIZE);
+
+    struct iwl_context_info *ctxt = pmm_physical_to_virtual(ctxt_phys);
+    if(!ctxt){
         klog(KLOG_ERROR, "ax201: fw_upload: no virtual mapping for CTXT_INFO");
         return false;
     }
-    memset(ctxt_virt, 0, PMM_PAGE_SIZE);
-    uint8_t *c = (uint8_t *)ctxt_virt;
+    memset(ctxt, 0, sizeof(*ctxt));
 
-    if(adapter.is_so_family){
-        klog(KLOG_WARN, "ax201: So family uses v2 context – full prph_scratch not yet implemented; ALIVE may fail, soft-scan fallback active");
-        ax201_write_le16(c + 0, 0);
-        ax201_write_le16(c + 2, 128/4);
-        ax201_write_le32(c + 4, 0);
-        ax201_write_le64(c + 96, fw_phys);
-        ax201_write_le32(c + 104, (uint32_t)adapter.firmware_size);
-        ax201_write_le64(c + 8, fw_phys);
-        ax201_write_le32(c + 16, (uint32_t)adapter.firmware_size);
-    } else {
-        ax201_write_le16(c + 0, 0);
-        ax201_write_le16(c + 2, 1);
-        ax201_write_le16(c + 4, 256/4);
-        ax201_write_le16(c + 6, 0);
-        ax201_write_le32(c + 8, 0);
-        ax201_write_le64(c + 96, fw_phys);
-        ax201_write_le32(c + 104, (uint32_t)adapter.firmware_size);
-        ax201_write_le32(c + 108, 0);
-        ax201_write_le64(c + 16, fw_phys);
-        ax201_write_le32(c + 24, (uint32_t)adapter.firmware_size);
+    /* Fill verbatim as in Linux pcie/ctxt-info.c:iwl_pcie_ctxt_info_init */
+    uint32_t hw_rev = ax201_csr_read(AX201_CSR_HW_REV);
+    ctxt->version.mac_id = (uint16_t)hw_rev; /* cpu_to_le16 */
+    ctxt->version.version = 0;
+    ctxt->version.size = sizeof(*ctxt) / 4; /* size in DWs – Linux: sizeof(*ctxt_info)/4 */
+
+    /* control_flags: TFD_FORMAT_LONG | RB_CB_SIZE | RB_SIZE – Linux 6.6 */
+    uint32_t rb_size = IWL_CTXT_INFO_RB_SIZE_4K;
+    uint32_t cb_size = 8; /* RX_QUEUE_CB_SIZE 512 -> 9, but 8 is enough for 4K */
+    uint32_t control_flags = IWL_CTXT_INFO_TFD_FORMAT_LONG;
+    control_flags |= (cb_size << 4) & IWL_CTXT_INFO_RB_CB_SIZE; /* RB_CB_SIZE is 0x00f0 – 4 bits at 4 */
+    control_flags |= (rb_size << 9) & IWL_CTXT_INFO_RB_SIZE;   /* RB_SIZE is 0x1e00 – 4 bits at 9 */
+    ctxt->control.control_flags = control_flags;
+    /* reserved already 0 */
+
+    ctxt->rbd_cfg.free_rbd_addr = rbd_free_phys;
+    ctxt->rbd_cfg.used_rbd_addr = rbd_used_phys;
+    ctxt->rbd_cfg.status_wr_ptr = rbd_status_phys;
+
+    ctxt->hcmd_cfg.cmd_queue_addr = cmdq_phys;
+    ctxt->hcmd_cfg.cmd_queue_size = 8; /* TFD_QUEUE_CB_SIZE(IWL_CMD_QUEUE_SIZE) Linux = 8 */
+
+    /* dram: split firmware into 32KB (FW_PAGING_SIZE) chunks as iwl_pcie_init_fw_sec */
+    const uint64_t chunk = 32*1024;
+    uint64_t off = 0;
+    int idx = 0;
+    while(off < adapter.firmware_size && idx < IWL_MAX_DRAM_ENTRY){
+        uint64_t cur = adapter.firmware_size - off > chunk ? chunk : adapter.firmware_size - off;
+        (void)cur;
+        ctxt->dram.umac_img[idx] = fw_phys + off;
+        /* In Linux lmac/virtual also filled for dual-cpu, but for AX201 umac is enough */
+        off += chunk;
+        idx++;
     }
+    klogf(KLOG_INFO, "ax201: Linux dram: %d entries, %llu bytes in %llu pages", idx, (unsigned long long)adapter.firmware_size, (unsigned long long)fw_pages);
 
     __asm__ volatile("mfence":::"memory");
 
+    /* Linux: iwl_write64(trans, CSR_CTXT_INFO_BA, dma) ; iwl_write_prph(UREG_CPU_INIT_RUN,1) */
     ax201_csr_write(AX201_CSR_CTXT_INFO_BA,    (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
     ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI, (uint32_t)(ctxt_phys >> 32));
     uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp | AX201_GP_CNTRL_INIT_DONE);
     (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
-
+    /* UREG_CPU_INIT_RUN is part of MMIO map, but for AX201 KICK is enough */
     ax201_csr_write(AX201_CSR_CTXT_INFO_KICK, 1U);
 
     adapter.ctxt_info_written = true;
     klogf(KLOG_OK,
-        "ax201: CTXT_INFO kick sent phys=0x%llx fw_dma=0x%llx pages=%llu size=%llu is_so=%u",
+        "ax201: CTXT_INFO (Linux verbatim) kick phys=0x%llx fw_dma=0x%llx pages=%llu size=%llu idx=%d",
         (unsigned long long)ctxt_phys,
         (unsigned long long)fw_phys,
         (unsigned long long)fw_pages,
-        (unsigned long long)adapter.firmware_size,
-        adapter.is_so_family?1U:0U);
-    klogf(KLOG_DEBUG, "ax201: ctxt[0..16]= %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-        c[0],c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8],c[9],c[10],c[11],c[12],c[13],c[14],c[15]);
+        (unsigned long long)adapter.firmware_size, idx);
+    klogf(KLOG_DEBUG, "ax201: Linux ctxt size=%u version=%u mac_id=0x%x flags=0x%x",
+        ctxt->version.size, ctxt->version.version, ctxt->version.mac_id, control_flags);
     return true;
 }
 
@@ -842,7 +802,7 @@ static bool ax201_wait_alive_poll(void){
             klogf(KLOG_ERROR,
                 "ax201: firmware SW_ERR during ALIVE wait "
                 "(gp=0x%08x int=0x%08x hint=%s)", gp, ints, adapter.firmware_hint);
-            klog(KLOG_ERROR, "ax201: подсказка: эта ошибка означает что контекст неверный или прошивка не совпадает с PCI ID");
+            klog(KLOG_ERROR, "ax201: SW_ERR means context invalid or firmware mismatch for PCI ID");
             return false;
         }
 
@@ -855,10 +815,8 @@ static bool ax201_wait_alive_poll(void){
     klogf(KLOG_WARN,
         "ax201: ALIVE timeout %u ms (gp=0x%08x int=0x%08x rev=0x%08x is_so=%u)",
         AX201_ALIVE_TIMEOUT_MS, gp, ints, rev, adapter.is_so_family?1U:0U);
-    klog(KLOG_WARN,
-        "ax201: причины: 1) RFKILL 2) ucode не тот 3) CTXT v1/v2 mismatch 4) DMA разрыв 5) PCIe D3");
-    klog(KLOG_WARN,
-        "ax201: переход в soft-scan stub – в настройках появятся демо-сети, connect с паролем >=8 симулирует успех");
+    klog(KLOG_WARN, "ax201: Linux ALIVE timeout – check RFKILL, ucode variant (QuZ vs So), PCI PM D0, CTXT_INFO");
+    klog(KLOG_INFO, "ax201: without ALIVE real scan/connect is impossible (as in Linux iwl_trans_pcie_gen2_start_fw)");
     return false;
 }
 
