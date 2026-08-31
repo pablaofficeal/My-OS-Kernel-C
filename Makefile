@@ -75,6 +75,10 @@ iso: kernel programs
 		dst="$(ISO_ROOT)/firmware/$$pnvm"; \
 		if [ -r "$$src" ]; then zstd -q -d -c "$$src" > "$$dst" && echo "AX201 PNVM extra: $$pnvm"; else echo "AX201 PNVM missing: $$src"; fi; \
 	done; \
+	mkdir -p "$(ISO_ROOT)/bin/firmware/Intel/wifi"; \
+	cp "$(ISO_ROOT)/firmware/"*.ucode "$(ISO_ROOT)/bin/firmware/Intel/wifi/" 2>/dev/null || true; \
+	cp "$(ISO_ROOT)/firmware/"*.pnvm "$(ISO_ROOT)/bin/firmware/Intel/wifi/" 2>/dev/null || true; \
+	echo "ISO firmware in bin/firmware/Intel/wifi:"; ls -1 "$(ISO_ROOT)/bin/firmware/Intel/wifi/" | head -n 30; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
