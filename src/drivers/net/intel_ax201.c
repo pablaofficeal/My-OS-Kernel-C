@@ -27,8 +27,10 @@ static const uint16_t ax201_device_ids[] = {
 
 #define AX201_FIRMWARE_QUZ_HINT   "iwlwifi-QuZ-a0-hr-b0-77.ucode"
 #define AX201_FIRMWARE_QUZ_MODULE "/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode"
-#define AX201_FIRMWARE_SO_HINT    "iwlwifi-so-a0-gf-a0-89.ucode"
-#define AX201_FIRMWARE_SO_MODULE  "/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
+#define AX201_FIRMWARE_SO_HR_HINT   "iwlwifi-so-a0-hr-b0-89.ucode"
+#define AX201_FIRMWARE_SO_HR_MODULE "/firmware/iwlwifi-so-a0-hr-b0-89.ucode"
+#define AX201_FIRMWARE_SO_GF_HINT   "iwlwifi-so-a0-gf-a0-89.ucode"
+#define AX201_FIRMWARE_SO_GF_MODULE "/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
 #define AX201_FIRMWARE_MAGIC        0x0A4C5749U
 #define AX201_FIRMWARE_MAGIC_OFFSET 4U
 
@@ -99,7 +101,7 @@ struct ax201_device {
     uint64_t fw_dma_phys;
     uint64_t fw_dma_pages;
     bool ctxt_info_written;
-    bool is_so_family; /* true for So/AX210/AX211 etc (51F0,7A70..) requires v2 */
+    bool is_so_family; /* true for CNVi/AX210+ (51F0..) – So firmware + ctxt v2 */
 };
 
 static struct ax201_device adapter;
@@ -427,10 +429,23 @@ static bool ax201_get_firmware(void){
 
 static bool ax201_is_so_family(uint16_t dev_id){
     switch(dev_id){
-        /* CNVi AX201/AX203 at 00:14.3 use Qu/QuZ HR firmware + ctxt v1 */
+        /* Alder Lake-P CNVi (00:14.3) and discrete So – Linux uses so-a0-* + ctxt v2 */
+        case 0x51F0:
+        case 0x51F1:
         case 0x54F0:
         case 0x7A70:
         case 0x7AF0:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool ax201_uses_so_hr_firmware(uint16_t dev_id){
+    switch(dev_id){
+        case 0x51F0:
+        case 0x51F1:
+        case 0x54F0:
             return true;
         default:
             return false;
@@ -443,18 +458,26 @@ static void ax201_select_firmware(void){
         uint32_t hw_rev=ax201_csr_read(AX201_CSR_HW_REV);
         uint32_t hw_type=(hw_rev>>8) & 0xFFFU;
         klogf(KLOG_INFO, "ax201: HW_REV=0x%08x type=0x%03x", hw_rev, hw_type);
-        if(adapter.pci.device_id==0x51F0 || adapter.pci.device_id==0x51F1)
-            adapter.is_so_family=false;
     }
     if(adapter.is_so_family){
-        adapter.firmware_hint = AX201_FIRMWARE_SO_HINT;
-        adapter.firmware_module = AX201_FIRMWARE_SO_MODULE;
-        klogf(KLOG_INFO, "ax201: PCI id 0x%04x uses Intel So/AX210-family firmware %s (needs v2 context)",
-            adapter.pci.device_id, adapter.firmware_hint);
+        if(ax201_uses_so_hr_firmware(adapter.pci.device_id)){
+            adapter.firmware_hint=AX201_FIRMWARE_SO_HR_HINT;
+            adapter.firmware_module=AX201_FIRMWARE_SO_HR_MODULE;
+            klogf(KLOG_INFO,
+                "ax201: PCI id 0x%04x uses So HR firmware %s (Linux: so-a0-hr-b0-89, ctxt v2)",
+                adapter.pci.device_id, adapter.firmware_hint);
+        } else {
+            adapter.firmware_hint=AX201_FIRMWARE_SO_GF_HINT;
+            adapter.firmware_module=AX201_FIRMWARE_SO_GF_MODULE;
+            klogf(KLOG_INFO,
+                "ax201: PCI id 0x%04x uses So GF firmware %s (ctxt v2)",
+                adapter.pci.device_id, adapter.firmware_hint);
+        }
     } else {
-        adapter.firmware_hint = AX201_FIRMWARE_QUZ_HINT;
-        adapter.firmware_module = AX201_FIRMWARE_QUZ_MODULE;
-        klogf(KLOG_INFO, "ax201: PCI id 0x%04x uses QuZ/AX201-family firmware %s (needs v1 context)",
+        adapter.firmware_hint=AX201_FIRMWARE_QUZ_HINT;
+        adapter.firmware_module=AX201_FIRMWARE_QUZ_MODULE;
+        klogf(KLOG_INFO,
+            "ax201: PCI id 0x%04x uses QuZ firmware %s (ctxt v1)",
             adapter.pci.device_id, adapter.firmware_hint);
     }
 }
