@@ -97,22 +97,24 @@ static void draw(struct pg_window *window,struct disk_app *app,
         pg_window_text(window,20,controls,selected,window->theme.text);
         // Partition count selector
         pg_window_text(window,20,controls+24,"Partitions: ",window->theme.muted_text);
-        char part_label[16]; out=append_text(part_label,"%u",0); // placeholder
-        // simple: show current and allow +/- via keys, but in draw we just display
-        char part_str[8]; pc_copy(part_str, &app->partition_count, 8);
+        char part_str[8]; 
+        uint32_t pc_val = app->partition_count;
+        char rev[12]; int rlen=0;
+        if(pc_val==0) rev[rlen++]='0'; else { char r2[12]; int l2=0; int v=pc_val; while(v>0){ r2[l2++]='0'+v%10; v/=10; } while(l2) rev[rlen++]=r2[--l2]; }
+        for(int i=0;i<rlen;i++) part_str[i]=rev[i];
+        part_str[rlen]='\0';
         pg_window_text(window, 140, controls+24, part_str, window->theme.text);
         // GB inputs for each partition (show only when custom_format)
         if(app->custom_format){
             pg_window_text(window,20,controls+48,"Size GB per partition:",window->theme.muted_text);
             for(int i=0;i<app->partition_count && i<4;i++){
                 char lbl[8]; 
-                // format uint64_t to string using append_u64 style
                 uint64_t v = app->sizes_gb[i];
-                char rev[24]; uint32_t count=0;
-                do{ rev[count++]=(char)('0'+v%10U); v/=10U; }
-                while(v && count<sizeof(rev));
-                while(count) lbl[count-1]=rev[--count];
-                lbl[count]='\0';
+                char r[24]; uint32_t cl=0;
+                do{ r[cl++]='0'+v%10U; v/=10U; }
+                while(v && cl<sizeof(r));
+                while(cl) lbl[cl-1]=r[--cl];
+                lbl[cl]='\0';
                 pg_window_text(window, 140+(i*50), controls+48, lbl, window->theme.text);
                 pg_window_text(window, 160+(i*50), controls+48, "GB", window->theme.muted_text);
             }
@@ -124,12 +126,13 @@ static void draw(struct pg_window *window,struct disk_app *app,
                 pc_copy(app->status,"Disk cannot be formatted safely.",
                         sizeof(app->status));
                 app->confirm_format=false;
-            }else if(!app->confirm_format){
+                app->custom_format=false;
+            }else if(!app->confirm_format && !app->custom_format){
                 app->confirm_format=true;
                 pc_copy(app->status,
                     "Warning: confirmation permanently erases the selected disk.",
                     sizeof(app->status));
-}else if(app->custom_format){
+            }else if(app->custom_format){
                 // custom format: call SYS_FAT32_FORMAT_CUSTOM
                 // build request: device, partition_count, sizes_gb array
                 struct {
@@ -156,6 +159,26 @@ static void draw(struct pg_window *window,struct disk_app *app,
                 }
                 refresh(app);
             }else{
+                int32_t result=(int32_t)pc_syscall(
+                    SYS_FAT32_FORMAT_FORCE,(uint64_t)(uintptr_t)disk->name,
+                    (uint64_t)(uintptr_t)disk->serial,0);
+                app->confirm_format=false;
+                if(result==0) pc_copy(app->status,"FAT32 format completed.",
+                                      sizeof(app->status));
+                else{
+                    pc_copy(app->status,"Format failed, error ",sizeof(app->status));
+                    char number[24]; char *number_out=number;
+                    if(result<0) *number_out++='-';
+                    (void)append_u64(number_out,result<0
+                        ? (uint64_t)(-(int64_t)result) : (uint64_t)result);
+                    append_text(app->status+pc_strlen(app->status),number);
+                }
+                refresh(app);
+            }
+        }
+    } // closes if(app->selected>=0)
+    if(app->status[0]) pg_window_text(window,190,controls+35,app->status,
+        app->confirm_format ? window->theme.danger : window->theme.muted_text);
     pg_window_end(window);
 }
 
