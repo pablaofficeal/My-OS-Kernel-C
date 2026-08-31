@@ -15,10 +15,24 @@ static const struct acpi_fadt *acpi_fadt;
 static const struct acpi_table_header *acpi_dsdt;
 static uint32_t acpi_lapic_count;
 
-static void *acpi_map_phys_impl(uint64_t physical_address){
-    if(physical_address>=hhdm_offset_global)
-        return (void *)(uintptr_t)physical_address;
-    return (void *)(uintptr_t)(physical_address+hhdm_offset_global);
+#define ACPI_FADT_DSDT_OFF    40U
+#define ACPI_FADT_X_DSDT_OFF  140U
+
+static bool acpi_addr_is_hhdm(uint64_t address){
+    if(!hhdm_offset_global)
+        return false;
+    return address>=hhdm_offset_global
+        && address<hhdm_offset_global+0x4000000000ULL;
+}
+
+static void *acpi_map_phys_impl(uint64_t address){
+    if(!address)
+        return NULL;
+    if(address<=0xFFFFFFFFULL)
+        return (void *)(uintptr_t)(address+hhdm_offset_global);
+    if(acpi_addr_is_hhdm(address))
+        return (void *)(uintptr_t)address;
+    return NULL;
 }
 
 void *acpi_map_phys(uint64_t physical_address){
@@ -48,11 +62,35 @@ static bool acpi_header_sane(const struct acpi_table_header *table){
         && length<=ACPI_TABLE_MAX_LENGTH;
 }
 
+static uint64_t acpi_fadt_lookup_dsdt(const struct acpi_table_header *fadt_hdr){
+    if(!fadt_hdr || memcmp(fadt_hdr->signature, "FACP", ACPI_SIG_LEN)!=0)
+        return 0;
+
+    const uint8_t *raw=(const uint8_t *)fadt_hdr;
+    uint32_t len=fadt_hdr->length;
+
+    if(len>=ACPI_FADT_X_DSDT_OFF+8U){
+        uint64_t xdsdt=0;
+        memcpy(&xdsdt, raw+ACPI_FADT_X_DSDT_OFF, sizeof(xdsdt));
+        if(xdsdt)
+            return xdsdt;
+    }
+    if(len>=ACPI_FADT_DSDT_OFF+4U){
+        uint32_t dsdt=0;
+        memcpy(&dsdt, raw+ACPI_FADT_DSDT_OFF, sizeof(dsdt));
+        if(dsdt)
+            return (uint64_t)dsdt;
+    }
+    return 0;
+}
+
 static const struct acpi_table_header *acpi_map_table(uint64_t address){
     if(!address)
         return NULL;
     const struct acpi_table_header *table=
         (const struct acpi_table_header *)acpi_map_phys_impl(address);
+    if(!table)
+        return NULL;
     if(!acpi_header_sane(table))
         return NULL;
     if(!acpi_table_valid(table, table->length))
@@ -226,17 +264,12 @@ bool acpi_init(void){
 
     acpi_dsdt=acpi_find_table("DSDT");
     if(!acpi_dsdt && acpi_fadt){
-        uint64_t dsdt_addr=0;
-        if(acpi_fadt->header.length>=sizeof(struct acpi_fadt)){
-            if(acpi_fadt->x_dsdt)
-                dsdt_addr=acpi_fadt->x_dsdt;
-            else if(acpi_fadt->dsdt)
-                dsdt_addr=(uint64_t)acpi_fadt->dsdt;
-        } else if(acpi_fadt->dsdt){
-            dsdt_addr=(uint64_t)acpi_fadt->dsdt;
-        }
+        uint64_t dsdt_addr=acpi_fadt_lookup_dsdt(&acpi_fadt->header);
         if(dsdt_addr)
             acpi_dsdt=acpi_map_table(dsdt_addr);
+        if(!acpi_dsdt && dsdt_addr)
+            klogf(KLOG_WARN, "acpi: FADT DSDT at 0x%llx failed validation",
+                  (unsigned long long)dsdt_addr);
     }
     if(acpi_dsdt)
         klogf(KLOG_INFO, "acpi: DSDT mapped at %p len=%u", acpi_dsdt, acpi_dsdt->length);
