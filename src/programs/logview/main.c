@@ -467,8 +467,8 @@ static void handle_key(struct logview_state *st, int32_t key){
         if(st->save_disk_count < 0) st->save_disk_count = 0;
         if(st->save_disk_count > 8) st->save_disk_count = 8;
         st->save_selected = 0;
-        st->save_path[0] = '\0';
-        draw_ui(&st);
+        pc_copy(st->save_path, "/kernel.log", sizeof(st->save_path));
+        draw_ui(st);
         return;
     }
 }
@@ -552,37 +552,36 @@ int main(void){
                 draw_ui(&st);
             }
         }
-        // check save dialog buttons
-                if(st->show_save_dialog){
-                    struct pg_rect save_b={w->client.width/2 - 40, w->client.height/2 + 220, 120, 28};
-                    struct pg_rect cancel_b={w->client.width/2 + 80, w->client.height/2 + 220, 120, 28};
-                    if(ev.x >= (int32_t)save_b.x && ev.x < (int32_t)(save_b.x+save_b.width) &&
-                       ev.y >= (int32_t)save_b.y && ev.y < (int32_t)(save_b.y+save_b.height)){
-                        // save: call syscall
-                        // collect device path from save_path
-                        // format: /dev/sdX/logview.log
-                        int32_t rc = (int32_t)pc_syscall(
-                            SYS_SAVE_KLOG, (uint64_t)(uintptr_t)st->save_path, 0);
-                        if(rc >= 0){
-                            pc_copy(st->status, "Log saved successfully", sizeof(st->status));
-                        } else {
-                            pc_copy(st->status, "Save failed", sizeof(st->status));
-                        }
-                        st->show_save_dialog = false;
-                        st->save_selected = 0;
-                        st->save_path[0] = '\0';
-                        draw_ui(&st);
-                        break;
-                    }
-                    if(ev.x >= (int32_t)cancel_b.x && ev.x < (int32_t)(cancel_b.x+cancel_b.width) &&
-                       ev.y >= (int32_t)cancel_b.y && ev.y < (int32_t)(cancel_b.y+cancel_b.height)){
-                        st->show_save_dialog = false;
-                        st->save_selected = 0;
-                        st->save_path[0] = '\0';
-                        draw_ui(&st);
-                        break;
-                    }
+        if(st.show_save_dialog && ev.type==PG_EVENT_MOUSE_DOWN){
+            struct pg_rect dlg={st.window.client.width/2 - 180, 70, 360, 300};
+            struct pg_rect save_b={dlg.x+40, dlg.y+270, 120, 28};
+            struct pg_rect cancel_b={dlg.x+200, dlg.y+270, 120, 28};
+            if(ev.x >= (int32_t)save_b.x && ev.x < (int32_t)(save_b.x+save_b.width) &&
+               ev.y >= (int32_t)save_b.y && ev.y < (int32_t)(save_b.y+save_b.height)){
+                int32_t rc=-1;
+                if(st.save_selected>=0 && st.save_selected<st.save_disk_count){
+                    rc=pc_save_klog(st.save_disks[st.save_selected].name, st.save_path);
                 }
+                if(rc >= 0){
+                    pc_copy(st.status, "Log saved successfully", sizeof(st.status));
+                } else {
+                    pc_copy(st.status, "Save failed", sizeof(st.status));
+                }
+                st.show_save_dialog = false;
+                st.save_selected = 0;
+                st.save_path[0] = '\0';
+                draw_ui(&st);
+                break;
+            }
+            if(ev.x >= (int32_t)cancel_b.x && ev.x < (int32_t)(cancel_b.x+cancel_b.width) &&
+               ev.y >= (int32_t)cancel_b.y && ev.y < (int32_t)(cancel_b.y+cancel_b.height)){
+                st.show_save_dialog = false;
+                st.save_selected = 0;
+                st.save_path[0] = '\0';
+                draw_ui(&st);
+                break;
+            }
+        }
                 // mouse wheel? not yet, use polling
                 pc_sleep(16);
     }
