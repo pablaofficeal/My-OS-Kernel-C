@@ -93,7 +93,6 @@ static uint8_t dma_buffer[512] __attribute__((aligned(512)));
 static uint64_t kernel_physical_base;
 static uint64_t kernel_virtual_base;
 static struct ahci_probe_stats probe_stats;
-static volatile uint32_t *configured_port;
 static uint8_t device_count;
 static uint8_t selected_device=AHCI_NO_DEVICE;
 static bool mapping_ready;
@@ -152,16 +151,19 @@ static bool is_addressed_command(uint8_t command){
         || command==ATA_COMMAND_READ_DMA_EXT || command==ATA_COMMAND_WRITE_DMA_EXT;
 }
 
-static bool configure_command_port(volatile uint32_t *port){
-    if(configured_port==port && (port[PORT_CMD]&AHCI_PORT_CMD_ST)
-       && (port[PORT_CMD]&AHCI_PORT_CMD_FRE)){
-        return true;
-    }
+static bool issue_command(volatile uint32_t *port, uint8_t command, uint32_t lba,
+                          void *data, bool write, bool lba48){
     if(!stop_port(port)) return false;
 
+    memset(command_list,0,sizeof(command_list));
     memset(received_fis,0,sizeof(received_fis));
+    memset(&command_table,0,sizeof(command_table));
+
     uint64_t command_list_physical=kernel_pointer_physical(command_list);
     uint64_t received_fis_physical=kernel_pointer_physical(received_fis);
+    uint64_t command_table_physical=kernel_pointer_physical(&command_table);
+    uint64_t data_physical=data ? kernel_pointer_physical(data) : 0;
+
     port[PORT_CLB]=(uint32_t)command_list_physical;
     port[PORT_CLBU]=(uint32_t)(command_list_physical>>32);
     port[PORT_FB]=(uint32_t)received_fis_physical;
@@ -170,23 +172,6 @@ static bool configure_command_port(volatile uint32_t *port){
     port[PORT_IS]=0xFFFFFFFF;
     port[PORT_SERR]=0xFFFFFFFF;
 
-    if(!start_port(port)) return false;
-    configured_port=port;
-    return true;
-}
-
-static bool issue_command(volatile uint32_t *port, uint8_t command, uint32_t lba,
-                          void *data, bool write, bool lba48){
-    if(!configure_command_port(port)) return false;
-
-    memset(command_list,0,sizeof(command_list));
-    memset(&command_table,0,sizeof(command_table));
-
-    uint64_t command_table_physical=kernel_pointer_physical(&command_table);
-    uint64_t data_physical=data ? kernel_pointer_physical(data) : 0;
-
-    port[PORT_IS]=0xFFFFFFFF;
-    port[PORT_SERR]=0xFFFFFFFF;
     command_list[0].flags=(uint16_t)(5|(write ? 1<<6 : 0));
     command_list[0].prdt_length=data ? 1 : 0;
     command_list[0].command_table_base=(uint32_t)command_table_physical;
@@ -213,29 +198,22 @@ static bool issue_command(volatile uint32_t *port, uint8_t command, uint32_t lba
     }
 
     __sync_synchronize();
+    if(!start_port(port)) return false;
     for(uint32_t wait=0;wait<AHCI_TIMEOUT;wait++){
         if(!(port[PORT_TFD]&(AHCI_TFD_BUSY|AHCI_TFD_DRQ))) break;
-        if(wait+1==AHCI_TIMEOUT){
-            (void)stop_port(port);
-            configured_port=0;
-            return false;
-        }
+        if(wait+1==AHCI_TIMEOUT){ (void)stop_port(port); return false; }
     }
 
     port[PORT_CI]=1;
     for(uint32_t wait=0;wait<AHCI_TIMEOUT;wait++){
-        if(port[PORT_IS]&AHCI_PORT_IS_TFES){
-            (void)stop_port(port);
-            configured_port=0;
-            return false;
-        }
+        if(port[PORT_IS]&AHCI_PORT_IS_TFES){ (void)stop_port(port); return false; }
         if(!(port[PORT_CI]&1)){
             __sync_synchronize();
+            (void)stop_port(port);
             return true;
         }
     }
     (void)stop_port(port);
-    configured_port=0;
     return false;
 }
 
