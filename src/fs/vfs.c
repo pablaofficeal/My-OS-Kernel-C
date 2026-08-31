@@ -204,6 +204,28 @@ int32_t vfs_list(const char *path, struct fs_directory_entry *entries,
             entries[count].attributes=FS_ATTRIBUTE_DIRECTORY;
             count++;
         }
+        if(count<capacity){
+            bool has=false;
+            for(uint32_t i=0;i<count;i++) if(strcmp(entries[i].name,"dmesg.txt")==0) has=true;
+            if(!has){
+                copy_name(entries[count].name,"dmesg.txt");
+                entries[count].size=(uint32_t)klog_total_bytes();
+                if(entries[count].size>8*1024*1024) entries[count].size=8*1024*1024;
+                entries[count].attributes=0;
+                count++;
+            }
+        }
+        if(count<capacity){
+            bool has=false;
+            for(uint32_t i=0;i<count;i++) if(strcmp(entries[i].name,"kernel.log")==0) has=true;
+            if(!has){
+                copy_name(entries[count].name,"kernel.log");
+                entries[count].size=(uint32_t)klog_total_bytes();
+                if(entries[count].size>8*1024*1024) entries[count].size=8*1024*1024;
+                entries[count].attributes=0;
+                count++;
+            }
+        }
         return (int32_t)count;
     }
     if(path_equals(path,"/kernel")){
