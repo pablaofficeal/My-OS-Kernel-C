@@ -1151,7 +1151,7 @@ static bool ax201_fw_upload(void)
                 off+=chunk;
                 idx++;
             }
-            klog(KLOG_WARN, "ax201: So dram: raw fallback %d chunks", idx);
+            klogf(KLOG_WARN, "ax201: So dram: raw fallback %d chunks", idx);
         }
         klogf(KLOG_INFO,
             "ax201: So dram: %d sections (lmac=%d umac=%d paging=%d) mac_id=0x%04x",
