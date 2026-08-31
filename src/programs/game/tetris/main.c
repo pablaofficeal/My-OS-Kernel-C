@@ -21,7 +21,8 @@ static uint32_t random_state=0x1234ABCD;
 static uint32_t drop_interval_ms=600;
 static uint32_t drop_timer;
 
-static uint32_t g_cell = 28;
+static uint32_t g_cell_w = 28;
+static uint32_t g_cell_h = 28;
 static uint32_t g_preview_cell = 16;
 static uint32_t g_board_x = 12;
 static uint32_t g_board_y = 12;
@@ -115,13 +116,13 @@ static void compute_layout(void){
     uint32_t by_width = (client_w>margin*2) ? (client_w-margin*2)/BOARD_W : 20;
     uint32_t by_height = (client_h>hud_h+gap+margin*2)
         ? (client_h-hud_h-gap-margin*2)/BOARD_H : 20;
-    uint32_t cell = by_width<by_height ? by_width : by_height;
-    if(cell<14) cell=14;
-    if(cell>48) cell=48;
-    uint32_t board_w=BOARD_W*cell;
-    uint32_t board_h=BOARD_H*cell;
+    if(by_width<14) by_width=14;
+    if(by_height<14) by_height=14;
+    uint32_t board_w=BOARD_W*by_width;
+    uint32_t board_h=BOARD_H*by_height;
 
-    g_cell=cell;
+    g_cell_w=by_width;
+    g_cell_h=by_height;
     g_preview_cell=preview_cell;
     g_hud_h=hud_h;
     g_hud_w=board_w;
@@ -279,16 +280,16 @@ static char *append_u32(char *dst,uint32_t v){
 }
 
 static void draw_board(struct pg_window *window){
-    uint32_t board_w = BOARD_W*g_cell;
-    uint32_t board_h = BOARD_H*g_cell;
+    uint32_t board_w = BOARD_W*g_cell_w;
+    uint32_t board_h = BOARD_H*g_cell_h;
     pg_window_rect(window,(struct pg_rect){g_board_x-2,g_board_y-2,board_w+4,board_h+4},window->theme.border);
     pg_window_rect(window,(struct pg_rect){g_board_x,g_board_y,board_w,board_h},0x11111B);
-    if(g_cell>=20){
+    if(g_cell_w>=20 && g_cell_h>=20){
         for(uint32_t x=1;x<BOARD_W;x++){
-            pg_window_rect(window,(struct pg_rect){g_board_x + x*g_cell, g_board_y, 1, board_h},0x1E1E2E);
+            pg_window_rect(window,(struct pg_rect){g_board_x + x*g_cell_w, g_board_y, 1, board_h},0x1E1E2E);
         }
         for(uint32_t y=1;y<BOARD_H;y++){
-            pg_window_rect(window,(struct pg_rect){g_board_x, g_board_y + y*g_cell, board_w, 1},0x1E1E2E);
+            pg_window_rect(window,(struct pg_rect){g_board_x, g_board_y + y*g_cell_h, board_w, 1},0x1E1E2E);
         }
     }
     for(int32_t y=0;y<BOARD_H;y++){
@@ -296,9 +297,9 @@ static void draw_board(struct pg_window *window){
             int8_t cell=board[y][x];
             if(cell==-1) continue;
             uint32_t color=piece_colors[cell];
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)y*g_cell+1, g_cell-2, g_cell-2},color);
-            uint32_t hl = g_cell>=28?4:3;
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell+1, g_board_y + (uint32_t)y*g_cell+1, g_cell-2, hl},color+0x222222);
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell_w+1, g_board_y + (uint32_t)y*g_cell_h+1, g_cell_w-2, g_cell_h-2},color);
+            uint32_t hl = g_cell_h>=28?4:3;
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)x*g_cell_w+1, g_board_y + (uint32_t)y*g_cell_h+1, g_cell_w-2, hl},color+0x222222);
         }
     }
     if(!game_over){
@@ -307,15 +308,15 @@ static void draw_board(struct pg_window *window){
             int32_t by = piece_y + SHAPES[piece_type][piece_rotation][i][1];
             if(by<0 || by>=BOARD_H || bx<0 || bx>=BOARD_W) continue;
             uint32_t color=piece_colors[piece_type];
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell+1, g_board_y + (uint32_t)by*g_cell+1, g_cell-2, g_cell-2},color);
-            uint32_t hl = g_cell>=28?4:3;
-            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell+1, g_board_y + (uint32_t)by*g_cell+1, g_cell-2, hl},color+0x222222);
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell_w+1, g_board_y + (uint32_t)by*g_cell_h+1, g_cell_w-2, g_cell_h-2},color);
+            uint32_t hl = g_cell_h>=28?4:3;
+            pg_window_rect(window,(struct pg_rect){g_board_x + (uint32_t)bx*g_cell_w+1, g_board_y + (uint32_t)by*g_cell_h+1, g_cell_w-2, hl},color+0x222222);
         }
     }
 }
 
 static void draw_hud(struct pg_window *window){
-    uint32_t board_w = BOARD_W*g_cell;
+    uint32_t board_w = BOARD_W*g_cell_w;
     uint32_t hud_w = g_hud_w ? g_hud_w : board_w;
     pg_window_rect(window,(struct pg_rect){g_hud_x-1,g_hud_y-1,hud_w+2,g_hud_h+2},window->theme.border);
     pg_window_rect(window,(struct pg_rect){g_hud_x,g_hud_y,hud_w,g_hud_h},window->theme.titlebar);
@@ -383,8 +384,8 @@ static void draw_hud(struct pg_window *window){
 
 static void draw_overlays(struct pg_window *window){
     if(!paused && !game_over) return;
-    uint32_t board_w=BOARD_W*g_cell;
-    uint32_t board_h=BOARD_H*g_cell;
+    uint32_t board_w=BOARD_W*g_cell_w;
+    uint32_t board_h=BOARD_H*g_cell_h;
     uint32_t ow = 160;
     uint32_t oh = 36;
     uint32_t ox = g_board_x + (board_w - ow)/2;
@@ -509,11 +510,12 @@ static int tetris_main(void){
         uint32_t by_width=(client_w>margin*2)?(client_w-margin*2)/BOARD_W:14;
         uint32_t by_height=(client_h>g_hud_h+gap+margin*2)
             ? (client_h-g_hud_h-gap-margin*2)/BOARD_H : 14;
-        g_cell=by_width<by_height ? by_width : by_height;
-        if(g_cell<14) g_cell=14;
-        if(g_cell>48) g_cell=48;
-        uint32_t board_w=BOARD_W*g_cell;
-        uint32_t board_h=BOARD_H*g_cell;
+        if(by_width<14) by_width=14;
+        if(by_height<14) by_height=14;
+        g_cell_w=by_width;
+        g_cell_h=by_height;
+        uint32_t board_w=BOARD_W*g_cell_w;
+        uint32_t board_h=BOARD_H*g_cell_h;
         g_hud_w=board_w;
         g_board_x=client_w>board_w ? (client_w-board_w)/2 : margin;
         g_board_y=margin;
