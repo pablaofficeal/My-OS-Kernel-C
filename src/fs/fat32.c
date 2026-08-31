@@ -57,6 +57,7 @@ struct fat32_volume {
     uint32_t root_cluster;
     uint32_t cluster_count;
     uint32_t total_sectors;
+    uint32_t next_free_cluster;
     uint8_t sectors_per_cluster;
     uint8_t fat_count;
     bool mounted;
@@ -499,9 +500,14 @@ static int32_t resolve_creation_parent(const char *path, uint32_t *parent,
     return FS_ERROR_INVALID;
 }
 
-static int32_t allocate_cluster(uint32_t *cluster_result){
+static int32_t allocate_cluster_ex(uint32_t *cluster_result, bool clear_data){
     if(!cluster_result) return FS_ERROR_INVALID;
-    for(uint32_t cluster=2;cluster<volume.cluster_count+2;cluster++){
+    uint32_t first_candidate=volume.next_free_cluster;
+    if(!valid_cluster(first_candidate)) first_candidate=2;
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t cluster=first_candidate+visited;
+        if(cluster>=volume.cluster_count+2)
+            cluster=2+(cluster-(volume.cluster_count+2));
         if((cluster&0xFFU)==0) scheduler_yield();
         uint32_t value;
         int32_t status=fat_next_cluster(cluster,&value);
@@ -510,18 +516,26 @@ static int32_t allocate_cluster(uint32_t *cluster_result){
 
         status=fat_write_entry(cluster,0x0FFFFFFF);
         if(status<0) return status;
-        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
-        uint32_t first_lba=cluster_lba(cluster);
-        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
-            if(!block_device_write(first_lba+sector,sector_buffer)){
-                (void)fat_write_entry(cluster,0);
-                return FS_ERROR_IO;
+        if(clear_data){
+            memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+            uint32_t first_lba=cluster_lba(cluster);
+            for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+                if(!block_device_write(first_lba+sector,sector_buffer)){
+                    (void)fat_write_entry(cluster,0);
+                    return FS_ERROR_IO;
+                }
             }
         }
         *cluster_result=cluster;
+        volume.next_free_cluster=cluster+1;
+        if(!valid_cluster(volume.next_free_cluster)) volume.next_free_cluster=2;
         return 0;
     }
     return FS_ERROR_NO_SPACE;
+}
+
+static int32_t allocate_cluster(uint32_t *cluster_result){
+    return allocate_cluster_ex(cluster_result,true);
 }
 
 static int32_t find_free_entry(uint32_t directory_cluster, uint32_t *lba_result,
@@ -864,6 +878,7 @@ static bool mount_boot_sector(uint32_t partition_lba){
     volume.root_cluster=root_cluster;
     volume.cluster_count=cluster_count;
     volume.total_sectors=total_sectors;
+    volume.next_free_cluster=3;
     volume.sectors_per_cluster=sectors_per_cluster;
     volume.fat_count=fat_count;
     volume.mounted=true;
@@ -1164,7 +1179,7 @@ static int32_t allocate_file_chain(uint32_t cluster_count,
     uint32_t previous=0;
     for(uint32_t index=0;index<cluster_count;index++){
         uint32_t cluster;
-        int32_t status=allocate_cluster(&cluster);
+        int32_t status=allocate_cluster_ex(&cluster,false);
         if(status<0){
             if(*first_cluster) (void)clear_cluster_chain(*first_cluster);
             return status;
