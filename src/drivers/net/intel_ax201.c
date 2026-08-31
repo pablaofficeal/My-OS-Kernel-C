@@ -76,6 +76,18 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_HW_IF_CONFIG_PCI_OWN_SET 0x00400000U
 #define AX201_MBOX_SET_OS_ALIVE        0x00000020U
 
+#define AX201_CSR_GIO_CHICKEN_BITS          0x100
+#define AX201_CSR_GIO_CHICKEN_BITS_L1A_NO_L0S_RX 0x00800000U
+#define AX201_CSR_DBG_HPET_MEM_REG          0x240
+#define AX201_CSR_DBG_HPET_MEM_REG_VAL      0xFFFF0000U
+#define AX201_CSR_DBG_LINK_PWR_MGMT_REG     0x250
+#define AX201_CSR_RESET_LINK_PWR_MGMT_DISABLED 0x80000000U
+#define AX201_CSR_GIO_REG                   0x03C
+#define AX201_CSR_GIO_REG_VAL_L0S_DISABLED  0x00000002U
+#define AX201_CSR_HW_IF_CONFIG_HAP_WAKE     0x00080000U
+#define AX201_CSR_HW_IF_CONFIG_WAKE_ME      0x08000000U
+#define AX201_CSR_HW_IF_CONFIG_WAKE_ME_PCIE_OWNER_EN 0x10000000U
+
 /* CSR_INT bits (Linux iwl-csr.h) */
 #define AX201_INT_ALIVE             0x00000001U
 #define AX201_INT_FH_RX             0x80000000U
@@ -136,6 +148,21 @@ static uint32_t ax201_csr_read(uint32_t offset){
 static void ax201_csr_write(uint32_t offset, uint32_t value){
     *(volatile uint32_t *)(adapter.regs + offset) = value;
 }
+static void ax201_csr_set_bit(uint32_t offset, uint32_t bit){
+    ax201_csr_write(offset, ax201_csr_read(offset) | bit);
+}
+static void ax201_pcie_apm_config(void){
+    ax201_csr_set_bit(AX201_CSR_GIO_REG, AX201_CSR_GIO_REG_VAL_L0S_DISABLED);
+}
+static void ax201_apm_init(void){
+    ax201_csr_set_bit(AX201_CSR_GIO_CHICKEN_BITS,
+                      AX201_CSR_GIO_CHICKEN_BITS_L1A_NO_L0S_RX);
+    ax201_csr_set_bit(AX201_CSR_DBG_HPET_MEM_REG,
+                      AX201_CSR_DBG_HPET_MEM_REG_VAL);
+    ax201_csr_set_bit(AX201_CSR_HW_IF_CONFIG_REG,
+                      AX201_CSR_HW_IF_CONFIG_HAP_WAKE);
+    ax201_pcie_apm_config();
+}
 
 static void ax201_csr_write64(uint32_t offset, uint64_t value){
     ax201_csr_write(offset, (uint32_t)(value & 0xFFFFFFFFU));
@@ -192,32 +219,51 @@ static bool ax201_request_radio_on(void){
     return ax201_prepare_nic_for_fwload();
 }
 
-static bool ax201_prepare_card_hw(void){
-    uint32_t hw_if=ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
-    ax201_csr_write(AX201_CSR_HW_IF_CONFIG_REG,
-        hw_if | AX201_HW_IF_CONFIG_PCI_OWN_SET);
-
+static int ax201_set_hw_ready(void){
+    ax201_csr_set_bit(AX201_CSR_HW_IF_CONFIG_REG,
+                      AX201_HW_IF_CONFIG_PCI_OWN_SET);
     for(uint32_t i=0;i<50U;i++){
         if(ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG) &
            AX201_HW_IF_CONFIG_PCI_OWN_SET){
-            uint32_t mbox=ax201_csr_read(AX201_CSR_MBOX_SET_REG);
-            ax201_csr_write(AX201_CSR_MBOX_SET_REG,
-                mbox | AX201_MBOX_SET_OS_ALIVE);
-            return true;
+            ax201_csr_set_bit(AX201_CSR_MBOX_SET_REG,
+                              AX201_MBOX_SET_OS_ALIVE);
+            return 0;
         }
         timer_sleep(1);
     }
-    klog(KLOG_WARN, "ax201: PCI/CSME ownership handshake timed out");
+    return -1;
+}
+static bool ax201_prepare_card_hw(void){
+    if(ax201_set_hw_ready()==0)
+        return true;
+    ax201_csr_set_bit(AX201_CSR_DBG_LINK_PWR_MGMT_REG,
+                      AX201_CSR_RESET_LINK_PWR_MGMT_DISABLED);
+    timer_sleep(1);
+    for(uint32_t iter=0;iter<10; iter++){
+        ax201_csr_set_bit(AX201_CSR_HW_IF_CONFIG_REG,
+                          AX201_CSR_HW_IF_CONFIG_WAKE_ME);
+        for(uint32_t t=0;t<10; t++){
+            if(ax201_set_hw_ready()==0){
+                ax201_csr_write(AX201_CSR_DBG_LINK_PWR_MGMT_REG,
+                    ax201_csr_read(AX201_CSR_DBG_LINK_PWR_MGMT_REG) &
+                    ~AX201_CSR_RESET_LINK_PWR_MGMT_DISABLED);
+                return true;
+            }
+            timer_sleep(1);
+        }
+    }
+    ax201_csr_write(AX201_CSR_DBG_LINK_PWR_MGMT_REG,
+        ax201_csr_read(AX201_CSR_DBG_LINK_PWR_MGMT_REG) &
+        ~AX201_CSR_RESET_LINK_PWR_MGMT_DISABLED);
+    klog(KLOG_WARN, "ax201: PCI/CSME ownership handshake timed out (UEFI CSME)");
+    klog(KLOG_WARN, "ax201: try UEFI: disable Intel ME/AMT, Fast Boot off");
     return false;
 }
 
 static bool ax201_nic_reset(void){
     if(!adapter.regs)
         return false;
-
     ax201_csr_write(AX201_CSR_RESET, AX201_CSR_RESET_SW);
-    /* Linux does not poll CSR_RESET for this bit to clear: it delays 5--6 ms
-     * and continues with NIC activation. */
     timer_sleep(6);
     return true;
 }
@@ -228,13 +274,15 @@ static bool ax201_prepare_nic_for_fwload(void){
 
     if(!ax201_prepare_card_hw())
         return false;
+    ax201_apm_init();
     (void)ax201_nic_reset();
+    ax201_csr_set_bit(AX201_CSR_HW_IF_CONFIG_REG,
+                      AX201_CSR_HW_IF_CONFIG_HAP_WAKE);
 
     uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
     klogf(KLOG_INFO, "ax201: GP_CNTRL after reset = 0x%08x", gp);
 
-    /* D0U -> D0A: INIT_DONE is host-writable; CLOCK_READY and hardware
-     * RF-kill are status bits and must never be forced by the driver. */
+    /* D0U -> D0A */
     gp|=AX201_GP_CNTRL_INIT_DONE;
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
 
@@ -1153,9 +1201,6 @@ static bool ax201_fw_upload(void)
         }
 
         ax201_v2_ctxt_kick(ctxt_phys, iml_phys, iml_len);
-        /* AX210/So ROM requires the same post-kick sequence as Linux:
-         * clear a stale IML cause, start UMAC, then keep the bus busy while
-         * the image loader runs. */
         ax201_csr_write(AX201_CSR_MSIX_HW_INT_CAUSES, AX201_MSIX_INT_IML);
         ax201_write_umac_prph(AX201_UREG_CPU_INIT_RUN, 1U);
         ax201_spin_for_iml();

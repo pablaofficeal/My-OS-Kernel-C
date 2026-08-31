@@ -133,8 +133,6 @@ bool acpi_wmi_evaluate_method(const uint8_t guid[16], uint8_t instance,
             continue;
         if(instance!=0xFFU && block->instance_count!=instance && instance!=0U)
             continue;
-        if(!(block->flags & ACPI_WMI_EXPENSIVE))
-            continue;
         if(method_id!=0U && method_id!=0x53564544U
            && wmi_method_id_from_block(block)!=method_id)
             continue;
