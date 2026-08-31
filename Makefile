@@ -13,7 +13,7 @@ AX201_FW_SO_HR := $(ISO_ROOT)/firmware/iwlwifi-so-a0-hr-b0-89.ucode
 AX201_FW_SO_GF_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode.zst
 AX201_FW_SO_GF := $(ISO_ROOT)/firmware/iwlwifi-so-a0-gf-a0-89.ucode
 AX201_FW_BRUTE_LIST := iwlwifi-so-a0-hr-b0-86 iwlwifi-so-a0-hr-b0-83 iwlwifi-so-a0-hr-b0-77 iwlwifi-so-a0-hr-b0-74 iwlwifi-so-a0-hr-b0-72 iwlwifi-so-a0-gf-a0-86 iwlwifi-so-a0-gf-a0-83 iwlwifi-so-a0-gf-a0-77 iwlwifi-so-a0-gf4-a0-89 iwlwifi-so-a0-gf4-a0-86 iwlwifi-so-a0-jf-b0-77 iwlwifi-so-a0-jf-b0-72 iwlwifi-QuZ-a0-hr-b0-74 iwlwifi-Qu-b0-hr-b0-77 iwlwifi-cc-a0-77
-AX201_FW_PNVM_LIST := iwlwifi-so-a0-hr-b0-89.pnvm iwlwifi-so-a0-gf-a0-89.pnvm
+AX201_FW_PNVM_LIST :=
 
 export ROOT_DIR BIN_DIR
 
