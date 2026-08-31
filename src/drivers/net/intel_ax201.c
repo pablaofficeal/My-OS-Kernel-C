@@ -196,14 +196,27 @@ static uint32_t ax201_rx_queue_cb_size(uint32_t num_rbds){
 }
 
 static void ax201_spin_for_iml(void){
-    uint64_t deadline=timer_ticks()+100U;
+    // увеличено с 100 до 1000 мс - CNVi иногда медленно отвечает, + детальный лог
+    uint64_t deadline=timer_ticks()+1000U;
+    uint32_t polls=0;
     while(timer_ticks() < deadline){
-        if(ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES) & AX201_MSIX_INT_IML)
+        polls++;
+        uint32_t msix=ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
+        uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+        uint32_t ltr=ax201_csr_read(AX201_CSR_LTR_LAST_MSG);
+        if(msix & AX201_MSIX_INT_IML){
+            klogf(KLOG_OK, "ax201: IML ready after %u polls msix=0x%08x gp=0x%08x ltr=0x%08x", polls, msix, gp, ltr);
             return;
-        (void)ax201_csr_read(AX201_CSR_LTR_LAST_MSG);
+        }
+        if(polls % 100U ==0){
+            klogf(KLOG_INFO, "ax201: IML still waiting %u ms msix=0x%08x gp=0x%08x", polls, msix, gp);
+        }
         timer_sleep(1);
     }
-    klog(KLOG_WARN, "ax201: IML poll timeout (100 ms)");
+    uint32_t msix=ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
+    uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+    uint32_t hw_if=ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+    klogf(KLOG_WARN, "ax201: IML poll timeout (1000 ms) msix=0x%08x gp=0x%08x hw_if=0x%08x", msix, gp, hw_if);
 }
 
 static void ax201_v2_ctxt_kick(uint64_t ctxt_phys, uint64_t iml_phys, uint32_t iml_len){
@@ -352,9 +365,22 @@ static bool ax201_prepare_nic_for_fwload(void){
     return clock_ready && rfkill_clear;
 }
 
+#define AX201_CSR_MSIX_FH_INT_CAUSES 0x2800U
+#define AX201_CSR_MSIX_FH_INT_MASK   0x2804U
+#define AX201_CSR_MSIX_HW_INT_MASK   0x280CU
+
 static void ax201_enable_fw_load_interrupts(void){
+    // Legacy INT (MSI)
     ax201_csr_write(AX201_CSR_INT, 0xFFFFFFFFU);
     ax201_csr_write(AX201_CSR_INT_MASK, AX201_FW_LOAD_INT_MASK);
+    // MSIX - скопировано целиком из Linux pcie/gen1_2/internal.h: iwl_enable_fw_load_int_ctx_info()
+    // Для So (MSIX enabled) нужно размаскировать ALIVE (bit0) и FH
+    // В MSIX маска инвертирована: ~msk включает прерывание
+    ax201_csr_write(AX201_CSR_MSIX_FH_INT_CAUSES, 0xFFFFFFFFU);
+    ax201_csr_write(AX201_CSR_MSIX_HW_INT_CAUSES, 0xFFFFFFFFU);
+    ax201_csr_write(AX201_CSR_MSIX_FH_INT_MASK, ~0x00010000U); // MSIX_FH_INT_CAUSES_D2S_CH0_NUM = BIT16
+    ax201_csr_write(AX201_CSR_MSIX_HW_INT_MASK, ~0x00000001U); // MSIX_HW_INT_CAUSES_REG_ALIVE = BIT0
+    klogf(KLOG_INFO, "ax201: FW load interrupts enabled INT_MASK=0x%08x MSIX_HW_MASK=~0x1 MSIX_FH_MASK=~0x10000", AX201_FW_LOAD_INT_MASK);
 }
 
 static uint32_t ax201_read_le32(const uint8_t *p){
@@ -1464,30 +1490,45 @@ static bool ax201_fw_upload(void)
 
 static bool ax201_wait_alive_poll(void){
     if(!adapter.regs) return false;
-    uint64_t deadline = timer_ticks() + AX201_ALIVE_TIMEOUT_MS;
-    klogf(KLOG_INFO, "ax201: waiting up to %u ms for firmware ALIVE (is_so=%u)...",
-        AX201_ALIVE_TIMEOUT_MS, adapter.is_so_family?1U:0U);
-
+    uint64_t start=timer_ticks();
+    uint64_t deadline = start + AX201_ALIVE_TIMEOUT_MS;
+    uint32_t hw_if0=ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+    uint32_t gp0=ax201_csr_read(AX201_CSR_GP_CNTRL);
+    klogf(KLOG_INFO, "ax201: waiting up to %u ms for firmware ALIVE (is_so=%u gp0=0x%08x hw_if0=0x%08x hint=%s)...",
+        AX201_ALIVE_TIMEOUT_MS, adapter.is_so_family?1U:0U, gp0, hw_if0, adapter.firmware_hint?adapter.firmware_hint:"?");
+    uint64_t last_log=start;
+    uint32_t polls=0;
     while(timer_ticks() < deadline){
+        polls++;
         uint32_t ints=ax201_csr_read(AX201_CSR_INT);
         uint32_t msix=ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
+        uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+        uint32_t hw_if=ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
 
         if((ints & AX201_INT_ALIVE) || (msix & AX201_MSIX_INT_ALIVE)){
             if(ints & AX201_INT_ALIVE)
                 ax201_csr_write(AX201_CSR_INT, AX201_INT_ALIVE);
+            if(msix & AX201_MSIX_INT_ALIVE)
+                ax201_csr_write(AX201_CSR_MSIX_HW_INT_CAUSES, AX201_MSIX_INT_ALIVE);
             adapter.firmware_alive=true;
             klogf(KLOG_OK,
-                "ax201: firmware ALIVE (synchronous) int=0x%08x msix=0x%08x", ints, msix);
+                "ax201: firmware ALIVE after %llu ms polls=%u int=0x%08x msix=0x%08x gp=0x%08x hw_if=0x%08x", (unsigned long long)(timer_ticks()-start), polls, ints, msix, gp, hw_if);
             return true;
         }
         if(ints & AX201_INT_SW_ERR){
             ax201_csr_write(AX201_CSR_INT, AX201_INT_SW_ERR);
-            uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint32_t gp2 = ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint32_t err_id=ax201_csr_read(AX201_CSR_HW_REV);
             klogf(KLOG_ERROR,
-                "ax201: firmware SW_ERR during ALIVE wait "
-                "(gp=0x%08x int=0x%08x hint=%s)", gp, ints, adapter.firmware_hint);
-            klog(KLOG_ERROR, "ax201: SW_ERR means context invalid or firmware mismatch for PCI ID");
+                "ax201: firmware SW_ERR during ALIVE wait after %llu ms polls=%u (gp=0x%08x int=0x%08x msix=0x%08x hw_if=0x%08x rev=0x%08x hint=%s)", (unsigned long long)(timer_ticks()-start), polls, gp2, ints, msix, hw_if, err_id, adapter.firmware_hint);
+            klog(KLOG_ERROR, "ax201: SW_ERR means context invalid or firmware mismatch for PCI ID - dumping CSR");
+            uint32_t gpio=ax201_csr_read(AX201_CSR_GPIO_IN);
+            klogf(KLOG_ERROR, "ax201: SW_ERR dump gp=0x%08x gpio=0x%08x int=0x%08x msix=0x%08x hw_if=0x%08x", gp2, gpio, ints, msix, hw_if);
             return false;
+        }
+        if(timer_ticks() - last_log >= 1000U){
+            last_log=timer_ticks();
+            klogf(KLOG_INFO, "ax201: still waiting ALIVE %llu/%u ms polls=%u gp=0x%08x int=0x%08x msix=0x%08x hw_if=0x%08x", (unsigned long long)(timer_ticks()-start), AX201_ALIVE_TIMEOUT_MS, polls, gp, ints, msix, hw_if);
         }
 
         timer_sleep(AX201_ALIVE_POLL_MS);
@@ -1495,12 +1536,18 @@ static bool ax201_wait_alive_poll(void){
 
     uint32_t gp   = ax201_csr_read(AX201_CSR_GP_CNTRL);
     uint32_t ints = ax201_csr_read(AX201_CSR_INT);
+    uint32_t msix = ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
     uint32_t rev  = ax201_csr_read(AX201_CSR_HW_REV);
+    uint32_t hw_if = ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+    uint32_t gpio = ax201_csr_read(AX201_CSR_GPIO_IN);
+    uint32_t rf_id = ax201_csr_read(AX201_CSR_HW_RF_ID);
+    uint8_t ec_d9=0; bool ec_ok=acpi_ec_read(0xD9U,&ec_d9);
     klogf(KLOG_WARN,
-        "ax201: ALIVE timeout %u ms (gp=0x%08x int=0x%08x rev=0x%08x is_so=%u)",
-        AX201_ALIVE_TIMEOUT_MS, gp, ints, rev, adapter.is_so_family?1U:0U);
+        "ax201: ALIVE timeout %u ms polls=%u (gp=0x%08x int=0x%08x msix=0x%08x rev=0x%08x hw_if=0x%08x gpio=0x%08x rf_id=0x%08x EC[D9]=0x%02x ok=%u is_so=%u hint=%s)",
+        AX201_ALIVE_TIMEOUT_MS, polls, gp, ints, msix, rev, hw_if, gpio, rf_id, ec_d9, ec_ok?1U:0U, adapter.is_so_family?1U:0U, adapter.firmware_hint?adapter.firmware_hint:"?");
     klog(KLOG_WARN, "ax201: Linux ALIVE timeout – check RFKILL, ucode variant (QuZ vs So), PCI PM D0, CTXT_INFO");
     klog(KLOG_INFO, "ax201: without ALIVE real scan/connect is impossible (as in Linux iwl_trans_pcie_gen2_start_fw)");
+    klogf(KLOG_INFO, "ax201: post-timeout dump: is_so=%u ctxt_written=%u loaded=%u", adapter.is_so_family?1U:0U, adapter.ctxt_info_written?1U:0U, adapter.firmware_loaded?1U:0U);
     return false;
 }
 
