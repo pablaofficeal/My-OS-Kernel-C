@@ -42,13 +42,21 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_RESET             0x020
 #define AX201_CSR_GP_CNTRL          0x024
 #define AX201_CSR_HW_REV            0x028
-#define AX201_CSR_CTXT_INFO_BA      0x040   /* context-info base address (lo 32) */
-#define AX201_CSR_CTXT_INFO_BA_HI   0x044   /* context-info base address (hi 32) */
-#define AX201_CSR_CTXT_INFO_KICK    0x048   /* write 1 to start ROM loader   */
+#define AX201_CSR_CTXT_INFO_BA      0x040   /* v1 context-info base (Qu) */
+#define AX201_CSR_CTXT_INFO_BA_HI   0x044
+#define AX201_CSR_CTXT_INFO_KICK    0x048
 #define AX201_CSR_HW_RF_ID          0x09C
-#define AX201_CSR_IML_DATA_ADDR     0x0C0
-#define AX201_CSR_IML_SIZE_ADDR     0x0C4
-#define AX201_CSR_CTXT_INFO_BOOT_CTRL 0x0F0
+#define AX201_CSR_IML_DATA_ADDR_V1  0x0C0
+#define AX201_CSR_IML_SIZE_ADDR_V1  0x0C4
+#define AX201_CSR_CTXT_INFO_BOOT_CTRL_V1 0x0F0
+#define AX201_CSR_LTR_LAST_MSG      0x0DC
+#define AX201_CSR_MSIX_HW_INT_CAUSES 0x2808
+#define AX201_HBUS_TARG_PRPH_WADDR  0x444
+#define AX201_HBUS_TARG_PRPH_WDAT   0x448
+#define AX201_UMAC_PRPH_OFFSET      0x300000U
+#define AX201_UREG_CPU_INIT_RUN     0x0A05C44U
+#define AX201_SO_CMD_QUEUE_SIZE     128U
+#define AX201_SO_NUM_RBDS           2048U
 #define AX201_CSR_AUTO_FUNC_BOOT_ENA  0x02
 #define AX201_CSR_MAC_ADDR_BASE     0x380
 #define AX201_CSR_MAC_ADDR0_OTP     (AX201_CSR_MAC_ADDR_BASE + 0x00)
@@ -63,11 +71,14 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_GP_CNTRL_MAC_CLOCK_READY 0x00000008U
 #define AX201_GP_CNTRL_HW_RADIO_ON     0x08000000U
 
-/* CSR_INT bits */
-#define AX201_INT_ALIVE             0x00010000U  /* firmware ALIVE notification */
-#define AX201_INT_SW_ERR            0x04000000U  /* firmware SW error           */
+/* CSR_INT bits (Linux iwl-csr.h) */
+#define AX201_INT_ALIVE             0x00000001U
+#define AX201_INT_FH_RX             0x80000000U
+#define AX201_INT_SW_ERR            0x04000000U
+#define AX201_MSIX_INT_IML           0x00000002U
+#define AX201_MSIX_INT_ALIVE         0x00000001U
 
-#define AX201_FW_LOAD_INT_MASK      (AX201_INT_ALIVE | AX201_INT_SW_ERR)
+#define AX201_FW_LOAD_INT_MASK      (AX201_INT_ALIVE | AX201_INT_FH_RX)
 #define AX201_CSR_RESET_SW          0x00000001U
 #define AX201_ALIVE_POLL_MS         5U
 #define AX201_ALIVE_TIMEOUT_MS      5000U
@@ -119,6 +130,59 @@ static uint32_t ax201_csr_read(uint32_t offset){
 }
 static void ax201_csr_write(uint32_t offset, uint32_t value){
     *(volatile uint32_t *)(adapter.regs + offset) = value;
+}
+
+static void ax201_csr_write64(uint32_t offset, uint64_t value){
+    ax201_csr_write(offset, (uint32_t)(value & 0xFFFFFFFFU));
+    ax201_csr_write(offset + 4U, (uint32_t)(value >> 32));
+}
+
+static void ax201_write_prph(uint32_t addr, uint32_t value){
+    const uint32_t mask=0x00FFFFFFU;
+    ax201_csr_write(AX201_HBUS_TARG_PRPH_WADDR, (addr & mask) | (3U << 24));
+    ax201_csr_write(AX201_HBUS_TARG_PRPH_WDAT, value);
+}
+
+static void ax201_write_umac_prph(uint32_t offset, uint32_t value){
+    ax201_write_prph(offset + AX201_UMAC_PRPH_OFFSET, value);
+}
+
+static uint32_t ax201_tfd_queue_cb_size(uint32_t queue_size){
+    uint32_t bits=0;
+    while((1U << bits) < queue_size)
+        bits++;
+    return bits > 3U ? bits - 3U : 0U;
+}
+
+static uint32_t ax201_rx_queue_cb_size(uint32_t num_rbds){
+    uint32_t bits=0;
+    while((1U << bits) < num_rbds)
+        bits++;
+    return bits;
+}
+
+static void ax201_spin_for_iml(void){
+    uint64_t deadline=timer_ticks()+100U;
+    while(timer_ticks() < deadline){
+        if(ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES) & AX201_MSIX_INT_IML)
+            return;
+        (void)ax201_csr_read(AX201_CSR_LTR_LAST_MSG);
+        timer_sleep(1);
+    }
+    klog(KLOG_WARN, "ax201: IML poll timeout (100 ms)");
+}
+
+static void ax201_v2_ctxt_kick(uint64_t ctxt_phys, uint64_t iml_phys, uint32_t iml_len){
+    ax201_enable_fw_load_interrupts();
+    ax201_csr_write64(CSR_CTXT_INFO_ADDR, ctxt_phys);
+    if(iml_phys && iml_len){
+        ax201_csr_write64(CSR_IML_DATA_ADDR, iml_phys);
+        ax201_csr_write(CSR_IML_SIZE_ADDR, iml_len);
+    }
+    ax201_csr_write(CSR_CTXT_INFO_BOOT_CTRL,
+        ax201_csr_read(CSR_CTXT_INFO_BOOT_CTRL) | CSR_AUTO_FUNC_BOOT_ENA);
+    ax201_write_umac_prph(AX201_UREG_CPU_INIT_RUN, 1U);
+    ax201_spin_for_iml();
 }
 
 static bool ax201_request_radio_on(void){
@@ -725,8 +789,10 @@ static void ax201_wifi_poll(void *context, uint64_t now_ms){
 
     if(dev->firmware_loaded && !dev->firmware_alive && dev->ctxt_info_written && dev->regs){
         uint32_t ints = ax201_csr_read(AX201_CSR_INT);
-        if(ints & AX201_INT_ALIVE){
-            ax201_csr_write(AX201_CSR_INT, AX201_INT_ALIVE);
+        uint32_t msix = ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
+        if((ints & AX201_INT_ALIVE) || (msix & AX201_MSIX_INT_ALIVE)){
+            if(ints & AX201_INT_ALIVE)
+                ax201_csr_write(AX201_CSR_INT, AX201_INT_ALIVE);
             dev->firmware_alive = true;
             klogf(KLOG_OK, "ax201: firmware ALIVE (deferred via poll) int=0x%08x", ints);
         } else if(ints & AX201_INT_SW_ERR){
@@ -1041,115 +1107,97 @@ static bool ax201_fw_upload(void)
     }
 
     if (adapter.is_so_family) {
-        uint64_t prph_scratch_phys = pmm_allocate_page();
-        uint64_t prph_info_phys = pmm_allocate_page();
-        if (!prph_scratch_phys || !prph_info_phys) {
-            klog(KLOG_ERROR,
-                "ax201: fw_upload: failed to allocate prph scratch/info for So");
+        uint64_t scratch_pages=
+            (sizeof(struct iwl_prph_scratch)+PMM_PAGE_SIZE-1)/PMM_PAGE_SIZE;
+        uint64_t prph_scratch_phys=pmm_allocate_contiguous(scratch_pages);
+        uint64_t prph_info_phys=pmm_allocate_page();
+        if(!prph_scratch_phys || !prph_info_phys){
+            klog(KLOG_ERROR, "ax201: fw_upload: prph scratch/info alloc failed");
             return false;
         }
-        memset(pmm_physical_to_virtual(prph_scratch_phys), 0, PMM_PAGE_SIZE);
+        memset(pmm_physical_to_virtual(prph_scratch_phys), 0,
+            scratch_pages*PMM_PAGE_SIZE);
         memset(pmm_physical_to_virtual(prph_info_phys), 0, PMM_PAGE_SIZE);
 
-        struct iwl_prph_scratch *scratch =
+        struct iwl_prph_scratch *scratch=
             pmm_physical_to_virtual(prph_scratch_phys);
+        uint32_t hw_rev_val=ax201_csr_read(AX201_CSR_HW_REV);
+        uint32_t control_flags=IWL_PRPH_SCRATCH_MTR_MODE;
+        control_flags|=IWL_PRPH_MTR_FORMAT_256B & IWL_PRPH_SCRATCH_MTR_FORMAT;
+        control_flags|=IWL_PRPH_SCRATCH_RB_SIZE_4K;
 
-        uint32_t hw_rev_val = ax201_csr_read(AX201_CSR_HW_REV);
-        scratch->ctrl_cfg.version.mac_id = (uint16_t)((hw_rev_val >> 4) & 0xFFF);
-        scratch->ctrl_cfg.version.version = 0;
-        scratch->ctrl_cfg.version.size = sizeof(*scratch) / 4;
-        scratch->ctrl_cfg.control_flags =
-            IWL_PRPH_SCRATCH_MTR_MODE |
-            IWL_PRPH_MTR_FORMAT_256B |
-            IWL_PRPH_SCRATCH_EARLY_DEBUG_EN |
-            IWL_PRPH_SCRATCH_EDBG_DEST_DRAM;
+        scratch->ctrl_cfg.version.version=0;
+        scratch->ctrl_cfg.version.mac_id=(uint16_t)hw_rev_val;
+        scratch->ctrl_cfg.version.size=(uint16_t)(sizeof(*scratch)/4U);
+        scratch->ctrl_cfg.control.control_flags=control_flags;
+        scratch->ctrl_cfg.control.control_flags_ext=0;
+        scratch->ctrl_cfg.rbd_cfg.free_rbd_addr=rbd_free_phys;
 
-        const uint64_t chunk = 32 * 1024;
-        uint64_t off = 0;
-        int idx = 0;
+        int idx=0;
         if(tlv_sections){
             idx=ax201_stage_dram_sections(
-                (struct iwl_context_info_dram *)&scratch->dram,
+                &scratch->dram.common,
                 lmac_secs, lmac_n, umac_secs, umac_n,
                 paging_secs, paging_n);
             if(idx<0){
                 klog(KLOG_ERROR, "ax201: So scratch dram staging failed");
                 return false;
             }
-            klogf(KLOG_INFO,
-                "ax201: So scratch dram: %d staged sections (lmac=%d umac=%d paging=%d) mac_id=0x%03x",
-                idx, lmac_n, umac_n, paging_n, scratch->ctrl_cfg.version.mac_id);
-        } else if(fw_phys) {
-            while (off < adapter.firmware_size && idx < 64) {
-                scratch->dram.umac_img[idx] = fw_phys + off;
-                off += chunk;
+        } else if(fw_phys){
+            const uint64_t chunk=32*1024;
+            uint64_t off=0;
+            while(off<adapter.firmware_size && idx<64){
+                scratch->dram.common.umac_img[idx]=fw_phys+off;
+                off+=chunk;
                 idx++;
             }
-            klogf(KLOG_WARN,
-                "ax201: So scratch dram: no TLV sections, %d chunk entries",
-                idx);
+            klog(KLOG_WARN, "ax201: So dram: raw fallback %d chunks", idx);
         }
+        klogf(KLOG_INFO,
+            "ax201: So dram: %d sections (lmac=%d umac=%d paging=%d) mac_id=0x%04x",
+            idx, lmac_n, umac_n, paging_n, scratch->ctrl_cfg.version.mac_id);
 
-        struct iwl_context_info_v2 *ctxt_v2 =
+        struct iwl_context_info_v2 *ctxt_v2=
             pmm_physical_to_virtual(ctxt_phys);
-        if (!ctxt_v2) {
-            klog(KLOG_ERROR,
-                "ax201: fw_upload: no virtual mapping for CTXT_INFO v2");
+        if(!ctxt_v2){
+            klog(KLOG_ERROR, "ax201: fw_upload: no mapping for CTXT_INFO v2");
             return false;
         }
         memset(ctxt_v2, 0, sizeof(*ctxt_v2));
-        ctxt_v2->version = 0;
-        ctxt_v2->size = sizeof(*ctxt_v2) / 4;
-        ctxt_v2->prph_info_base_addr = prph_info_phys;
-        ctxt_v2->prph_scratch_base_addr = prph_scratch_phys;
-        ctxt_v2->prph_scratch_size = sizeof(*scratch);
-        ctxt_v2->cr_head_idx_arr_base_addr = rbd_status_phys;
-        ctxt_v2->tr_tail_idx_arr_base_addr = prph_info_phys + 2048;
-        ctxt_v2->cr_tail_idx_arr_base_addr = prph_info_phys + 3072;
-        ctxt_v2->mtr_base_addr = cmdq_phys;
-        ctxt_v2->mcr_base_addr = rbd_used_phys;
-        ctxt_v2->mtr_size = 8;
-        ctxt_v2->mcr_size = 8;
+        ctxt_v2->version=0;
+        ctxt_v2->size=(uint16_t)(sizeof(*ctxt_v2)/4U);
+        ctxt_v2->prph_info_base_addr=prph_info_phys;
+        ctxt_v2->prph_scratch_base_addr=prph_scratch_phys;
+        ctxt_v2->prph_scratch_size=
+            (uint32_t)(offsetofend(struct iwl_prph_scratch, dram.common));
+        ctxt_v2->cr_head_idx_arr_base_addr=rbd_status_phys;
+        ctxt_v2->tr_tail_idx_arr_base_addr=prph_info_phys+PMM_PAGE_SIZE/2;
+        ctxt_v2->cr_tail_idx_arr_base_addr=prph_info_phys+3*PMM_PAGE_SIZE/4;
+        ctxt_v2->mtr_base_addr=cmdq_phys;
+        ctxt_v2->mcr_base_addr=rbd_used_phys;
+        ctxt_v2->mtr_size=(uint16_t)ax201_tfd_queue_cb_size(AX201_SO_CMD_QUEUE_SIZE);
+        ctxt_v2->mcr_size=(uint16_t)ax201_rx_queue_cb_size(AX201_SO_NUM_RBDS);
 
         klogf(KLOG_INFO,
-            "ax201: So v2 context: scratch 0x%llx info 0x%llx",
+            "ax201: So v2 ctxt scratch=0x%llx info=0x%llx mtr=%u mcr=%u scratch_dw=%u",
             (unsigned long long)prph_scratch_phys,
-            (unsigned long long)prph_info_phys);
+            (unsigned long long)prph_info_phys,
+            ctxt_v2->mtr_size, ctxt_v2->mcr_size,
+            ctxt_v2->prph_scratch_size);
 
         __asm__ volatile("mfence" ::: "memory");
 
-        ax201_enable_fw_load_interrupts();
-
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BA,
-            (uint32_t)(ctxt_phys & 0xFFFFFFFFU));
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
-            (uint32_t)(ctxt_phys >> 32));
-
-        if(iml_phys && iml_len){
-            ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
-                (uint32_t)(iml_phys & 0xFFFFFFFFU));
-            ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
-                (uint32_t)(iml_phys >> 32));
-            ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
+        if(!iml_phys || !iml_len){
+            klog(KLOG_ERROR, "ax201: So v2 requires IML TLV 52");
+            return false;
         }
 
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
-            AX201_CSR_AUTO_FUNC_BOOT_ENA);
-
-        uint32_t gp = ax201_csr_read(AX201_CSR_GP_CNTRL);
-        gp &= ~AX201_GP_CNTRL_INIT_DONE;
-        ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
-        timer_sleep(1);
-        gp |= AX201_GP_CNTRL_INIT_DONE;
-        ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
-        (void)ax201_csr_read(AX201_CSR_GP_CNTRL);
-
-        adapter.ctxt_info_written = true;
+        ax201_v2_ctxt_kick(ctxt_phys, iml_phys, iml_len);
+        adapter.ctxt_info_written=true;
 
         klogf(KLOG_OK,
-            "ax201: So v2 CTXT_INFO ready phys=0x%llx (BOOT_CTRL+INIT_DONE, Linux v2_kick) iml=%u",
+            "ax201: So v2 kick done ctxt=0x%llx iml=%u (Linux ctxt-info-v2)",
             (unsigned long long)ctxt_phys, iml_len);
-
         return true;
     }
 
@@ -1231,12 +1279,12 @@ static bool ax201_fw_upload(void)
     ax201_csr_write(AX201_CSR_CTXT_INFO_BA_HI,
         (uint32_t)(ctxt_phys >> 32));
     if (iml_phys && iml_len) {
-        ax201_csr_write(AX201_CSR_IML_DATA_ADDR,
+        ax201_csr_write(AX201_CSR_IML_DATA_ADDR_V1,
             (uint32_t)(iml_phys & 0xFFFFFFFFU));
-        ax201_csr_write(AX201_CSR_IML_DATA_ADDR + 4,
+        ax201_csr_write(AX201_CSR_IML_DATA_ADDR_V1 + 4,
             (uint32_t)(iml_phys >> 32));
-        ax201_csr_write(AX201_CSR_IML_SIZE_ADDR, iml_len);
-        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL,
+        ax201_csr_write(AX201_CSR_IML_SIZE_ADDR_V1, iml_len);
+        ax201_csr_write(AX201_CSR_CTXT_INFO_BOOT_CTRL_V1,
             AX201_CSR_AUTO_FUNC_BOOT_ENA);
     }
 
@@ -1274,13 +1322,15 @@ static bool ax201_wait_alive_poll(void){
         AX201_ALIVE_TIMEOUT_MS, adapter.is_so_family?1U:0U);
 
     while(timer_ticks() < deadline){
-        uint32_t ints = ax201_csr_read(AX201_CSR_INT);
+        uint32_t ints=ax201_csr_read(AX201_CSR_INT);
+        uint32_t msix=ax201_csr_read(AX201_CSR_MSIX_HW_INT_CAUSES);
 
-        if(ints & AX201_INT_ALIVE){
-            ax201_csr_write(AX201_CSR_INT, AX201_INT_ALIVE);
-            adapter.firmware_alive = true;
+        if((ints & AX201_INT_ALIVE) || (msix & AX201_MSIX_INT_ALIVE)){
+            if(ints & AX201_INT_ALIVE)
+                ax201_csr_write(AX201_CSR_INT, AX201_INT_ALIVE);
+            adapter.firmware_alive=true;
             klogf(KLOG_OK,
-                "ax201: firmware ALIVE (synchronous) int=0x%08x", ints);
+                "ax201: firmware ALIVE (synchronous) int=0x%08x msix=0x%08x", ints, msix);
             return true;
         }
         if(ints & AX201_INT_SW_ERR){
