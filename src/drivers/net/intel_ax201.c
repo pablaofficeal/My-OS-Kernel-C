@@ -765,7 +765,7 @@ static bool ax201_wifi_scan(void *context){
         uint64_t now = timer_ticks();
         if(now - last_log_ms >= 5000ULL){
             last_log_ms = now;
-            klogf(KLOG_ERROR,
+            klogf(KLOG_DEBUG,
                 "ax201: firmware not alive – scan rejected "
                 "(gp=0x%08x int=0x%08x loaded=%u ctxt=%u is_so=%u) – need ALIVE",
                 gp, ints,
@@ -777,7 +777,7 @@ static bool ax201_wifi_scan(void *context){
     }
 
     dev->scan_start_ms = timer_ticks();
-    klogf(KLOG_INFO, "ax201: issuing UMAC scan via Linux HCMD (gp=0x%08x int=0x%08x)", gp, ints);
+    klogf(KLOG_DEBUG, "ax201: issuing UMAC scan via Linux HCMD (gp=0x%08x int=0x%08x)", gp, ints);
     /* TODO: real SCAN_REQ_UMAC will be built in HCMD queue (as in Linux iwl_mvm_scan) */
     return true;
 }

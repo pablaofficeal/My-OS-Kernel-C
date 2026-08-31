@@ -95,14 +95,14 @@ bool wifi_trigger_scan(void){
         bool ok = mgr.active->ops->scan(mgr.active->context);
         if(!ok){
             mgr.last_scan_ms = timer_ticks();
-            klog(KLOG_WARN, "wifi: driver scan failed to start");
+            klog(KLOG_DEBUG, "wifi: driver scan failed to start");
             return false;
         }
     }
     mgr.scanning = true;
     mgr.scan_start_ms = timer_ticks();
     mgr.state = WIFI_STATE_SCANNING;
-    klog(KLOG_INFO, "wifi: scanning started (driver will report beacons)");
+    klog(KLOG_DEBUG, "wifi: scanning started (driver will report beacons)");
     return true;
 }
 
