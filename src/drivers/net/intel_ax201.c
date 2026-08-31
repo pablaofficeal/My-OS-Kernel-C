@@ -1142,7 +1142,9 @@ bool intel_ax201_init(void){
         {"/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode", "iwlwifi-QuZ-a0-hr-b0-77.ucode (So ctxt)", true},
     };
     bool any_alive=false;
-    klogf(KLOG_INFO, "ax201: BRUTE FORCE start: %u candidates (hidden, see Log Viewer)", (unsigned)(sizeof(candidates)/sizeof(candidates[0])));
+    klogf(KLOG_INFO, "ax201: BRUTE FORCE start: %u candidates (hidden, see Log Viewer -> DEBUG)", (unsigned)(sizeof(candidates)/sizeof(candidates[0])));
+    bool prev_screen=klog_is_screen_enabled();
+    klog_set_screen_enabled(false);
     for(uint32_t ci=0; ci < sizeof(candidates)/sizeof(candidates[0]); ci++){
         const struct fw_candidate *c=&candidates[ci];
         klogf(KLOG_DEBUG, "ax201: [BRUTE %u/%u] trying %s is_so=%u module=%s", ci+1, (unsigned)(sizeof(candidates)/sizeof(candidates[0])), c->hint, c->is_so?1U:0U, c->module);
