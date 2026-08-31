@@ -2021,11 +2021,11 @@ static int32_t install_program_payload(void){
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
-    const void *settings_image,*monitor_image,*disks_image,*tetris_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
-    uint64_t settings_size,monitor_size,disks_size,tetris_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -2077,6 +2077,11 @@ static int32_t install_program_payload(void){
         disks_image=0;
         disks_size=0;
     }
+    if(!boot_get_module("/bin/program/logview",&logview_image,&logview_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/logview (non-fatal)");
+        logview_image=0;
+        logview_size=0;
+    }
     if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
         klog(KLOG_ERROR,"install: missing /bin/gui-demo");
         return FS_ERROR_NOT_FOUND;
@@ -2085,7 +2090,7 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -2154,6 +2159,13 @@ static int32_t install_program_payload(void){
             return status;
         }
     }
+    if(logview_image && logview_size){
+        status=fat32_write_file("/bin/program/logview",logview_image,(uint32_t)logview_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write logview %d",status);
+            return status;
+        }
+    }
     if(tetris_image && tetris_size){
         status=fat32_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
         if(status<0){
@@ -2197,6 +2209,10 @@ static int32_t install_program_payload(void){
     }
     if(disks_image && disks_size){
         status=verify_installed_file("/bin/program/disks",(uint32_t)disks_size);
+        if(status<0) return status;
+    }
+    if(logview_image && logview_size){
+        status=verify_installed_file("/bin/program/logview",(uint32_t)logview_size);
         if(status<0) return status;
     }
     if(tetris_image && tetris_size){

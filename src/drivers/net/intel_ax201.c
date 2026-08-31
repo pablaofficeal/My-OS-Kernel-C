@@ -591,30 +591,8 @@ static bool ax201_get_firmware(void){
         return false;
     }
     klogf(KLOG_INFO, "ax201: requesting firmware module '%s' (hint %s)", adapter.firmware_module, adapter.firmware_hint);
-    // дамп всех модулей Limine для диагностики mismatch пути
-    boot_log_modules();
-    klogf(KLOG_INFO, "ax201: boot module count=%llu trying exact path '%s'",
-          (unsigned long long)boot_get_module_count(), adapter.firmware_module);
     if(!boot_get_module(adapter.firmware_module,&image,&size) || !image || size<8){
-        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine (image=%p size=%llu)", adapter.firmware_module, image, (unsigned long long)size);
-        klog(KLOG_ERROR, "ax201: check Makefile AX201_FW_* copied to /firmware and listed in limine.conf module_path");
-        // пробуем также альтернативные имена (без префикса /firmware/)
-        const char *alt="/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode";
-        const void *a_img=0; uint64_t a_sz=0;
-        if(boot_get_module(alt,&a_img,&a_sz))
-            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
-        else
-            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
-        alt="/firmware/iwlwifi-so-a0-gf-a0-89.ucode";
-        if(boot_get_module(alt,&a_img,&a_sz))
-            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
-        else
-            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
-        alt="/firmware/iwlwifi-so-a0-hr-b0-89.ucode";
-        if(boot_get_module(alt,&a_img,&a_sz))
-            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
-        else
-            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
+        klogf(KLOG_WARN, "ax201: firmware module %s not supplied by Limine (image=%p size=%llu) - will try next", adapter.firmware_module, image, (unsigned long long)size);
         return false;
     }
     uint32_t magic=ax201_read_le32((const uint8_t *)image + AX201_FIRMWARE_MAGIC_OFFSET);
@@ -1318,7 +1296,7 @@ static bool ax201_fw_upload(void)
                 iml_len, (unsigned long long)iml_phys);
         }
     } else {
-        klog(KLOG_WARN, "ax201: IML TLV 52 not found – trying without IML");
+        klogf(KLOG_WARN, "ax201: IML TLV 52 not found for %s – trying without IML", adapter.firmware_hint);
     }
 
     if (adapter.is_so_family) {
@@ -1478,12 +1456,6 @@ static bool ax201_fw_upload(void)
     klogf(KLOG_OK,
         "ax201: CTXT_INFO kick phys=0x%llx staged=%d iml=%u",
         (unsigned long long)ctxt_phys, idx, iml_len);
-    klogf(KLOG_DEBUG,
-        "ax201: Linux ctxt size=%u version=%u mac_id=0x%x flags=0x%x",
-        ctxt->version.size,
-        ctxt->version.version,
-        ctxt->version.mac_id,
-        control_flags);
 
     return true;
 }
