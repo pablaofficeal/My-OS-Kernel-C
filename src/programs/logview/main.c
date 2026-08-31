@@ -394,7 +394,7 @@ static void handle_key(struct logview_state *st, int32_t key){
 }
 
 int main(void){
-    struct logview_state st;
+    static struct logview_state st;
     // init
     for(int i=0;i<LOGVIEW_MAX_LINES;i++) st.lines[i].text[0]='\0';
     st.line_count=0;
