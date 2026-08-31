@@ -1177,6 +1177,7 @@ bool intel_ax201_init(void){
             timer_sleep(20);
         }
     }
+    klog_set_screen_enabled(prev_screen);
     if(!any_alive){
         klog(KLOG_WARN, "ax201: BRUTE FORCE all candidates FAILED – see Log Viewer (DEBUG) for details");
         // fallback к старому селектору для совместимости (хотя уже все попробовали)
