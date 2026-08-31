@@ -18,4 +18,5 @@ int32_t block_device_find(const char *name);
 bool block_device_select(uint32_t index);
 bool block_device_read(uint32_t lba, void *buffer);
 bool block_device_write(uint32_t lba, const void *buffer);
+bool block_device_flush(void);
 const char *block_device_name(void);

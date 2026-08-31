@@ -1560,7 +1560,8 @@ static bool write_format_metadata(const struct fat32_format_layout *layout){
 
     build_format_boot_sector(layout,0,required_volume_label);
     if(!block_device_write(6,sector_buffer)) return false;
-    return block_device_write(0,sector_buffer);
+    if(!block_device_write(0,sector_buffer)) return false;
+    return block_device_flush();
 }
 
 int32_t fat32_format_device(const char *device_name,
@@ -1823,6 +1824,10 @@ static bool write_format_metadata_at(uint32_t part_lba,
     }
     if(!block_device_write(part_lba, sector_buffer)){
         klogf(KLOG_ERROR,"write_format_at: boot LBA %u failed",part_lba);
+        return false;
+    }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"write_format_at: flush failed part %u",part_lba);
         return false;
     }
     klogf(KLOG_OK,"write_format_at: OK part %u",part_lba);
@@ -2370,6 +2375,8 @@ static int32_t install_uefi_payload(void){
         if(status<0) return status;
     }
 
+    if(!block_device_flush()) return FS_ERROR_IO;
+
     status=verify_installed_file("/EFI/BOOT/BOOTX64.EFI",efi_loader_size);
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
@@ -2441,6 +2448,10 @@ int32_t fat32_format_uefi_device_progress(
         klogf(KLOG_ERROR,"fat32_uefi: GPT write failed");
         return FS_ERROR_IO;
     }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: GPT flush failed");
+        return FS_ERROR_IO;
+    }
     if(callback) callback(18,"Formatting EFI system partition");
     if(!write_format_metadata_at(
             FAT32_ESP_START_LBA,&esp_layout,esp_volume_label,
@@ -2460,6 +2471,10 @@ int32_t fat32_format_uefi_device_progress(
     if(status<0){
         klogf(KLOG_ERROR,"fat32_uefi: boot payload failed %d",status);
         return status;
+    }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: boot payload flush failed");
+        return FS_ERROR_IO;
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
@@ -2481,6 +2496,10 @@ int32_t fat32_format_uefi_device_progress(
     if(status<0){
         klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
         return status;
+    }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
+        return FS_ERROR_IO;
     }
     if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");

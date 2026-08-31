@@ -253,6 +253,14 @@ bool ata_pio_write_sector(uint32_t lba, const void *buffer){
     return wait_for_completion(device);
 }
 
+bool ata_pio_flush(void){
+    if(selected_device>=device_count) return false;
+    struct ata_device *device=&devices[selected_device];
+    if(!wait_not_busy(device)) return false;
+    outb(device->io_base+ATA_REG_COMMAND,ATA_CMD_FLUSH);
+    return wait_for_completion(device);
+}
+
 const char *ata_pio_device_name(void){
     return selected_device<device_count ? devices[selected_device].info.name : "none";
 }
