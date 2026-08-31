@@ -377,3 +377,91 @@ static int32_t raw_log_write(const void *buffer, uint32_t count){
     }
     return written ? (int32_t)written : FS_ERROR_IO;
 }
+
+int32_t vfs_save_klog_to_device(const char *device, const char *path){
+    if(!device || !device[0] || !path || !path[0]) return FS_ERROR_INVALID;
+    // найдем устройство
+    int32_t dev_idx=block_device_find(device);
+    if(dev_idx<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)dev_idx, &info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    // запомним текущий смонтированный девайс для восстановления
+    const char *prev_root=vfs_root_device_name();
+    char prev_device[32]={0};
+    if(prev_root) pc_copy(prev_device, prev_root, sizeof(prev_device));
+    // попробуем смонтировать выбранное устройство
+    bool mounted=false;
+    if(prev_root && strcmp(prev_root, device)==0){
+        mounted=vfs_is_root_mounted();
+    } else {
+        // попытаемся смонтировать конкретное устройство
+        if(block_device_select((uint32_t)dev_idx)){
+            // попробуем найти FAT на этом устройстве
+            // сначала сбросим текущий volume и попробуем смонтировать заново
+            // fat32_mount_specific попытается смонтировать именно это устройство
+            if(fat32_mount_specific(device)){
+                mounted=true;
+            } else {
+                // fallback - общий mount (найдет первый FAT)
+                mounted=vfs_mount_root();
+            }
+        }
+    }
+    if(!mounted) return FS_ERROR_IO;
+    // теперь пишем лог
+    // читаем весь кольцевой буфер
+    uint64_t total=klog_total_bytes();
+    uint64_t cursor= total > (8*1024*1024) ? total - 8*1024*1024 : 0;
+    // выделим временный буфер (64K)
+    static char log_buffer[64*1024];
+    uint64_t write_cursor=cursor;
+    // создадим/перезапишем файл
+    // сначала удалим если существует (для перезаписи)
+    (void)vfs_delete(path);
+    int32_t fd=vfs_open(path);
+    if(fd<0){
+        // попробуем создать
+        if(vfs_create_file(path)<0) {
+            // восстановим предыдущий mount
+            if(prev_root && strcmp(prev_root, device)!=0 && prev_device[0]){
+                int32_t prev_idx=block_device_find(prev_device);
+                if(prev_idx>=0){
+                    block_device_select((uint32_t)prev_idx);
+                    vfs_mount_root();
+                }
+            }
+            return fd;
+        }
+        fd=vfs_open(path);
+        if(fd<0) return fd;
+    }
+    vfs_close(fd);
+    // теперь пишем порциями
+    uint32_t total_written=0;
+    bool data_lost=false;
+    while(write_cursor < total){
+        uint32_t to_read = sizeof(log_buffer);
+        if(write_cursor + to_read > total) to_read = (uint32_t)(total - write_cursor);
+        uint32_t got=klog_read_since(&write_cursor, log_buffer, to_read, &data_lost);
+        if(got==0) break;
+        int32_t wr=vfs_append_file(path, log_buffer, got);
+        if(wr<0){
+            // попробуем через write (перезапись)
+            wr=vfs_write_file(path, log_buffer, got);
+            if(wr<0) break;
+        }
+        total_written+=got;
+        if(data_lost) break;
+    }
+    // восстановим предыдущий root если меняли
+    if(prev_root && strcmp(prev_root, device)!=0 && prev_device[0]){
+        int32_t prev_idx=block_device_find(prev_device);
+        if(prev_idx>=0){
+            block_device_select((uint32_t)prev_idx);
+            vfs_mount_root();
+        }
+    }
+    if(total_written==0) return FS_ERROR_IO;
+    return (int32_t)total_written;
+}

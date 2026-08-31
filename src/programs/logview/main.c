@@ -35,6 +35,11 @@ struct logview_state {
     bool search_active;
     char status[128];
     uint64_t last_read_ms;
+    bool show_save_dialog;
+    int32_t save_selected;
+    struct storage_device_info save_disks[8];
+    int32_t save_disk_count;
+    char save_path[64];
 };
 
 static const char *level_name(enum log_level l){
@@ -229,6 +234,12 @@ static void draw_ui(struct logview_state *st){
         pg_window_text(w, bx+8, 9, names[i], st->filter_enabled[i] ? col : w->theme.muted_text);
         bx+=66;
     }
+    // Save button
+    struct pg_rect save_btn={w->client.width-80, 6, 68, 18};
+    pg_window_rect(w, save_btn, 0x45475A);
+    pg_window_rect(w, (struct pg_rect){save_btn.x, save_btn.y, save_btn.width, 1}, 0x89B4FA);
+    pg_window_rect(w, (struct pg_rect){save_btn.x, save_btn.y+save_btn.height-1, save_btn.width, 1}, 0x89B4FA);
+    pg_window_text(w, save_btn.x+18, 9, "Save", w->theme.text);
     // search
     char search_line[96];
     search_line[0]='\0';
@@ -322,6 +333,64 @@ static void draw_ui(struct logview_state *st){
     while(*help && p - footer < 150) *p++=*help++;
     *p='\0';
     pg_window_text(w, 12, w->client.height-18, footer, w->theme.muted_text);
+    if(st->show_save_dialog){
+        // overlay dim
+        pg_window_rect(w, (struct pg_rect){0,0,w->client.width,w->client.height}, 0x11111B);
+        struct pg_rect dlg={w->client.width/2 - 180, 70, 360, 300};
+        pg_window_rect(w, dlg, 0x1E1E2E);
+        pg_window_rect(w, (struct pg_rect){dlg.x, dlg.y, dlg.width, 26}, 0x313244);
+        pg_window_text(w, dlg.x+12, dlg.y+7, "Save logs to FAT32 device", w->theme.text);
+        // device list header
+        pg_window_text(w, dlg.x+12, dlg.y+36, "Select device:", w->theme.muted_text);
+        for(int i=0;i<st->save_disk_count && i<6;i++){
+            struct pg_rect row={dlg.x+12, (uint32_t)(dlg.y+56+i*28), dlg.width-24, 24};
+            uint32_t bg = (i==st->save_selected) ? 0x45475A : 0x313244;
+            pg_window_rect(w, row, bg);
+            char disp[80];
+            pc_copy(disp, st->save_disks[i].name, sizeof(disp));
+            uint32_t l=pc_strlen(disp);
+            disp[l++]=' '; disp[l++]='(';
+            uint64_t bytes=st->save_disks[i].sector_count*st->save_disks[i].sector_size;
+            uint64_t mb=bytes/(1024*1024);
+            if(mb>=1024){
+                uint64_t gb=mb/1024;
+                char r[12]; int rl=0;
+                if(gb==0) r[rl++]='0'; else { uint64_t v=gb; while(v){ r[rl++]='0'+v%10; v/=10; } }
+                for(int k=rl-1;k>=0;k--) disp[l++]=r[k];
+                disp[l++]='G'; disp[l++]='B';
+            } else {
+                char r[12]; int rl=0;
+                uint64_t v=mb; if(v==0) r[rl++]='0'; else while(v){ r[rl++]='0'+v%10; v/=10; }
+                for(int k=rl-1;k>=0;k--) disp[l++]=r[k];
+                disp[l++]='M'; disp[l++]='B';
+            }
+            disp[l++]=')';
+            if(!st->save_disks[i].writable){
+                const char *ro=" RO";
+                for(int k=0;ro[k] && l+1<80;k++) disp[l++]=ro[k];
+            }
+            disp[l]='\0';
+            pg_window_text(w, row.x+8, row.y+6, disp, st->save_disks[i].writable ? w->theme.text : w->theme.muted_text);
+        }
+        if(st->save_disk_count==0){
+            pg_window_text(w, dlg.x+12, dlg.y+70, "No writable FAT32 disks found", w->theme.danger);
+        }
+        // path
+        char path_line[96];
+        pc_copy(path_line, "Path: ", sizeof(path_line));
+        uint32_t pl=pc_strlen(path_line);
+        for(uint32_t k=0;k<pc_strlen(st->save_path) && pl+1 < sizeof(path_line);k++) path_line[pl++]=st->save_path[k];
+        path_line[pl]='\0';
+        pg_window_text(w, dlg.x+12, dlg.y+230, path_line, w->theme.text);
+        pg_window_text(w, dlg.x+12, dlg.y+250, "Enter to edit, S to save", w->theme.muted_text);
+        // buttons
+        struct pg_rect save_b={dlg.x+40, dlg.y+270, 120, 28};
+        struct pg_rect cancel_b={dlg.x+200, dlg.y+270, 120, 28};
+        pg_window_rect(w, save_b, 0xA6E3A1);
+        pg_window_text(w, save_b.x+38, save_b.y+8, "Save", 0x1E1E2E);
+        pg_window_rect(w, cancel_b, 0x45475A);
+        pg_window_text(w, cancel_b.x+32, cancel_b.y+8, "Cancel", w->theme.text);
+    }
 
     pg_window_end(w);
 }

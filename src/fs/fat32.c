@@ -2475,3 +2475,139 @@ int32_t fat32_format_uefi_device(const char *device_name,
                                  const char *serial_confirmation){
     return fat32_format_uefi_device_progress(device_name,serial_confirmation,0);
 }
+
+bool fat32_mount_specific(const char *device){
+    if(!device || !device[0]) return false;
+    int32_t idx=block_device_find(device);
+    if(idx<0) return false;
+    if(!block_device_select((uint32_t)idx)) return false;
+    // попробуем смонтировать как в fat32_init но только для этого устройства
+    // сначала пробуем GPT
+    if(mount_gpt_partition(gpt_basic_data_type_guid)) return true;
+    if(mount_gpt_partition(gpt_esp_type_guid)) return true;
+    // затем MBR
+    if(!block_device_read(0,sector_buffer)) return false;
+    uint32_t part_lbas[4]; uint8_t part_cnt=0;
+    for(uint8_t i=0;i<4;i++){
+        uint16_t off=(uint16_t)(446+i*16);
+        uint8_t type=sector_buffer[off+4];
+        if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
+            uint32_t lba=read_u32(&sector_buffer[off+8]);
+            if(lba) part_lbas[part_cnt++]=lba;
+        }
+    }
+    for(uint8_t i=0;i<part_cnt;i++) if(mount_boot_sector(part_lbas[i])) return true;
+    if(mount_boot_sector(0)) return true;
+    if(mount_boot_sector(2048)) return true;
+    return false;
+}
+
+int32_t fat32_format_custom_device(const char *device, uint32_t partition_count, const uint64_t *sizes_gb){
+    if(!device || !device[0] || !partition_count || partition_count>4 || !sizes_gb) return FS_ERROR_INVALID;
+    int32_t idx=block_device_find(device);
+    if(idx<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(info.sector_size!=BLOCK_SECTOR_SIZE) return FS_ERROR_UNSUPPORTED;
+    uint32_t total_sectors=(uint32_t)info.sector_count;
+    if(total_sectors < 65536) return FS_ERROR_TOO_SMALL;
+    // проверим что сумма GB не превышает размер диска (с запасом 1GB на GPT)
+    uint64_t total_gb=0;
+    for(uint32_t i=0;i<partition_count;i++) total_gb+=sizes_gb[i];
+    uint64_t total_bytes_needed=total_gb*1024ULL*1024ULL*1024ULL;
+    uint64_t disk_bytes=(uint64_t)total_sectors*BLOCK_SECTOR_SIZE;
+    if(total_bytes_needed==0 || total_bytes_needed > disk_bytes - 2*1024*1024) return FS_ERROR_NO_SPACE;
+    if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
+    // для 1 раздела - простой FAT32 на весь диск (совместимо с fat32_format_device)
+    if(partition_count==1){
+        struct fat32_format_layout layout;
+        if(!calculate_format_layout(total_sectors,&layout)) return FS_ERROR_TOO_SMALL;
+        if(!write_format_metadata(&layout)) return FS_ERROR_IO;
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        return fat32_init()?0:FS_ERROR_IO;
+    }
+    // для N>1 - GPT с N разделами
+    // рассчитаем стартовые LBA для каждого раздела
+    uint32_t gpt_sectors=34+32; // 34 для GPT header+32 для entries
+    uint32_t current_lba=34;
+    uint32_t part_starts[4], part_sectors_arr[4];
+    for(uint32_t i=0;i<partition_count;i++){
+        uint64_t bytes=sizes_gb[i]*1024ULL*1024ULL*1024ULL;
+        uint32_t sectors=(uint32_t)(bytes/BLOCK_SECTOR_SIZE);
+        if(sectors<32768) sectors=32768; // минимум 16MB
+        part_starts[i]=current_lba;
+        part_sectors_arr[i]=sectors;
+        current_lba+=sectors;
+        // выравниваем на 1MiB (2048 секторов)
+        uint32_t align=2048;
+        uint32_t rem=current_lba % align;
+        if(rem) current_lba+=align - rem;
+    }
+    if(current_lba > total_sectors-33) return FS_ERROR_NO_SPACE;
+    // пишем GPT
+    uint8_t disk_guid[16], part_guid[16];
+    // используем info.serial для генерации
+    generate_guid(disk_guid,info.serial,0x47505444U^total_sectors);
+    // очищаем первые сектора
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
+    // protective MBR
+    sector_buffer[446+4]=0xEE;
+    write_u32(&sector_buffer[446+8],1);
+    write_u32(&sector_buffer[446+12],total_sectors-1);
+    if(!block_device_write(0,sector_buffer)) return FS_ERROR_IO;
+    // GPT entries
+    uint32_t entries_crc=0xFFFFFFFFU;
+    // подготовим entries в second_sector_buffer как временный буфер для CRC
+    // сначала запишем все entries и посчитаем CRC
+    uint8_t gpt_entries[32*128]={0};
+    for(uint32_t i=0;i<partition_count;i++){
+        uint8_t *e=&gpt_entries[i*128];
+        memcpy(e,gpt_basic_data_type_guid,16);
+        generate_guid(part_guid,info.serial,0x44415441U ^ i ^ total_sectors);
+        memcpy(e+16,part_guid,16);
+        write_u64(e+32,part_starts[i]);
+        write_u64(e+40,part_starts[i]+part_sectors_arr[i]-1);
+        write_gpt_name(e, i==0?"PureC System":"PureC Data");
+        // атрибуты 0
+    }
+    // CRC
+    entries_crc=crc32(gpt_entries,sizeof(gpt_entries));
+    // пишем primary GPT header
+    build_gpt_header(1,total_sectors-1,2,total_sectors-33-1,disk_guid,entries_crc);
+    if(!block_device_write(1,sector_buffer)) return FS_ERROR_IO;
+    // пишем entries primary
+    for(uint32_t s=0;s<32;s++){
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        memcpy(sector_buffer, &gpt_entries[s*512], 512);
+        if(!block_device_write(2+s,sector_buffer)) return FS_ERROR_IO;
+    }
+    // backup header
+    build_gpt_header(total_sectors-1,1,total_sectors-32,total_sectors-33-1,disk_guid,entries_crc);
+    if(!block_device_write(total_sectors-1,sector_buffer)) return FS_ERROR_IO;
+    for(uint32_t s=0;s<32;s++){
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        memcpy(sector_buffer, &gpt_entries[s*512], 512);
+        if(!block_device_write(total_sectors-32+s,sector_buffer)) return FS_ERROR_IO;
+    }
+    // форматируем каждый раздел
+    for(uint32_t i=0;i<partition_count;i++){
+        struct fat32_format_layout layout;
+        if(!calculate_format_layout(part_sectors_arr[i],&layout)) return FS_ERROR_TOO_SMALL;
+        if(!write_format_metadata_at(part_starts[i],&layout,required_volume_label,0,0,0,"")) return FS_ERROR_IO;
+    }
+    // пробуем смонтировать первый раздел как root
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    // выберем устройство снова и попробуем смонтировать первый раздел
+    block_device_select((uint32_t)idx);
+    if(!mount_boot_sector(part_starts[0])){
+        // fallback - общий mount
+    vfs_mount_root();
+    }
+    klogf(KLOG_OK,"fat32_custom: device %s formatted %u partitions",device,partition_count);
+    for(uint32_t i=0;i<partition_count;i++) klogf(KLOG_INFO," fat32_custom: part%u start %u sectors %u (%llu GB)",i,part_starts[i],part_sectors_arr[i],sizes_gb[i]);
+    return 0;
+}
