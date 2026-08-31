@@ -460,6 +460,17 @@ static void handle_key(struct logview_state *st, int32_t key){
         // will be handled as close
         return;
     }
+    if(key=='s' || key=='S'){
+        st->show_save_dialog = true;
+        // enumerate disks - simple: list first few storage devices
+        st->save_disk_count = pc_list_disks(st->save_disks, 8);
+        if(st->save_disk_count < 0) st->save_disk_count = 0;
+        if(st->save_disk_count > 8) st->save_disk_count = 8;
+        st->save_selected = 0;
+        st->save_path[0] = '\0';
+        draw_ui(&st);
+        return;
+    }
 }
 
 int main(void){
@@ -541,8 +552,39 @@ int main(void){
                 draw_ui(&st);
             }
         }
-        // mouse wheel? not yet, use polling
-        pc_sleep(16);
+        // check save dialog buttons
+                if(st->show_save_dialog){
+                    struct pg_rect save_b={w->client.width/2 - 40, w->client.height/2 + 220, 120, 28};
+                    struct pg_rect cancel_b={w->client.width/2 + 80, w->client.height/2 + 220, 120, 28};
+                    if(ev.x >= (int32_t)save_b.x && ev.x < (int32_t)(save_b.x+save_b.width) &&
+                       ev.y >= (int32_t)save_b.y && ev.y < (int32_t)(save_b.y+save_b.height)){
+                        // save: call syscall
+                        // collect device path from save_path
+                        // format: /dev/sdX/logview.log
+                        int32_t rc = (int32_t)pc_syscall(
+                            SYS_SAVE_KLOG, (uint64_t)(uintptr_t)st->save_path, 0);
+                        if(rc >= 0){
+                            pc_copy(st->status, "Log saved successfully", sizeof(st->status));
+                        } else {
+                            pc_copy(st->status, "Save failed", sizeof(st->status));
+                        }
+                        st->show_save_dialog = false;
+                        st->save_selected = 0;
+                        st->save_path[0] = '\0';
+                        draw_ui(&st);
+                        break;
+                    }
+                    if(ev.x >= (int32_t)cancel_b.x && ev.x < (int32_t)(cancel_b.x+cancel_b.width) &&
+                       ev.y >= (int32_t)cancel_b.y && ev.y < (int32_t)(cancel_b.y+cancel_b.height)){
+                        st->show_save_dialog = false;
+                        st->save_selected = 0;
+                        st->save_path[0] = '\0';
+                        draw_ui(&st);
+                        break;
+                    }
+                }
+                // mouse wheel? not yet, use polling
+                pc_sleep(16);
     }
     pg_window_close(&st.window);
     return 0;

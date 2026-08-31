@@ -12,6 +12,9 @@ struct disk_app {
     int32_t selected;
     bool confirm_format;
     char status[96];
+    int32_t partition_count;    // новое: кол-во partitions (1-4)
+    uint64_t sizes_gb[4];       // новые: размеры GB для каждого раздела
+    bool custom_format;         // флаг кастомного формата
 };
 
 static char *append_text(char *out,const char *text){
@@ -33,6 +36,10 @@ static void refresh(struct disk_app *app){
     if(app->count<0) app->count=0;
     if(app->selected>=app->count) app->selected=app->count-1;
     if(app->selected<0 && app->count>0) app->selected=0;
+    // reset custom format state when refreshing
+    app->custom_format = false;
+    app->partition_count = 1;
+    for(int i=0;i<4;i++) app->sizes_gb[i] = 0;
 }
 
 static void disk_line(char *line,const struct storage_device_info *disk){
@@ -88,7 +95,30 @@ static void draw(struct pg_window *window,struct disk_app *app,
         out=append_text(out,disk->name); out=append_text(out,"  serial: ");
         (void)append_text(out,disk->serial[0] ? disk->serial : "unavailable");
         pg_window_text(window,20,controls,selected,window->theme.text);
-        const char *label=app->confirm_format ? "CONFIRM ERASE" : "Format FAT32";
+        // Partition count selector
+        pg_window_text(window,20,controls+24,"Partitions: ",window->theme.muted_text);
+        char part_label[16]; out=append_text(part_label,"%u",0); // placeholder
+        // simple: show current and allow +/- via keys, but in draw we just display
+        char part_str[8]; pc_copy(part_str, &app->partition_count, 8);
+        pg_window_text(window, 140, controls+24, part_str, window->theme.text);
+        // GB inputs for each partition (show only when custom_format)
+        if(app->custom_format){
+            pg_window_text(window,20,controls+48,"Size GB per partition:",window->theme.muted_text);
+            for(int i=0;i<app->partition_count && i<4;i++){
+                char lbl[8]; 
+                // format uint64_t to string using append_u64 style
+                uint64_t v = app->sizes_gb[i];
+                char rev[24]; uint32_t count=0;
+                do{ rev[count++]=(char)('0'+v%10U); v/=10U; }
+                while(v && count<sizeof(rev));
+                while(count) lbl[count-1]=rev[--count];
+                lbl[count]='\0';
+                pg_window_text(window, 140+(i*50), controls+48, lbl, window->theme.text);
+                pg_window_text(window, 160+(i*50), controls+48, "GB", window->theme.muted_text);
+            }
+        }
+        // Format button
+        const char *label = app->confirm_format ? "CONFIRM ERASE" : (app->custom_format ? "Apply Custom" : "Format FAT32");
         if(pg_button(window,(struct pg_rect){20,controls+24,152,30},label,event)){
             if(!disk->writable || !disk->operational || !disk->serial[0]){
                 pc_copy(app->status,"Disk cannot be formatted safely.",
@@ -99,13 +129,23 @@ static void draw(struct pg_window *window,struct disk_app *app,
                 pc_copy(app->status,
                     "Warning: confirmation permanently erases the selected disk.",
                     sizeof(app->status));
-            }else{
-                int32_t result=(int32_t)pc_syscall(
-                    SYS_FAT32_FORMAT_FORCE,(uint64_t)(uintptr_t)disk->name,
-                    (uint64_t)(uintptr_t)disk->serial,0);
+}else if(app->custom_format){
+                // custom format: call SYS_FAT32_FORMAT_CUSTOM
+                // build request: device, partition_count, sizes_gb array
+                struct {
+                    char device[64];
+                    uint32_t partition_count;
+                    uint64_t sizes_gb[4];
+                } req;
+                pc_copy(req.device, disk->name, sizeof(req.device));
+                req.partition_count = app->partition_count;
+                for(int i=0;i<app->partition_count && i<4;i++) req.sizes_gb[i] = app->sizes_gb[i];
+                int32_t result = (int32_t)pc_syscall(
+                    SYS_FAT32_FORMAT_CUSTOM, (uint64_t)(uintptr_t)&req, 0, 0);
                 app->confirm_format=false;
-                if(result==0) pc_copy(app->status,"FAT32 format completed.",
-                                      sizeof(app->status));
+                app->custom_format=false;
+                if(result==0) pc_copy(app->status,"Custom FAT32 format completed.",
+                                    sizeof(app->status));
                 else{
                     pc_copy(app->status,"Format failed, error ",sizeof(app->status));
                     char number[24]; char *number_out=number;
@@ -115,11 +155,7 @@ static void draw(struct pg_window *window,struct disk_app *app,
                     append_text(app->status+pc_strlen(app->status),number);
                 }
                 refresh(app);
-            }
-        }
-    }
-    if(app->status[0]) pg_window_text(window,190,controls+35,app->status,
-        app->confirm_format ? window->theme.danger : window->theme.muted_text);
+            }else{
     pg_window_end(window);
 }
 
