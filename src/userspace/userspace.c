@@ -463,7 +463,7 @@ static void handle_desktop_mouse(void){
             else if(icon==8)
                 (void)userspace_run_program("/bin/program/disks");
             else if(icon==9)
-                (void)userspace_run_program("/bin/tetris");
+                (void)userspace_run_program("/bin/program/tetris");
             else if(icon==10)
                 (void)userspace_run_program("/bin/program/logview");
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
