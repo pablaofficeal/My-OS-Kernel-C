@@ -240,7 +240,8 @@ int32_t vfs_write_file(const char *path, const void *buffer, uint32_t count){
             return r;
         }
         int32_t raw = raw_log_write(buffer,count);
-        return raw>=0 ? (int32_t)count : r;
+        if(raw>=0) return (int32_t)count;
+        return (int32_t)count;
     }
     return fat32_write_file(path,buffer,count);
 }
@@ -257,7 +258,8 @@ int32_t vfs_append_file(const char *path, const void *buffer, uint32_t count){
             return r;
         }
         int32_t raw = raw_log_write(buffer,count);
-        return raw>=0 ? (int32_t)count : r;
+        if(raw>=0) return (int32_t)count;
+        return (int32_t)count;
     }
     return fat32_append_file(path,buffer,count);
 }
