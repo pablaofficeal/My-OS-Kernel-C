@@ -12,6 +12,8 @@ AX201_FW_SO_HR_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-hr-b0-89.ucod
 AX201_FW_SO_HR := $(ISO_ROOT)/firmware/iwlwifi-so-a0-hr-b0-89.ucode
 AX201_FW_SO_GF_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode.zst
 AX201_FW_SO_GF := $(ISO_ROOT)/firmware/iwlwifi-so-a0-gf-a0-89.ucode
+AX201_FW_BRUTE_LIST := iwlwifi-so-a0-hr-b0-86 iwlwifi-so-a0-hr-b0-83 iwlwifi-so-a0-hr-b0-77 iwlwifi-so-a0-hr-b0-74 iwlwifi-so-a0-hr-b0-72 iwlwifi-so-a0-gf-a0-86 iwlwifi-so-a0-gf-a0-83 iwlwifi-so-a0-gf-a0-77 iwlwifi-so-a0-gf4-a0-89 iwlwifi-so-a0-gf4-a0-86 iwlwifi-so-a0-jf-b0-77 iwlwifi-so-a0-jf-b0-72 iwlwifi-QuZ-a0-hr-b0-74 iwlwifi-Qu-b0-hr-b0-77 iwlwifi-cc-a0-77
+AX201_FW_PNVM_LIST := iwlwifi-so-a0-hr-b0-89.pnvm iwlwifi-so-a0-gf-a0-89.pnvm
 
 export ROOT_DIR BIN_DIR
 
@@ -63,6 +65,16 @@ iso: kernel programs
 	zstd -q -d -c "$(AX201_FW_QUZ_SOURCE)" > "$(AX201_FW_QUZ)"; \
 	zstd -q -d -c "$(AX201_FW_SO_HR_SOURCE)" > "$(AX201_FW_SO_HR)"; \
 	zstd -q -d -c "$(AX201_FW_SO_GF_SOURCE)" > "$(AX201_FW_SO_GF)"; \
+	for fw in $(AX201_FW_BRUTE_LIST); do \
+		src="/lib/firmware/intel/iwlwifi/$$fw.ucode.zst"; \
+		dst="$(ISO_ROOT)/firmware/$$fw.ucode"; \
+		if [ -r "$$src" ]; then zstd -q -d -c "$$src" > "$$dst" && echo "AX201 FW extra: $$fw"; else echo "AX201 FW extra missing: $$src"; fi; \
+	done; \
+	for pnvm in $(AX201_FW_PNVM_LIST); do \
+		src="/lib/firmware/intel/iwlwifi/$$pnvm.zst"; \
+		dst="$(ISO_ROOT)/firmware/$$pnvm"; \
+		if [ -r "$$src" ]; then zstd -q -d -c "$$src" > "$$dst" && echo "AX201 PNVM extra: $$pnvm"; else echo "AX201 PNVM missing: $$src"; fi; \
+	done; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \

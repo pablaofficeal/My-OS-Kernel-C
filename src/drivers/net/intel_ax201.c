@@ -1107,21 +1107,89 @@ bool intel_ax201_init(void){
         return false;
     }
 
-    ax201_select_firmware();
-    if(!ax201_get_firmware()){
-        klog(KLOG_WARN,
-            "ax201: firmware not available from bootloader; "
-            "wlan0 registered without firmware (scan will fail until ucode loaded)");
-    } else {
+    // === BRUTE FORCE FIRMWARE для 51F0: пробуем все варианты по очереди ===
+    // Один терминал - один шанс, поэтому гоняем все кандидаты до первого ALIVE.
+    struct fw_candidate {
+        const char *module;
+        const char *hint;
+        bool is_so;
+    };
+    static const struct fw_candidate candidates[] = {
+        {"/firmware/iwlwifi-so-a0-hr-b0-89.ucode", "iwlwifi-so-a0-hr-b0-89.ucode", true},
+        {"/firmware/iwlwifi-so-a0-hr-b0-86.ucode", "iwlwifi-so-a0-hr-b0-86.ucode", true},
+        {"/firmware/iwlwifi-so-a0-hr-b0-83.ucode", "iwlwifi-so-a0-hr-b0-83.ucode", true},
+        {"/firmware/iwlwifi-so-a0-hr-b0-77.ucode", "iwlwifi-so-a0-hr-b0-77.ucode", true},
+        {"/firmware/iwlwifi-so-a0-hr-b0-74.ucode", "iwlwifi-so-a0-hr-b0-74.ucode", true},
+        {"/firmware/iwlwifi-so-a0-hr-b0-72.ucode", "iwlwifi-so-a0-hr-b0-72.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf-a0-89.ucode", "iwlwifi-so-a0-gf-a0-89.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf-a0-86.ucode", "iwlwifi-so-a0-gf-a0-86.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf-a0-83.ucode", "iwlwifi-so-a0-gf-a0-83.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf-a0-77.ucode", "iwlwifi-so-a0-gf-a0-77.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf4-a0-89.ucode", "iwlwifi-so-a0-gf4-a0-89.ucode", true},
+        {"/firmware/iwlwifi-so-a0-gf4-a0-86.ucode", "iwlwifi-so-a0-gf4-a0-86.ucode", true},
+        {"/firmware/iwlwifi-so-a0-jf-b0-77.ucode", "iwlwifi-so-a0-jf-b0-77.ucode", true},
+        {"/firmware/iwlwifi-so-a0-jf-b0-72.ucode", "iwlwifi-so-a0-jf-b0-72.ucode", true},
+        {"/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode", "iwlwifi-QuZ-a0-hr-b0-77.ucode", false},
+        {"/firmware/iwlwifi-QuZ-a0-hr-b0-74.ucode", "iwlwifi-QuZ-a0-hr-b0-74.ucode", false},
+        {"/firmware/iwlwifi-Qu-b0-hr-b0-77.ucode", "iwlwifi-Qu-b0-hr-b0-77.ucode", false},
+        {"/firmware/iwlwifi-cc-a0-77.ucode", "iwlwifi-cc-a0-77.ucode", false},
+        // на случай если So прошивку пытаются кормить Qu контекстом и наоборот - пробуем инверсию is_so для главных кандидатов
+        {"/firmware/iwlwifi-so-a0-hr-b0-89.ucode", "iwlwifi-so-a0-hr-b0-89.ucode (Qu ctxt)", false},
+        {"/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode", "iwlwifi-QuZ-a0-hr-b0-77.ucode (So ctxt)", true},
+    };
+    bool any_alive=false;
+    klogf(KLOG_INFO, "ax201: BRUTE FORCE start: %u candidates for 0x%04x is_so_hw=%u", (unsigned)(sizeof(candidates)/sizeof(candidates[0])), adapter.pci.device_id, ax201_is_so_family(adapter.pci.device_id)?1U:0U);
+    for(uint32_t ci=0; ci < sizeof(candidates)/sizeof(candidates[0]); ci++){
+        const struct fw_candidate *c=&candidates[ci];
+        klogf(KLOG_INFO, "ax201: [BRUTE %u/%u] trying %s is_so=%u module=%s", ci+1, (unsigned)(sizeof(candidates)/sizeof(candidates[0])), c->hint, c->is_so?1U:0U, c->module);
+        // сброс состояния перед попыткой
+        adapter.firmware=NULL; adapter.firmware_size=0; adapter.firmware_loaded=false; adapter.firmware_alive=false;
+        adapter.ctxt_info_written=false; adapter.is_so_family=c->is_so;
+        adapter.firmware_hint=c->hint; adapter.firmware_module=c->module;
+        // также сброс HW для чистого эксперимента
+        (void)ax201_nic_reset();
+        timer_sleep(10);
+        if(!ax201_get_firmware()){
+            klogf(KLOG_WARN, "ax201: [BRUTE %u] %s NOT FOUND as Limine module, skip", ci+1, c->hint);
+            continue;
+        }
+        klogf(KLOG_INFO, "ax201: [BRUTE %u] %s loaded %llu bytes, uploading...", ci+1, c->hint, (unsigned long long)adapter.firmware_size);
         if(!ax201_fw_upload()){
-            klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware (scan will fail until ALIVE)");
+            klogf(KLOG_WARN, "ax201: [BRUTE %u] %s CTXT_INFO upload FAILED", ci+1, c->hint);
+            continue;
+        }
+        klogf(KLOG_INFO, "ax201: [BRUTE %u] %s CTXT kick done, waiting ALIVE 5000ms...", ci+1, c->hint);
+        if(ax201_wait_alive_poll()){
+            klogf(KLOG_OK, "ax201: [BRUTE %u] %s ALIVE SUCCESS is_so=%u", ci+1, c->hint, c->is_so?1U:0U);
+            any_alive=true;
+            break;
         } else {
-            if(!ax201_wait_alive_poll()){
-                klog(KLOG_WARN,
-                    "ax201: ALIVE not received during init; "
-                    "will keep polling in wifi_poll()");
+            uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint32_t intr=ax201_csr_read(AX201_CSR_INT);
+            uint32_t hw_rev=ax201_csr_read(AX201_CSR_HW_REV);
+            klogf(KLOG_WARN, "ax201: [BRUTE %u] %s ALIVE TIMEOUT gp=0x%08x int=0x%08x rev=0x%08x", ci+1, c->hint, gp, intr, hw_rev);
+            // небольшой cooldown перед следующей прошивкой
+            ax201_csr_write(AX201_CSR_RESET, AX201_CSR_RESET_SW);
+            timer_sleep(20);
+        }
+    }
+    if(!any_alive){
+        klog(KLOG_WARN, "ax201: BRUTE FORCE all candidates FAILED – wlan0 will stay without ALIVE");
+        // fallback к старому селектору для совместимости (хотя уже все попробовали)
+        ax201_select_firmware();
+        if(!ax201_get_firmware()){
+            klog(KLOG_WARN, "ax201: firmware not available from bootloader; wlan0 registered without firmware");
+        } else {
+            if(!ax201_fw_upload()){
+                klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware");
+            } else {
+                if(!ax201_wait_alive_poll()){
+                    klog(KLOG_WARN, "ax201: ALIVE not received during init; will keep polling in wifi_poll()");
+                }
             }
         }
+    } else {
+        klogf(KLOG_OK, "ax201: BRUTE FORCE succeeded – firmware_alive=%u hint=%s", adapter.firmware_alive?1U:0U, adapter.firmware_hint);
     }
 
     memcpy(adapter.net.mac, adapter.mac, 6);
