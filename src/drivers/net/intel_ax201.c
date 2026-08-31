@@ -1,5 +1,4 @@
 #include "intel_ax201.h"
-#include "../acpi/acpi_asus.h"
 #include "../pci/pci.h"
 #include "../../arch/x86_64/mmio.h"
 #include "../../kernel/diagnostics/klog.h"
@@ -46,6 +45,7 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_CTXT_INFO_BA_HI   0x044
 #define AX201_CSR_CTXT_INFO_KICK    0x048
 #define AX201_CSR_UCODE_DRV_GP1_CLR 0x05C
+#define AX201_CSR_MBOX_SET_REG       0x088
 #define AX201_CSR_HW_RF_ID          0x09C
 #define AX201_CSR_IML_DATA_ADDR_V1  0x0C0
 #define AX201_CSR_IML_SIZE_ADDR_V1  0x0C4
@@ -68,11 +68,13 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_CSR_MAC_ADDR1_STRAP   (AX201_CSR_MAC_ADDR_BASE + 0x0C)
 
 /* GP_CNTRL bits (iwlwifi CSR_GP_CNTRL) */
-#define AX201_GP_CNTRL_MAC_ACCESS_REQ  0x00000001U
-#define AX201_GP_CNTRL_MAC_ACCESS_SAV  0x00000002U
+#define AX201_GP_CNTRL_MAC_CLOCK_READY 0x00000001U
 #define AX201_GP_CNTRL_INIT_DONE       0x00000004U
-#define AX201_GP_CNTRL_MAC_CLOCK_READY 0x00000008U
-#define AX201_GP_CNTRL_HW_RADIO_ON     0x08000000U
+#define AX201_GP_CNTRL_MAC_ACCESS_REQ  0x00000008U
+#define AX201_GP_CNTRL_GOING_TO_SLEEP  0x00000010U
+#define AX201_GP_CNTRL_HW_RF_KILL_SW   0x08000000U
+#define AX201_HW_IF_CONFIG_PCI_OWN_SET 0x00400000U
+#define AX201_MBOX_SET_OS_ALIVE        0x00000020U
 
 /* CSR_INT bits (Linux iwl-csr.h) */
 #define AX201_INT_ALIVE             0x00000001U
@@ -82,7 +84,7 @@ static const uint16_t ax201_device_ids[] = {
 #define AX201_MSIX_INT_ALIVE         0x00000001U
 
 #define AX201_FW_LOAD_INT_MASK      (AX201_INT_ALIVE | AX201_INT_FH_RX)
-#define AX201_CSR_RESET_SW          0x00000001U
+#define AX201_CSR_RESET_SW          0x00000080U
 #define AX201_ALIVE_POLL_MS         5U
 #define AX201_ALIVE_TIMEOUT_MS      5000U
 
@@ -190,57 +192,70 @@ static bool ax201_request_radio_on(void){
     return ax201_prepare_nic_for_fwload();
 }
 
+static bool ax201_prepare_card_hw(void){
+    uint32_t hw_if=ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG);
+    ax201_csr_write(AX201_CSR_HW_IF_CONFIG_REG,
+        hw_if | AX201_HW_IF_CONFIG_PCI_OWN_SET);
+
+    for(uint32_t i=0;i<50U;i++){
+        if(ax201_csr_read(AX201_CSR_HW_IF_CONFIG_REG) &
+           AX201_HW_IF_CONFIG_PCI_OWN_SET){
+            uint32_t mbox=ax201_csr_read(AX201_CSR_MBOX_SET_REG);
+            ax201_csr_write(AX201_CSR_MBOX_SET_REG,
+                mbox | AX201_MBOX_SET_OS_ALIVE);
+            return true;
+        }
+        timer_sleep(1);
+    }
+    klog(KLOG_WARN, "ax201: PCI/CSME ownership handshake timed out");
+    return false;
+}
+
 static bool ax201_nic_reset(void){
     if(!adapter.regs)
         return false;
 
     ax201_csr_write(AX201_CSR_RESET, AX201_CSR_RESET_SW);
-    for(uint32_t i=0;i<20000U;i++){
-        if((ax201_csr_read(AX201_CSR_RESET) & AX201_CSR_RESET_SW)==0)
-            return true;
-        timer_sleep(1);
-    }
-    klog(KLOG_WARN, "ax201: NIC SW reset timed out");
-    return false;
+    /* Linux does not poll CSR_RESET for this bit to clear: it delays 5--6 ms
+     * and continues with NIC activation. */
+    timer_sleep(6);
+    return true;
 }
 
 static bool ax201_prepare_nic_for_fwload(void){
     if(!adapter.regs)
         return false;
 
+    if(!ax201_prepare_card_hw())
+        return false;
     (void)ax201_nic_reset();
 
     uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
     klogf(KLOG_INFO, "ax201: GP_CNTRL after reset = 0x%08x", gp);
 
-    gp|=AX201_GP_CNTRL_MAC_ACCESS_REQ | AX201_GP_CNTRL_MAC_CLOCK_READY
-        | AX201_GP_CNTRL_HW_RADIO_ON;
+    /* D0U -> D0A: INIT_DONE is host-writable; CLOCK_READY and hardware
+     * RF-kill are status bits and must never be forced by the driver. */
+    gp|=AX201_GP_CNTRL_INIT_DONE;
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
 
     bool clock_ready=false;
-    bool sav=false;
-    for(uint32_t i=0;i<5000U;i++){
+    for(uint32_t i=0;i<25U;i++){
         gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
         if(gp & AX201_GP_CNTRL_MAC_CLOCK_READY)
             clock_ready=true;
-        if(gp & AX201_GP_CNTRL_MAC_ACCESS_SAV){
-            sav=true;
-            break;
-        }
-        if(clock_ready && i>250U)
+        if(clock_ready)
             break;
         timer_sleep(1);
     }
 
     gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
-    bool radio_on=(gp & AX201_GP_CNTRL_HW_RADIO_ON)!=0;
+    bool rfkill_clear=(gp & AX201_GP_CNTRL_HW_RF_KILL_SW)!=0;
     klogf(KLOG_INFO,
-        "ax201: GP_CNTRL ready = 0x%08x (clock=%u sav=%u radio=%u)",
+        "ax201: GP_CNTRL ready = 0x%08x (clock=%u hw_rfkill_clear=%u)",
         gp,
         (gp & AX201_GP_CNTRL_MAC_CLOCK_READY) ? 1U : 0U,
-        sav ? 1U : 0U,
-        radio_on ? 1U : 0U);
-    return radio_on;
+        rfkill_clear ? 1U : 0U);
+    return clock_ready && rfkill_clear;
 }
 
 static void ax201_enable_fw_load_interrupts(void){
@@ -889,9 +904,6 @@ bool intel_ax201_init(void){
     klogf(KLOG_OK, "ax201: hardware detected: %s at %02x:%02x.%u", adapter.hw_info, adapter.pci.bus, adapter.pci.slot, adapter.pci.function);
     klog(KLOG_INFO, "ax201: PCI detection complete; starting MMIO bring-up");
 
-    if(!acpi_asus_rfkill_clear_wifi())
-        klog(KLOG_WARN, "ax201: ASUS ACPI RF-kill clear failed; Wi-Fi may stay blocked");
-
     uint32_t bar0 = pci_read_config32(adapter.pci.bus, adapter.pci.slot, adapter.pci.function, 0x10);
     if(!bar0 || bar0 == 0xFFFFFFFFU || (bar0 & 1U)){
         klog(KLOG_ERROR, "ax201: BAR0 invalid");
@@ -934,12 +946,12 @@ bool intel_ax201_init(void){
         klog(KLOG_WARN, "ax201: device reports not ready (RFKILL or power)");
         klog(KLOG_WARN, "ax201: try: Fn+F2 / BIOS Wi-Fi Enable, disable Fast Boot, EC reset");
     }
-    if(!(gp_ctrl & AX201_GP_CNTRL_HW_RADIO_ON)){
-        klog(KLOG_WARN, "ax201: hardware radio OFF (GP_CNTRL missing 0x08000000)");
-        if(!ax201_request_radio_on())
-            klog(KLOG_WARN, "ax201: failed to assert HW_RADIO_ON in GP_CNTRL");
+    if(!(gp_ctrl & AX201_GP_CNTRL_HW_RF_KILL_SW)){
+        klog(KLOG_WARN,
+            "ax201: hardware RF-kill asserted (GP_CNTRL missing 0x08000000)");
     } else {
-        klog(KLOG_INFO, "ax201: hardware radio ON (GP_CNTRL 0x08000000 set)");
+        klog(KLOG_INFO,
+            "ax201: hardware RF-kill clear (GP_CNTRL 0x08000000 set)");
     }
 
     if(!ax201_read_mac(adapter.mac)){
@@ -953,10 +965,6 @@ bool intel_ax201_init(void){
             "ax201: firmware not available from bootloader; "
             "wlan0 registered without firmware (scan will fail until ucode loaded)");
     } else {
-        if(!acpi_asus_rfkill_clear_wifi())
-            klog(KLOG_WARN, "ax201: ASUS EC/WMI did not confirm RF-kill clear");
-        if(!ax201_request_radio_on())
-            klog(KLOG_WARN, "ax201: GP_CNTRL radio still off before firmware upload");
         if(!ax201_fw_upload()){
             klog(KLOG_WARN, "ax201: CTXT_INFO upload failed; continuing without firmware (scan will fail until ALIVE)");
         } else {
