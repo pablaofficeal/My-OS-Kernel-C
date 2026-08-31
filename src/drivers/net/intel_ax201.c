@@ -12,6 +12,8 @@
 #include "../../boot/install_source.h"
 #include "iwl-context-info.h"
 #include "iwl-context-info-v2.h"
+#include "../../drivers/acpi/acpi_asus.h"
+#include "../../drivers/acpi/acpi_ec.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -280,29 +282,73 @@ static bool ax201_prepare_nic_for_fwload(void){
                       AX201_CSR_HW_IF_CONFIG_HAP_WAKE);
 
     uint32_t gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
-    klogf(KLOG_INFO, "ax201: GP_CNTRL after reset = 0x%08x", gp);
+    klogf(KLOG_INFO, "ax201: GP_CNTRL after reset = 0x%08x (clock=%u rfkill=%u)", gp,
+          (gp & AX201_GP_CNTRL_MAC_CLOCK_READY)?1U:0U,
+          (gp & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U);
+    if(!(gp & AX201_GP_CNTRL_HW_RF_KILL_SW)){
+        uint8_t ec_d9=0;
+        bool ec_ok=acpi_ec_read(0xD9U, &ec_d9);
+        klogf(KLOG_WARN, "ax201: RF-KILL asserted before EC clear (GP=0x%08x EC[D9]=0x%02x ok=%u) -> calling asus rfkill clear", gp, ec_d9, ec_ok?1U:0U);
+        bool ec_cleared=acpi_asus_rfkill_clear_wifi();
+        klogf(ec_cleared?KLOG_OK:KLOG_WARN, "ax201: acpi_asus_rfkill_clear_wifi -> %s", ec_cleared?"SUCCESS":"FAIL");
+        // повторный опрос EC и GP после попытки
+        uint8_t ec_after=0;
+        bool ec_after_ok=acpi_ec_read(0xD9U, &ec_after);
+        uint32_t gp_after=ax201_csr_read(AX201_CSR_GP_CNTRL);
+        klogf(KLOG_INFO, "ax201: after EC clear: EC[D9] 0x%02x->0x%02x (ok %u->%u) GP 0x%08x->0x%08x rfkill %u->%u",
+              ec_d9, ec_after, ec_ok?1U:0U, ec_after_ok?1U:0U,
+              gp, gp_after,
+              (gp & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U,
+              (gp_after & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U);
+        // дать EC время повлиять на GPIO
+        for(uint32_t i=0;i<20U;i++){
+            timer_sleep(5);
+            uint32_t gp_poll=ax201_csr_read(AX201_CSR_GP_CNTRL);
+            uint8_t ec_poll=0;
+            (void)acpi_ec_read(0xD9U, &ec_poll);
+            if(gp_poll & AX201_GP_CNTRL_HW_RF_KILL_SW){
+                klogf(KLOG_OK, "ax201: RF-KILL cleared after %u ms (GP=0x%08x EC[D9]=0x%02x)", (i+1)*5, gp_poll, ec_poll);
+                break;
+            }
+            if(i==19)
+                klogf(KLOG_WARN, "ax201: RF-KILL still asserted after 100ms (GP=0x%08x EC[D9]=0x%02x)", gp_poll, ec_poll);
+        }
+        gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
+    }
 
     /* D0U -> D0A */
     gp|=AX201_GP_CNTRL_INIT_DONE;
     ax201_csr_write(AX201_CSR_GP_CNTRL, gp);
+    klogf(KLOG_INFO, "ax201: GP_CNTRL INIT_DONE set -> 0x%08x", ax201_csr_read(AX201_CSR_GP_CNTRL));
 
     bool clock_ready=false;
     for(uint32_t i=0;i<25U;i++){
         gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
         if(gp & AX201_GP_CNTRL_MAC_CLOCK_READY)
             clock_ready=true;
-        if(clock_ready)
+        if(clock_ready){
+            klogf(KLOG_INFO, "ax201: MAC clock ready at poll %u (GP=0x%08x)", i, gp);
             break;
+        }
         timer_sleep(1);
     }
+    if(!clock_ready)
+        klogf(KLOG_WARN, "ax201: MAC clock NOT ready after 25ms (GP=0x%08x)", ax201_csr_read(AX201_CSR_GP_CNTRL));
 
     gp=ax201_csr_read(AX201_CSR_GP_CNTRL);
     bool rfkill_clear=(gp & AX201_GP_CNTRL_HW_RF_KILL_SW)!=0;
+    uint8_t ec_final=0;
+    bool ec_final_ok=acpi_ec_read(0xD9U, &ec_final);
     klogf(KLOG_INFO,
-        "ax201: GP_CNTRL ready = 0x%08x (clock=%u hw_rfkill_clear=%u)",
+        "ax201: GP_CNTRL ready = 0x%08x (clock=%u hw_rfkill_clear=%u EC[D9]=0x%02x ok=%u)",
         gp,
         (gp & AX201_GP_CNTRL_MAC_CLOCK_READY) ? 1U : 0U,
-        rfkill_clear ? 1U : 0U);
+        rfkill_clear ? 1U : 0U,
+        ec_final, ec_final_ok?1U:0U);
+    if(!rfkill_clear){
+        klog(KLOG_WARN, "ax201: FINAL RF-KILL still asserted – EC writes did not propagate to GP_CNTRL bit 27");
+        klogf(KLOG_WARN, "ax201: FINAL EC[D9]=0x%02x vs GP bit27=%u – if EC=0x01 but GP=0 -> GPIO/EC не связан, нужен Fn+F2/BIOS", ec_final, rfkill_clear?1U:0U);
+    }
     return clock_ready && rfkill_clear;
 }
 
@@ -974,6 +1020,13 @@ bool intel_ax201_init(void){
     }
     adapter.mmio_mapped = true;
     klogf(KLOG_OK, "ax201: MMIO mapped at %p phys=0x%lx", adapter.regs, (unsigned long)bar_addr);
+    // EC init сразу чтобы корреляция GP vs EC читалась корректно
+    if(!acpi_ec_is_ready()){
+        bool ec_init_ok=acpi_ec_init();
+        klogf(ec_init_ok?KLOG_OK:KLOG_WARN, "ax201: acpi_ec_init early -> %s", ec_init_ok?"OK":"FAIL");
+    } else {
+        klog(KLOG_INFO, "ax201: EC already ready");
+    }
 
     ax201_csr_write(AX201_CSR_INT_MASK, 0xFFFFFFFFU);
     (void)ax201_csr_read(AX201_CSR_INT);
@@ -990,16 +1043,41 @@ bool intel_ax201_init(void){
         hw_if, hw_rev, hw_rf_id);
     klogf(KLOG_INFO, "ax201: CSR gp_ctrl=0x%08x gpio=0x%08x int=0x%08x mask=0x%08x",
         gp_ctrl, gpio_in, interrupt_status, interrupt_mask);
+    {
+        uint8_t ec_d9_init=0;
+        bool ec_d9_ok=acpi_ec_read(0xD9U, &ec_d9_init);
+        klogf(KLOG_INFO, "ax201: RF-KILL correlation: GP bit27=%u EC[D9]=0x%02x (%u) ok=%u", (gp_ctrl & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U, ec_d9_init, ec_d9_init, ec_d9_ok?1U:0U);
+    }
     if(hw_rev == 0xFFFFFFFFU){
         klog(KLOG_WARN, "ax201: device reports not ready (RFKILL or power)");
         klog(KLOG_WARN, "ax201: try: Fn+F2 / BIOS Wi-Fi Enable, disable Fast Boot, EC reset");
     }
     if(!(gp_ctrl & AX201_GP_CNTRL_HW_RF_KILL_SW)){
         klog(KLOG_WARN,
-            "ax201: hardware RF-kill asserted (GP_CNTRL missing 0x08000000)");
+            "ax201: hardware RF-kill asserted (GP_CNTRL missing 0x08000000) – attempting EC/WMI clear now");
+        uint8_t ec_before=0;
+        bool ec_before_ok=acpi_ec_read(0xD9U, &ec_before);
+        klogf(KLOG_INFO, "ax201: early RF-KILL path: EC[D9] before=0x%02x ok=%u GP=0x%08x", ec_before, ec_before_ok?1U:0U, gp_ctrl);
+        bool cleared=acpi_asus_rfkill_clear_wifi();
+        uint8_t ec_after=0;
+        bool ec_after_ok=acpi_ec_read(0xD9U, &ec_after);
+        uint32_t gp_after=ax201_csr_read(AX201_CSR_GP_CNTRL);
+        klogf(cleared?KLOG_OK:KLOG_WARN, "ax201: early rfkill_clear -> %s (EC 0x%02x->0x%02x GP 0x%08x->0x%08x bit27 %u->%u)",
+              cleared?"SUCCESS":"FAIL", ec_before, ec_after, gp_ctrl, gp_after,
+              (gp_ctrl & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U, (gp_after & AX201_GP_CNTRL_HW_RF_KILL_SW)?1U:0U);
+        (void)ec_after_ok;
+        gp_ctrl=gp_after;
+        if(gp_ctrl & AX201_GP_CNTRL_HW_RF_KILL_SW){
+            klog(KLOG_OK, "ax201: RF-KILL cleared after early EC attempt");
+        } else {
+            klog(KLOG_WARN, "ax201: RF-KILL still asserted after early EC – will retry in fwload stage with 100ms poll");
+        }
     } else {
         klog(KLOG_INFO,
             "ax201: hardware RF-kill clear (GP_CNTRL 0x08000000 set)");
+        uint8_t ec_d9=0;
+        if(acpi_ec_read(0xD9U, &ec_d9))
+            klogf(KLOG_INFO, "ax201: RF-KILL clear confirmed EC[D9]=0x%02x", ec_d9);
     }
 
     if(!ax201_read_mac(adapter.mac)){
