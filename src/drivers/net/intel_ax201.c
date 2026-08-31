@@ -564,9 +564,31 @@ static bool ax201_get_firmware(void){
         klog(KLOG_ERROR, "ax201: firmware selector was not initialized");
         return false;
     }
+    klogf(KLOG_INFO, "ax201: requesting firmware module '%s' (hint %s)", adapter.firmware_module, adapter.firmware_hint);
+    // дамп всех модулей Limine для диагностики mismatch пути
+    boot_log_modules();
+    klogf(KLOG_INFO, "ax201: boot module count=%llu trying exact path '%s'",
+          (unsigned long long)boot_get_module_count(), adapter.firmware_module);
     if(!boot_get_module(adapter.firmware_module,&image,&size) || !image || size<8){
-        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine", adapter.firmware_module);
+        klogf(KLOG_ERROR, "ax201: firmware module %s not supplied by Limine (image=%p size=%llu)", adapter.firmware_module, image, (unsigned long long)size);
         klog(KLOG_ERROR, "ax201: check Makefile AX201_FW_* copied to /firmware and listed in limine.conf module_path");
+        // пробуем также альтернативные имена (без префикса /firmware/)
+        const char *alt="/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode";
+        const void *a_img=0; uint64_t a_sz=0;
+        if(boot_get_module(alt,&a_img,&a_sz))
+            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
+        else
+            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
+        alt="/firmware/iwlwifi-so-a0-gf-a0-89.ucode";
+        if(boot_get_module(alt,&a_img,&a_sz))
+            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
+        else
+            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
+        alt="/firmware/iwlwifi-so-a0-hr-b0-89.ucode";
+        if(boot_get_module(alt,&a_img,&a_sz))
+            klogf(KLOG_INFO, "ax201: alt probe %s FOUND size=%llu", alt, (unsigned long long)a_sz);
+        else
+            klogf(KLOG_INFO, "ax201: alt probe %s NOT FOUND", alt);
         return false;
     }
     uint32_t magic=ax201_read_le32((const uint8_t *)image + AX201_FIRMWARE_MAGIC_OFFSET);

@@ -148,6 +148,35 @@ bool boot_get_module(const char *path, const void **address, uint64_t *size){
     return false;
 }
 
+void boot_log_modules(void){
+    if(!module_request.response || !module_request.response->modules){
+        klog(KLOG_WARN, "boot: no Limine modules response");
+        return;
+    }
+    klogf(KLOG_INFO, "boot: Limine modules count=%llu", (unsigned long long)module_request.response->module_count);
+    for(uint64_t i=0;i<module_request.response->module_count;i++){
+        struct limine_file *m=module_request.response->modules[i];
+        if(!m){
+            klogf(KLOG_WARN, "boot: module[%llu] = NULL", (unsigned long long)i);
+            continue;
+        }
+        const char *path=m->path ? m->path : "<null path>";
+        klogf(KLOG_INFO, "boot: module[%llu] path='%s' addr=%p size=%llu (%llu KB)",
+              (unsigned long long)i, path, m->address,
+              (unsigned long long)m->size, (unsigned long long)m->size/1024ULL);
+        // также логируем первые 4 байта для детекции типа
+        if(m->address && m->size>=4){
+            const uint8_t *b=(const uint8_t*)m->address;
+            klogf(KLOG_INFO, "boot:   hdr %02x %02x %02x %02x", b[0], b[1], b[2], b[3]);
+        }
+    }
+}
+
+uint64_t boot_get_module_count(void){
+    if(!module_request.response) return 0;
+    return module_request.response->module_count;
+}
+
 void _start(void) {
     // Limine already in 64-bit long mode, paging enabled
     serial_init();
