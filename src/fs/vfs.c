@@ -389,7 +389,7 @@ int32_t vfs_save_klog_to_device(const char *device, const char *path){
     // запомним текущий смонтированный девайс для восстановления
     const char *prev_root=vfs_root_device_name();
     char prev_device[32]={0};
-    if(prev_root) pc_copy(prev_device, prev_root, sizeof(prev_device));
+    if(prev_root){ strncpy(prev_device, prev_root, sizeof(prev_device)-1); prev_device[sizeof(prev_device)-1]='\0'; }
     // попробуем смонтировать выбранное устройство
     bool mounted=false;
     if(prev_root && strcmp(prev_root, device)==0){
