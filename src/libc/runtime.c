@@ -379,25 +379,6 @@ int32_t pc_wifi_disconnect(void){ return (int32_t)pc_syscall(SYS_WIFI_DISCONNECT
 bool pc_wifi_status(struct wifi_status_info *status){
     return status && pc_syscall(SYS_WIFI_STATUS,(uint64_t)(uintptr_t)status,0,0)>=0;
 }
-int32_t pc_save_klog(const char *device, const char *path){
-    if(!device || !path) return -1;
-    struct save_klog_request req={0};
-    pc_copy(req.device, device, sizeof(req.device));
-    pc_copy(req.path, path, sizeof(req.path));
-    return (int32_t)pc_syscall(SYS_SAVE_KLOG, (uint64_t)(uintptr_t)&req, 0, 0);
-}
-int32_t pc_get_root_device(char *buffer, uint32_t capacity){
-    if(!buffer || !capacity) return -1;
-    return (int32_t)pc_syscall(SYS_GET_ROOT_DEVICE, (uint64_t)(uintptr_t)buffer, capacity, 0);
-}
-int32_t pc_format_custom(const char *device, uint32_t partition_count, const uint64_t *sizes_gb){
-    if(!device || !partition_count || !sizes_gb) return -1;
-    struct fat32_custom_format_request req={0};
-    pc_copy(req.device, device, sizeof(req.device));
-    req.partition_count=partition_count;
-    for(uint32_t i=0;i<partition_count && i<4;i++) req.sizes_gb[i]=sizes_gb[i];
-    return (int32_t)pc_syscall(SYS_FAT32_FORMAT_CUSTOM, (uint64_t)(uintptr_t)&req, 0, 0);
-}
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

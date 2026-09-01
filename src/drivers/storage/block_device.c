@@ -309,12 +309,6 @@ bool block_device_write(uint32_t lba, const void *buffer){
     return false;
 }
 
-bool block_device_flush(void){
-    if(active_transport==STORAGE_TRANSPORT_AHCI) return ahci_flush();
-    if(active_transport==STORAGE_TRANSPORT_ATA_PIO) return ata_pio_flush();
-    return true;
-}
-
 const char *block_device_name(void){
     if(active_transport==STORAGE_TRANSPORT_USB_EHCI) return ehci_device_name();
     if(active_transport==STORAGE_TRANSPORT_USB_MSC) return xhci_device_name();

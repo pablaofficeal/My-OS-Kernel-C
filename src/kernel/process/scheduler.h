@@ -46,7 +46,7 @@ void scheduler_sleep(uint32_t milliseconds);
 void scheduler_block(void);
 void scheduler_unblock(int tid);
 void scheduler_exit(void);
-void scheduler_start(void);
+void scheduler_start(void) __attribute__((noreturn));
 struct thread *scheduler_current_thread(void);
 int scheduler_current_tid(void);
 uint32_t scheduler_thread_count(void);

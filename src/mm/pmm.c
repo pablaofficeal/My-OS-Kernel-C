@@ -78,46 +78,6 @@ uint64_t pmm_allocate_page(void){
     return 0;
 }
 
-uint64_t pmm_allocate_contiguous(uint64_t page_count){
-    if(!ready || !free_frames || !page_count) return 0;
-    if(page_count==1) return pmm_allocate_page();
-    if(page_count>free_frames) return 0;
-    for(uint64_t pass=0;pass<2;pass++){
-        uint64_t end=pass==0 ? frame_limit : allocation_cursor;
-        uint64_t begin=pass==0 ? allocation_cursor : 1;
-        if(end<begin+page_count) continue;
-        for(uint64_t frame=begin;frame+page_count<=end;frame++){
-            bool ok=true;
-            for(uint64_t off=0;off<page_count;off++){
-                if(frame_is_used(frame+off)){ ok=false; frame+=off; break; }
-            }
-            if(!ok) continue;
-            for(uint64_t off=0;off<page_count;off++) set_frame(frame+off);
-            free_frames-=page_count;
-            allocation_cursor=frame+page_count;
-            for(uint64_t off=0;off<page_count;off++){
-                void *page=pmm_physical_to_virtual((frame+off)*PMM_PAGE_SIZE);
-                memset(page,0,PMM_PAGE_SIZE);
-            }
-            return frame*PMM_PAGE_SIZE;
-        }
-    }
-    return 0;
-}
-
-void pmm_free_contiguous(uint64_t physical_address, uint64_t page_count){
-    if((physical_address&(PMM_PAGE_SIZE-1))!=0 || !page_count) return;
-    uint64_t start_frame=physical_address/PMM_PAGE_SIZE;
-    if(start_frame==0 || start_frame+page_count>frame_limit) return;
-    for(uint64_t off=0;off<page_count;off++){
-        uint64_t frame=start_frame+off;
-        if(!frame_is_used(frame)) continue;
-        clear_frame(frame);
-        free_frames++;
-        if(frame<allocation_cursor) allocation_cursor=frame;
-    }
-}
-
 void pmm_free_page(uint64_t physical_address){
     if((physical_address&(PMM_PAGE_SIZE-1))!=0) return;
     uint64_t frame=physical_address/PMM_PAGE_SIZE;

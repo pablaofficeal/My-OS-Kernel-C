@@ -173,7 +173,6 @@ int system_platform_command(const char *name, const char *arguments){
     if(pc_strcmp(name,"htop")==0) return command_htop();
     if(pc_strcmp(name,"font")==0) return command_font(arguments);
     if(pc_strcmp(name,"snake")==0) return run_program("/bin/snake",arguments);
-    if(pc_strcmp(name,"tetris")==0) return run_program("/bin/tetris",arguments);
     if(pc_strcmp(name,"mouse")==0) return command_mouse();
     if(pc_strcmp(name,"debug")==0) return command_debug(arguments);
     if(pc_strcmp(name,"reboot")==0)

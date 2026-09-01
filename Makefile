@@ -6,19 +6,13 @@ LIB_DIR := $(BIN_DIR)/lib
 ISO_ROOT := $(BIN_DIR)/iso_root
 ISO_IMAGE := $(BIN_DIR)/purec_limine.iso
 LIMINE_CONFIG := $(ROOT_DIR)/src/boot/limine.conf
-AX201_FW_QUZ_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-QuZ-a0-hr-b0-77.ucode.zst
-AX201_FW_QUZ := $(ISO_ROOT)/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode
-AX201_FW_SO_HR_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-hr-b0-89.ucode.zst
-AX201_FW_SO_HR := $(ISO_ROOT)/firmware/iwlwifi-so-a0-hr-b0-89.ucode
-AX201_FW_SO_GF_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode.zst
-AX201_FW_SO_GF := $(ISO_ROOT)/firmware/iwlwifi-so-a0-gf-a0-89.ucode
-AX201_FW_BRUTE_LIST := iwlwifi-so-a0-hr-b0-86 iwlwifi-so-a0-hr-b0-83 iwlwifi-so-a0-hr-b0-77 iwlwifi-so-a0-hr-b0-74 iwlwifi-so-a0-hr-b0-72 iwlwifi-so-a0-gf-a0-86 iwlwifi-so-a0-gf-a0-83 iwlwifi-so-a0-gf-a0-77 iwlwifi-so-a0-gf4-a0-89 iwlwifi-so-a0-gf4-a0-86 iwlwifi-so-a0-jf-b0-77 iwlwifi-so-a0-jf-b0-72 iwlwifi-QuZ-a0-hr-b0-74 iwlwifi-Qu-b0-hr-b0-77 iwlwifi-cc-a0-77
-AX201_FW_PNVM_LIST :=
+AX201_FIRMWARE_SOURCE := /lib/firmware/intel/iwlwifi/iwlwifi-QuZ-a0-hr-b0-77.ucode.zst
+AX201_FIRMWARE := $(ISO_ROOT)/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode
 
 export ROOT_DIR BIN_DIR
 
 .DEFAULT_GOAL := all
-.PHONY: all libraries programs kernel modules iso clean help
+.PHONY: all libraries programs kernel iso clean help
 
 all: iso
 
@@ -28,9 +22,6 @@ libraries:
 
 programs: libraries
 	$(MAKE) -C src/programs
-
-modules:
-	$(MAKE) -C src/drivers/net/ar928x
 
 kernel:
 	$(MAKE) -C src/kernel
@@ -49,45 +40,20 @@ iso: kernel programs
 		echo "Limine не найден в /usr или /tmp/limine-pkg" >&2; \
 		exit 1; \
 	fi; \
-	if [ ! -r "$(AX201_FW_QUZ_SOURCE)" ]; then \
-		echo "AX201 firmware is missing: $(AX201_FW_QUZ_SOURCE)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -r "$(AX201_FW_SO_HR_SOURCE)" ]; then \
-		echo "AX201 So HR firmware is missing: $(AX201_FW_SO_HR_SOURCE)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -r "$(AX201_FW_SO_GF_SOURCE)" ]; then \
-		echo "AX201 So GF firmware is missing: $(AX201_FW_SO_GF_SOURCE)" >&2; \
+	if [ ! -r "$(AX201_FIRMWARE_SOURCE)" ]; then \
+		echo "AX201 firmware is missing: $(AX201_FIRMWARE_SOURCE)" >&2; \
 		exit 1; \
 	fi; \
 	rm -rf "$(ISO_ROOT)"; \
 	mkdir -p "$(ISO_ROOT)/boot/limine" "$(ISO_ROOT)/EFI/BOOT" \
 		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include" \
 		"$(ISO_ROOT)/firmware"; \
-	zstd -q -d -c "$(AX201_FW_QUZ_SOURCE)" > "$(AX201_FW_QUZ)"; \
-	zstd -q -d -c "$(AX201_FW_SO_HR_SOURCE)" > "$(AX201_FW_SO_HR)"; \
-	zstd -q -d -c "$(AX201_FW_SO_GF_SOURCE)" > "$(AX201_FW_SO_GF)"; \
-	for fw in $(AX201_FW_BRUTE_LIST); do \
-		src="/lib/firmware/intel/iwlwifi/$$fw.ucode.zst"; \
-		dst="$(ISO_ROOT)/firmware/$$fw.ucode"; \
-		if [ -r "$$src" ]; then zstd -q -d -c "$$src" > "$$dst" && echo "AX201 FW extra: $$fw"; else echo "AX201 FW extra missing: $$src"; fi; \
-	done; \
-	for pnvm in $(AX201_FW_PNVM_LIST); do \
-		src="/lib/firmware/intel/iwlwifi/$$pnvm.zst"; \
-		dst="$(ISO_ROOT)/firmware/$$pnvm"; \
-		if [ -r "$$src" ]; then zstd -q -d -c "$$src" > "$$dst" && echo "AX201 PNVM extra: $$pnvm"; else echo "AX201 PNVM missing: $$src"; fi; \
-	done; \
-	mkdir -p "$(ISO_ROOT)/bin/firmware/Intel/wifi"; \
-	cp "$(ISO_ROOT)/firmware/"*.ucode "$(ISO_ROOT)/bin/firmware/Intel/wifi/" 2>/dev/null || true; \
-	cp "$(ISO_ROOT)/firmware/"*.pnvm "$(ISO_ROOT)/bin/firmware/Intel/wifi/" 2>/dev/null || true; \
-	echo "ISO firmware in bin/firmware/Intel/wifi:"; ls -1 "$(ISO_ROOT)/bin/firmware/Intel/wifi/" | head -n 30; \
+	zstd -q -d -c "$(AX201_FIRMWARE_SOURCE)" > "$(AX201_FIRMWARE)"; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
 	cp "$(PROGRAM_DIR)/installer" "$(ISO_ROOT)/bin/installer"; \
 	cp "$(PROGRAM_DIR)/snake" "$(ISO_ROOT)/bin/snake"; \
-	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/tetris"; \
 	cp "$(PROGRAM_DIR)/terminal" "$(ISO_ROOT)/bin/program/terminal"; \
 	cp "$(PROGRAM_DIR)/nano" "$(ISO_ROOT)/bin/program/nano"; \
 	cp "$(PROGRAM_DIR)/system" "$(ISO_ROOT)/bin/program/system"; \
@@ -96,16 +62,11 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/settings" "$(ISO_ROOT)/bin/program/settings"; \
 	cp "$(PROGRAM_DIR)/monitor" "$(ISO_ROOT)/bin/program/monitor"; \
 	cp "$(PROGRAM_DIR)/disks" "$(ISO_ROOT)/bin/program/disks"; \
-	cp "$(PROGRAM_DIR)/logview" "$(ISO_ROOT)/bin/program/logview"; \
-	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/program/tetris"; \
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
 	cp "$(ROOT_DIR)/src/libgui/include/puregui.h" "$(ISO_ROOT)/include/puregui.h"; \
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
-	mkdir -p "$(ISO_ROOT)/bin/modules"; \
-	if [ -f "$(BIN_DIR)/modules/ar928x.ko" ]; then cp "$(BIN_DIR)/modules/ar928x.ko" "$(ISO_ROOT)/bin/modules/ar928x.ko"; echo "modules: ar928x.ko -> ISO"; fi; \
-	if [ -f "$(BIN_DIR)/modules/ar928x.a" ]; then cp "$(BIN_DIR)/modules/ar928x.a" "$(ISO_ROOT)/bin/modules/ar928x.a"; fi; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/limine.conf"; \
 	cp "$$limine_share/limine-bios.sys" "$(ISO_ROOT)/boot/limine/limine-bios.sys"; \

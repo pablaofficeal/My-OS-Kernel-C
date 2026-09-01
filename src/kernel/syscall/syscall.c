@@ -730,36 +730,6 @@ int64_t syscall_handler(struct syscall_regs *r){
             out->has_device=st.has_device?1:0;
             return 0;
         }
-        case SYS_SAVE_KLOG: {
-            const struct save_klog_request *user_req=(const struct save_klog_request*)(uintptr_t)a1;
-            if(!readable(user_req,sizeof(*user_req))) return -1;
-            struct save_klog_request req=*user_req;
-            req.device[sizeof(req.device)-1]='\0';
-            req.path[sizeof(req.path)-1]='\0';
-            for(uint32_t i=0;i<sizeof(req.device);i++) if(!req.device[i]) break; else if(req.device[i]=='\n' || req.device[i]=='\r') req.device[i]='\0';
-            for(uint32_t i=0;i<sizeof(req.path);i++) if(!req.path[i]) break; else if(req.path[i]=='\n' || req.path[i]=='\r') req.path[i]='\0';
-            if(!req.device[0] || !req.path[0]) return -1;
-            return vfs_save_klog_to_device(req.device, req.path);
-        }
-        case SYS_GET_ROOT_DEVICE: {
-            char *buffer=(char*)(uintptr_t)a1;
-            uint32_t capacity=(uint32_t)a2;
-            if(!writable(buffer,capacity)) return -1;
-            const char *root=vfs_root_device_name();
-            if(!root || !root[0]) return -1;
-            uint32_t len=(uint32_t)strlen(root);
-            if(len+1>capacity) return -1;
-            memcpy(buffer,root,len+1);
-            return (int64_t)len;
-        }
-        case SYS_FAT32_FORMAT_CUSTOM: {
-            const struct fat32_custom_format_request *user_req=(const struct fat32_custom_format_request*)(uintptr_t)a1;
-            if(!readable(user_req,sizeof(*user_req))) return -1;
-            struct fat32_custom_format_request req=*user_req;
-            req.device[sizeof(req.device)-1]='\0';
-            if(req.partition_count==0 || req.partition_count>4) return -1;
-            return fat32_format_custom_device(req.device, req.partition_count, req.sizes_gb);
-        }
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;

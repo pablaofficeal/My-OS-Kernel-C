@@ -309,4 +309,7 @@ void scheduler_start(void){
     klogf(KLOG_INFO, "sched: starting with %u threads", scheduler_thread_count());
     started=true;
     scheduler_yield();
+    /* The boot context is threads[0].  It must be the real idle task; falling
+       through here used to start a second desktop/input polling loop. */
+    for(;;) __asm__ volatile("sti; hlt":::"memory");
 }

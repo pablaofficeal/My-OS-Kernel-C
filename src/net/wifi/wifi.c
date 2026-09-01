@@ -10,7 +10,7 @@
 #define WIFI_SCAN_INTERVAL_MS 5000ULL
 #define WIFI_SCAN_TIMEOUT_MS 4000ULL
 
-#define WIFI_MAX_DEVICES 4
+#define WIFI_MAX_DEVICES 2
 
 struct wifi_slot {
     bool used;
@@ -90,19 +90,20 @@ bool wifi_trigger_scan(void){
         klog(KLOG_INFO, "wifi: scan deferred while connecting");
         return false;
     }
-    mgr.cache_count = 0;
-    if(mgr.active->ops && mgr.active->ops->scan){
-        bool ok = mgr.active->ops->scan(mgr.active->context);
-        if(!ok){
-            mgr.last_scan_ms = timer_ticks();
-            klog(KLOG_DEBUG, "wifi: driver scan failed to start");
-            return false;
-        }
-    }
     mgr.scanning = true;
     mgr.scan_start_ms = timer_ticks();
     mgr.state = WIFI_STATE_SCANNING;
-    klog(KLOG_DEBUG, "wifi: scanning started (driver will report beacons)");
+    mgr.cache_count = 0;
+    klog(KLOG_INFO, "wifi: scanning started (driver will report beacons)");
+    if(mgr.active->ops && mgr.active->ops->scan){
+        bool ok = mgr.active->ops->scan(mgr.active->context);
+        if(!ok){
+            klog(KLOG_WARN, "wifi: driver scan failed to start");
+            mgr.scanning = false;
+            mgr.state = WIFI_STATE_DISCONNECTED;
+            return false;
+        }
+    }
     return true;
 }
 

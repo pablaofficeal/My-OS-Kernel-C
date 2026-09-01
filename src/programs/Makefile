@@ -28,7 +28,6 @@ GENERAL_SOURCES := \
 	terminal/window.c \
 	nano/window.c \
 	gui_demo/main.c \
-	game/tetris/main.c \
 	files/main.c \
 	files/app.c \
 	files/model.c \
@@ -40,15 +39,13 @@ GENERAL_SOURCES := \
 	settings/pages/audio.c \
 	settings/pages/wifi.c \
 	monitor/main.c \
-	disks/main.c \
-	logview/main.c
+	disks/main.c
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 TARGETS := \
 	$(PROGRAM_DIR)/init \
 	$(PROGRAM_DIR)/installer \
 	$(PROGRAM_DIR)/snake \
-	$(PROGRAM_DIR)/tetris \
 	$(PROGRAM_DIR)/terminal \
 	$(PROGRAM_DIR)/nano \
 	$(PROGRAM_DIR)/system \
@@ -56,8 +53,7 @@ TARGETS := \
 	$(PROGRAM_DIR)/files \
 	$(PROGRAM_DIR)/settings \
 	$(PROGRAM_DIR)/monitor \
-	$(PROGRAM_DIR)/disks \
-	$(PROGRAM_DIR)/logview
+	$(PROGRAM_DIR)/disks
 
 .NOTPARALLEL:
 .PHONY: all
@@ -118,13 +114,5 @@ $(PROGRAM_DIR)/monitor: $(OBJ_DIR)/monitor/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LI
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/disks: $(OBJ_DIR)/disks/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
-	@mkdir -p $(@D)
-	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
-
-$(PROGRAM_DIR)/logview: $(OBJ_DIR)/logview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
-	@mkdir -p $(@D)
-	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
-
-$(PROGRAM_DIR)/tetris: $(OBJ_DIR)/game/tetris/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)

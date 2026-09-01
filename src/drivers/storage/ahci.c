@@ -380,13 +380,7 @@ bool ahci_write_sector(uint32_t lba, const void *buffer){
     if(!issue_command(device->port,command,lba,dma_buffer,true,device->lba48)){
         return false;
     }
-    return true;
-}
-
-bool ahci_flush(void){
-    if(selected_device>=device_count) return false;
-    struct ahci_device *device=&devices[selected_device];
-    uint8_t command=device->lba48 ? ATA_COMMAND_FLUSH_EXT : ATA_COMMAND_FLUSH;
+    command=device->lba48 ? ATA_COMMAND_FLUSH_EXT : ATA_COMMAND_FLUSH;
     return issue_command(device->port,command,0,0,false,device->lba48);
 }
 

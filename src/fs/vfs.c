@@ -1,16 +1,13 @@
 #include "vfs.h"
 #include "fat32.h"
 #include "../lib/string.h"
-#include "../kernel/diagnostics/klog.h"
-#include "../drivers/storage/block_device.h"
 
 #define VFS_MAX_OPEN_FILES 32
 
 enum vfs_handle_type {
     VFS_HANDLE_NONE,
     VFS_HANDLE_FAT32,
-    VFS_HANDLE_KERNEL_FILE,
-    VFS_HANDLE_KLOG
+    VFS_HANDLE_KERNEL_FILE
 };
 
 struct kernel_file {
@@ -25,8 +22,6 @@ struct vfs_handle {
     const char *data;
     uint32_t size;
     uint32_t position;
-    uint64_t klog_cursor;
-    bool klog_data_lost;
 };
 
 static const struct kernel_file kernel_files[]={
@@ -97,9 +92,6 @@ const char *vfs_root_device_name(void){
     return fat32_device_name();
 }
 
-static bool is_klog_path(const char *path){
-    return path && (strcmp(path,"/kernel.log")==0 || strcmp(path,"/dmesg.txt")==0);
-}
 int32_t vfs_open(const char *path){
     if(!path || !path[0]) return FS_ERROR_INVALID;
     const struct kernel_file *kernel_file=find_kernel_file(path);
@@ -115,30 +107,9 @@ int32_t vfs_open(const char *path){
         handle->position=0;
         return VFS_FD_BASE+handle_index;
     }
-    if(is_klog_path(path)){
-        handle->type=VFS_HANDLE_KLOG;
-        handle->backend_descriptor=-1;
-        handle->data=0;
-        handle->size=0;
-        handle->position=0;
-        handle->klog_cursor=0;
-        uint64_t total=klog_total_bytes();
-        handle->klog_cursor = total > (8*1024*1024) ? total - 8*1024*1024 : 0;
-        handle->klog_data_lost=false;
-        return VFS_FD_BASE+handle_index;
-    }
 
     int32_t backend_descriptor=fat32_open(path);
-    if(backend_descriptor<0){
-        if(is_klog_path(path)){
-            handle->type=VFS_HANDLE_KLOG;
-            handle->backend_descriptor=-1;
-            handle->klog_cursor=0;
-            return VFS_FD_BASE+handle_index;
-        }
-        memset(handle,0,sizeof(*handle));
-        return backend_descriptor;
-    }
+    if(backend_descriptor<0) return backend_descriptor;
     handle->type=VFS_HANDLE_FAT32;
     handle->backend_descriptor=backend_descriptor;
     handle->data=0;
@@ -153,10 +124,6 @@ int32_t vfs_read(int32_t descriptor, void *buffer, uint32_t count){
     if(!handle) return FS_ERROR_INVALID;
     if(handle->type==VFS_HANDLE_FAT32){
         return fat32_read(handle->backend_descriptor,buffer,count);
-    }
-    if(handle->type==VFS_HANDLE_KLOG){
-        uint32_t amount=klog_read_since(&handle->klog_cursor, (char*)buffer, count, &handle->klog_data_lost);
-        return (int32_t)amount;
     }
     if(handle->type!=VFS_HANDLE_KERNEL_FILE) return FS_ERROR_INVALID;
     if(handle->position>=handle->size) return 0;
@@ -204,28 +171,6 @@ int32_t vfs_list(const char *path, struct fs_directory_entry *entries,
             entries[count].attributes=FS_ATTRIBUTE_DIRECTORY;
             count++;
         }
-        if(count<capacity){
-            bool has=false;
-            for(uint32_t i=0;i<count;i++) if(strcmp(entries[i].name,"dmesg.txt")==0) has=true;
-            if(!has){
-                copy_name(entries[count].name,"dmesg.txt");
-                entries[count].size=(uint32_t)klog_total_bytes();
-                if(entries[count].size>8*1024*1024) entries[count].size=8*1024*1024;
-                entries[count].attributes=0;
-                count++;
-            }
-        }
-        if(count<capacity){
-            bool has=false;
-            for(uint32_t i=0;i<count;i++) if(strcmp(entries[i].name,"kernel.log")==0) has=true;
-            if(!has){
-                copy_name(entries[count].name,"kernel.log");
-                entries[count].size=(uint32_t)klog_total_bytes();
-                if(entries[count].size>8*1024*1024) entries[count].size=8*1024*1024;
-                entries[count].attributes=0;
-                count++;
-            }
-        }
         return (int32_t)count;
     }
     if(path_equals(path,"/kernel")){
@@ -244,45 +189,16 @@ int32_t vfs_list(const char *path, struct fs_directory_entry *entries,
 int32_t vfs_create_file(const char *path){
     if(!path || path_equals(path,"/kernel")) return FS_ERROR_INVALID;
     if(find_kernel_file(path)) return FS_ERROR_READ_ONLY;
-    if(is_klog_path(path)) return 0;
     return fat32_create_file(path);
 }
-static uint32_t raw_log_base_lba;
-static uint32_t raw_log_next_sector;
-static bool raw_log_inited;
-static int32_t raw_log_write(const void *buffer, uint32_t count);
-static int32_t raw_log_truncate(void);
+
 int32_t vfs_write_file(const char *path, const void *buffer, uint32_t count){
     if(find_kernel_file(path) || path_equals(path,"/kernel")) return FS_ERROR_READ_ONLY;
-    if(is_klog_path(path)){
-        if(count==0) raw_log_truncate();
-        int32_t r = fat32_write_file(path,buffer,count);
-        if(r>=0) {
-            (void)raw_log_write(buffer,count);
-            return r;
-        }
-        int32_t raw = raw_log_write(buffer,count);
-        if(raw>=0) return (int32_t)count;
-        return (int32_t)count;
-    }
     return fat32_write_file(path,buffer,count);
 }
 
 int32_t vfs_append_file(const char *path, const void *buffer, uint32_t count){
     if(find_kernel_file(path) || path_equals(path,"/kernel")) return FS_ERROR_READ_ONLY;
-    if(is_klog_path(path)){
-        int32_t r = fat32_append_file(path,buffer,count);
-        if(r<0 && !vfs_is_root_mounted()){
-            r = fat32_write_file(path,buffer,count);
-        }
-        if(r>=0) {
-            (void)raw_log_write(buffer,count);
-            return r;
-        }
-        int32_t raw = raw_log_write(buffer,count);
-        if(raw>=0) return (int32_t)count;
-        return (int32_t)count;
-    }
     return fat32_append_file(path,buffer,count);
 }
 
@@ -313,155 +229,4 @@ int32_t vfs_format_uefi_device_progress(
     fat32_progress_callback callback){
     return fat32_format_uefi_device_progress(device_name,serial_confirmation,
                                               callback);
-}
-static bool raw_log_init(void){
-    if(raw_log_inited) return true;
-    uint32_t n = block_device_count();
-    if(n==0) return false;
-    struct storage_device_info info;
-    bool found=false;
-    for(uint32_t i=0;i<n;i++){
-        if(block_device_get_info(i,&info) && info.selected){ found=true; break; }
-    }
-    if(!found){
-        if(!block_device_get_info(0,&info)) return false;
-    }
-    if(info.sector_count < 4096) return false;
-    raw_log_base_lba = 1024;
-    if(raw_log_base_lba + 2048 > info.sector_count) raw_log_base_lba = info.sector_count - 2048;
-    raw_log_next_sector = 1;
-    raw_log_inited = true;
-    uint8_t hdr[512];
-    hdr[0]='K'; hdr[1]='L'; hdr[2]='O'; hdr[3]='G';
-    hdr[4]=0; hdr[5]=0; hdr[6]=0; hdr[7]=0;
-    for(uint32_t i=8;i<512;i++) hdr[i]=0;
-    (void)block_device_write(raw_log_base_lba, hdr);
-    return true;
-}
-static int32_t raw_log_truncate(void){
-    if(!raw_log_init()) return FS_ERROR_INVALID;
-    raw_log_next_sector = 1;
-    uint8_t hdr[512];
-    hdr[0]='K'; hdr[1]='L'; hdr[2]='O'; hdr[3]='G';
-    for(uint32_t i=4;i<512;i++) hdr[i]=0;
-    if(!block_device_write(raw_log_base_lba, hdr)) return FS_ERROR_IO;
-    return 0;
-}
-static int32_t raw_log_write(const void *buffer, uint32_t count){
-    if(!buffer && count) return FS_ERROR_INVALID;
-    if(count==0) return 0;
-    if(!raw_log_init()) return FS_ERROR_INVALID;
-    const uint8_t *src=(const uint8_t*)buffer;
-    uint32_t written=0;
-    uint8_t sector[512];
-    while(count>0){
-        if(raw_log_next_sector >= 2048) break;
-        uint32_t to_copy = count > 512 ? 512 : count;
-        memset(sector,0,512);
-        memcpy(sector,src,to_copy);
-        if(!block_device_write(raw_log_base_lba + raw_log_next_sector, sector)) break;
-        raw_log_next_sector++;
-        src+=to_copy;
-        count-=to_copy;
-        written+=to_copy;
-        if(count==0){
-            uint8_t hdr[512];
-            if(block_device_read(raw_log_base_lba, hdr)){
-                hdr[4]=(uint8_t)(raw_log_next_sector & 0xFF);
-                hdr[5]=(uint8_t)((raw_log_next_sector>>8)&0xFF);
-                hdr[6]=(uint8_t)((raw_log_next_sector>>16)&0xFF);
-                hdr[7]=(uint8_t)((raw_log_next_sector>>24)&0xFF);
-                (void)block_device_write(raw_log_base_lba, hdr);
-            }
-        }
-    }
-    return written ? (int32_t)written : FS_ERROR_IO;
-}
-
-int32_t vfs_save_klog_to_device(const char *device, const char *path){
-    if(!device || !device[0] || !path || !path[0]) return FS_ERROR_INVALID;
-    // найдем устройство
-    int32_t dev_idx=block_device_find(device);
-    if(dev_idx<0) return FS_ERROR_NOT_FOUND;
-    struct storage_device_info info;
-    if(!block_device_get_info((uint32_t)dev_idx, &info)) return FS_ERROR_INVALID;
-    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
-    // запомним текущий смонтированный девайс для восстановления
-    const char *prev_root=vfs_root_device_name();
-    char prev_device[32]={0};
-    if(prev_root){ strncpy(prev_device, prev_root, sizeof(prev_device)-1); prev_device[sizeof(prev_device)-1]='\0'; }
-    // попробуем смонтировать выбранное устройство
-    bool mounted=false;
-    if(prev_root && strcmp(prev_root, device)==0){
-        mounted=vfs_is_root_mounted();
-    } else {
-        // попытаемся смонтировать конкретное устройство
-        if(block_device_select((uint32_t)dev_idx)){
-            // попробуем найти FAT на этом устройстве
-            // сначала сбросим текущий volume и попробуем смонтировать заново
-            // fat32_mount_specific попытается смонтировать именно это устройство
-            if(fat32_mount_specific(device)){
-                mounted=true;
-            } else {
-                // fallback - общий mount (найдет первый FAT)
-                mounted=vfs_mount_root();
-            }
-        }
-    }
-    if(!mounted) return FS_ERROR_IO;
-    // теперь пишем лог
-    // читаем весь кольцевой буфер
-    uint64_t total=klog_total_bytes();
-    uint64_t cursor= total > (8*1024*1024) ? total - 8*1024*1024 : 0;
-    // выделим временный буфер (64K)
-    static char log_buffer[64*1024];
-    uint64_t write_cursor=cursor;
-    // создадим/перезапишем файл
-    // сначала удалим если существует (для перезаписи)
-    (void)vfs_delete(path);
-    int32_t fd=vfs_open(path);
-    if(fd<0){
-        // попробуем создать
-        if(vfs_create_file(path)<0) {
-            // восстановим предыдущий mount
-            if(prev_root && strcmp(prev_root, device)!=0 && prev_device[0]){
-                int32_t prev_idx=block_device_find(prev_device);
-                if(prev_idx>=0){
-                    block_device_select((uint32_t)prev_idx);
-                    vfs_mount_root();
-                }
-            }
-            return fd;
-        }
-        fd=vfs_open(path);
-        if(fd<0) return fd;
-    }
-    vfs_close(fd);
-    // теперь пишем порциями
-    uint32_t total_written=0;
-    bool data_lost=false;
-    while(write_cursor < total){
-        uint32_t to_read = sizeof(log_buffer);
-        if(write_cursor + to_read > total) to_read = (uint32_t)(total - write_cursor);
-        uint32_t got=klog_read_since(&write_cursor, log_buffer, to_read, &data_lost);
-        if(got==0) break;
-        int32_t wr=vfs_append_file(path, log_buffer, got);
-        if(wr<0){
-            // попробуем через write (перезапись)
-            wr=vfs_write_file(path, log_buffer, got);
-            if(wr<0) break;
-        }
-        total_written+=got;
-        if(data_lost) break;
-    }
-    // восстановим предыдущий root если меняли
-    if(prev_root && strcmp(prev_root, device)!=0 && prev_device[0]){
-        int32_t prev_idx=block_device_find(prev_device);
-        if(prev_idx>=0){
-            block_device_select((uint32_t)prev_idx);
-            vfs_mount_root();
-        }
-    }
-    if(total_written==0) return FS_ERROR_IO;
-    return (int32_t)total_written;
 }

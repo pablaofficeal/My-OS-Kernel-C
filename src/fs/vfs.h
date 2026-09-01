@@ -35,4 +35,3 @@ int32_t vfs_format_uefi_device(const char *device_name,
 int32_t vfs_format_uefi_device_progress(
     const char *device_name, const char *serial_confirmation,
     fat32_progress_callback callback);
-int32_t vfs_save_klog_to_device(const char *device, const char *path);

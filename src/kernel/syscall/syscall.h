@@ -83,9 +83,6 @@
 #define SYS_WIFI_CONNECT 262
 #define SYS_WIFI_DISCONNECT 263
 #define SYS_WIFI_STATUS 264
-#define SYS_SAVE_KLOG 265
-#define SYS_GET_ROOT_DEVICE 266
-#define SYS_FAT32_FORMAT_CUSTOM 267
 
 #define NETWORK_PING_TARGET_CAPACITY 128
 
@@ -327,18 +324,6 @@ struct wifi_status_info {
 struct wifi_connect_request {
     char ssid[WIFI_SSID_CAPACITY];
     char password[WIFI_PASSWORD_CAPACITY];
-};
-
-struct save_klog_request {
-    char device[32];
-    char path[64];
-};
-
-struct fat32_custom_format_request {
-    char device[32];
-    uint32_t partition_count;
-    uint64_t sizes_gb[4];
-    uint32_t reserved;
 };
 
 struct syscall_regs {

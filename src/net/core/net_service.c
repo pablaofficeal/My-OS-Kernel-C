@@ -8,8 +8,6 @@
 #include "../config/dhcp.h"
 #include "../diagnostics/icmp.h"
 #include "../../drivers/net/e1000_82540em.h"
-#include "../../drivers/net/intel_ax201.h"
-#include "../wifi/wifi.h"
 #include "../../drivers/interrupts/timer.h"
 #include "../../kernel/diagnostics/klog.h"
 #include "../../kernel/process/scheduler.h"
@@ -21,7 +19,6 @@ static bool ready;
 
 bool net_service_init(void){
     net_device_registry_init();
-    wifi_system_init();
     ethernet_init();
     if(!arp_init()){
         klog(KLOG_ERROR,"net: cannot register ARP Ethernet handler");
@@ -34,19 +31,11 @@ bool net_service_init(void){
         ready=false;
         return false;
     }
-    bool eth_ready=e1000_82540em_init();
-    bool wifi_ready=intel_ax201_init();
-    ready=eth_ready||wifi_ready;
-    if(!ready) klog(KLOG_WARN,"net: no supported network adapter found (e1000 nor AX201)");
+    ready=e1000_82540em_init();
+    if(!ready) klog(KLOG_WARN,"net: no supported network adapter found");
     else {
-        for(uint32_t index=0;index<net_device_count();index++){
-            struct net_device *dev=net_device_get(index);
-            if(dev && dev->name[0]=='e'){
-                (void)dhcp_start(dev);
-            } else if(dev && dev->name[0]=='w'){
-                klogf(KLOG_INFO,"net: %s registered, waiting for Wi-Fi association before DHCP",dev->name);
-            }
-        }
+        for(uint32_t index=0;index<net_device_count();index++)
+            (void)dhcp_start(net_device_get(index));
     }
     return ready;
 }
@@ -67,7 +56,6 @@ void net_service_thread(void *argument){
             }
         }
         uint64_t now=timer_ticks();
-        wifi_poll(now);
         dhcp_poll(now);
         if(now-last_housekeeping>=1000){
             arp_poll(now);
