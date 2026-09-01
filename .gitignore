@@ -8,3 +8,4 @@
 *.log
 *.elf
 *repair-backups/
+*old-core/

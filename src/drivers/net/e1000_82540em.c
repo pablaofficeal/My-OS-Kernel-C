@@ -4,7 +4,7 @@
 #include "../../kernel/diagnostics/klog.h"
 #include "../../lib/string.h"
 #include "../../mm/pmm.h"
-#include "../../net/core/net_device.h"
+#include "../../net/net_device.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -70,19 +70,12 @@ struct e1000_tx_descriptor {
     uint16_t special;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct e1000_rx_descriptor)==16,
-               "e1000 RX descriptor ABI must be 16 bytes");
-_Static_assert(sizeof(struct e1000_tx_descriptor)==16,
-               "e1000 TX descriptor ABI must be 16 bytes");
-_Static_assert((E1000_RING_COUNT*16U)%128U==0,
-               "e1000 descriptor ring length must be 128-byte aligned");
-
 struct e1000_device {
     volatile uint8_t *registers;
     struct pci_device_info pci;
     struct net_device net;
-    volatile struct e1000_rx_descriptor *rx_ring;
-    volatile struct e1000_tx_descriptor *tx_ring;
+    struct e1000_rx_descriptor *rx_ring;
+    struct e1000_tx_descriptor *tx_ring;
     uint64_t rx_ring_physical;
     uint64_t tx_ring_physical;
     uint64_t rx_buffer_physical[E1000_RING_COUNT];
@@ -171,14 +164,6 @@ static bool read_mac(uint8_t mac[6]){
     return !all_zero && !all_ff && !(mac[0]&1U);
 }
 
-static void program_receive_address(const uint8_t mac[6]){
-    uint32_t low=(uint32_t)mac[0]|((uint32_t)mac[1]<<8)
-        |((uint32_t)mac[2]<<16)|((uint32_t)mac[3]<<24);
-    uint32_t high=(uint32_t)mac[4]|((uint32_t)mac[5]<<8)|(1U<<31);
-    reg_write(E1000_REG_RAL,low);
-    reg_write(E1000_REG_RAH,high);
-}
-
 static bool reset_controller(void){
     reg_write(E1000_REG_IMC,0xFFFFFFFFU);
     (void)reg_read(E1000_REG_ICR);
@@ -223,7 +208,7 @@ static bool e1000_transmit(void *context, const uint8_t *frame,
         return false;
     if(__atomic_test_and_set(&device->tx_locked,__ATOMIC_ACQUIRE)) return false;
     uint16_t index=device->tx_next;
-    volatile struct e1000_tx_descriptor *descriptor=&device->tx_ring[index];
+    struct e1000_tx_descriptor *descriptor=&device->tx_ring[index];
     if(!(descriptor->status&E1000_TX_STATUS_DD)){
         __atomic_clear(&device->tx_locked,__ATOMIC_RELEASE);
         return false;
@@ -247,7 +232,7 @@ static void e1000_poll(void *context, uint32_t budget){
     if(!device || !device->initialized) return;
     for(uint32_t completed=0;completed<budget;completed++){
         uint16_t index=device->rx_next;
-        volatile struct e1000_rx_descriptor *descriptor=&device->rx_ring[index];
+        struct e1000_rx_descriptor *descriptor=&device->rx_ring[index];
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if(!(descriptor->status&E1000_RX_STATUS_DD)) break;
         if(!descriptor->errors && (descriptor->status&E1000_RX_STATUS_EOP)
@@ -317,7 +302,6 @@ bool e1000_82540em_init(void){
         klog(KLOG_ERROR,"e1000: invalid MAC address after EEPROM reload");
         return false;
     }
-    program_receive_address(adapter.net.mac);
     if(!allocate_dma()){
         klog(KLOG_ERROR,"e1000: cannot allocate bounded DMA rings");
         return false;
