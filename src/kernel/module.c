@@ -130,6 +130,9 @@ static uint64_t align_up(uint64_t v, uint64_t a){
     return (v+mask)&~mask;
 }
 bool module_load_from_memory(const void *data, uint64_t size){
+    (void)data;
+    (void)size;
+    return false;
     if(!data||size<sizeof(struct elf64_hdr)) return false;
     const struct elf64_hdr *hdr=data;
     if(hdr->e_ident[0]!=0x7F||hdr->e_ident[1]!='E'||hdr->e_ident[2]!='L'||hdr->e_ident[3]!='F') return false;
@@ -274,6 +277,7 @@ bool module_load_from_memory(const void *data, uint64_t size){
     return ok;
 }
 bool module_load_from_limine(void){
+    return false;
     uint64_t count=boot_get_module_count();
     if(!count) return false;
     bool loaded=false;
