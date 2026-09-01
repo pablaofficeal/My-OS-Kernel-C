@@ -9,3 +9,4 @@
 *.elf
 *repair-backups/
 *old-core/
+src copy/

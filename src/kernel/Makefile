@@ -34,14 +34,8 @@ C_SOURCES := \
 	kernel/diagnostics/boot_diag.c \
 	kernel/diagnostics/panic.c \
 	drivers/input/keyboard.c \
-	drivers/acpi/acpi.c \
-	drivers/acpi/acpi_ec.c \
-	drivers/acpi/acpi_aml.c \
-	drivers/acpi/acpi_wmi.c \
-	drivers/acpi/acpi_asus.c \
 	drivers/pci/pci.c \
 	drivers/net/e1000_82540em.c \
-	drivers/net/intel_ax201.c \
 	net/wifi/wifi.c \
 	net/core/net_device.c \
 	net/link/ethernet.c \
@@ -86,8 +80,6 @@ C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
 CPP_OBJECTS := $(CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.asm.o)
 OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
-MODULES_A := $(BIN_DIR)/modules/ar928x.a
-MODULES_LD :=
 
 .PHONY: all
 all: $(TARGET)
@@ -98,7 +90,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	@if [ -f $@ ]; then cp $@ $(FALLBACK); fi
-	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS) $(MODULES_LD)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS)
 	@if [ ! -f $(FALLBACK) ]; then cp $@ $(FALLBACK); fi
 
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.c
