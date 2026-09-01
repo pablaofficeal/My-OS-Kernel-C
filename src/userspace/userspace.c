@@ -180,6 +180,7 @@ static int32_t userspace_run_detached(const char *path,
     int32_t pid=(int32_t)userspace_syscall(
         SYS_EXEC,(uint64_t)path,(uint64_t)arguments,0);
     if(pid>=0) detached_programs[slot]=pid;
+    else klogf(KLOG_ERROR,"desktop: exec failed path='%s' rc=%d",path,pid);
     return pid;
 }
 
@@ -190,6 +191,10 @@ static void reap_detached_programs(void){
         int64_t result=userspace_syscall(SYS_WAIT,
             (uint64_t)detached_programs[index],(uint64_t)&status,1);
         if(result>0){
+            if(status!=0){
+                klogf(KLOG_ERROR,"desktop: detached pid=%d exited status=%d",
+                      detached_programs[index],status);
+            }
             detached_programs[index]=0;
             installer_icon_visible=!installation_present();
         }
