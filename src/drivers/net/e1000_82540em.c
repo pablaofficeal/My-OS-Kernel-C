@@ -280,9 +280,8 @@ static const struct net_device_ops e1000_ops={
 
 static void find_adapter(const struct pci_device_info *device, void *context){
     struct e1000_device *result=context;
-    if(result->found) return;
-    if(device->vendor_id!=E1000_VENDOR_INTEL) return;
-    if(device->class_code!=0x02 || device->subclass!=0x00) return;
+    if(result->found || device->vendor_id!=E1000_VENDOR_INTEL
+       || device->device_id!=E1000_DEVICE_82540EM) return;
     result->pci=*device;
     result->found=true;
 }
@@ -290,11 +289,7 @@ static void find_adapter(const struct pci_device_info *device, void *context){
 bool e1000_82540em_init(void){
     memset(&adapter,0,sizeof(adapter));
     pci_enumerate(find_adapter,&adapter);
-    if(!adapter.found){
-        klog(KLOG_INFO,"e1000: no Intel Ethernet controller found");
-        return false;
-    }
-    klogf(KLOG_INFO,"e1000: PCI %02x:%02x.%u 8086:%04x found",adapter.pci.bus,adapter.pci.slot,adapter.pci.function,adapter.pci.device_id);
+    if(!adapter.found) return false;
 
     uint32_t bar0=pci_read_config32(adapter.pci.bus,adapter.pci.slot,
                                     adapter.pci.function,0x10);
@@ -319,13 +314,8 @@ bool e1000_82540em_init(void){
         return false;
     }
     if(!read_mac(adapter.net.mac)){
-        klog(KLOG_WARN,"e1000: invalid MAC after reset, generating fallback");
-        adapter.net.mac[0]=0x02;
-        adapter.net.mac[1]=0x52;
-        adapter.net.mac[2]=0x54;
-        adapter.net.mac[3]=0x00;
-        adapter.net.mac[4]=0x12;
-        adapter.net.mac[5]=0x34;
+        klog(KLOG_ERROR,"e1000: invalid MAC address after EEPROM reload");
+        return false;
     }
     program_receive_address(adapter.net.mac);
     if(!allocate_dma()){

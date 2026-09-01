@@ -38,12 +38,14 @@ bool net_service_init(void){
     bool wifi_ready=intel_ax201_init();
     ready=eth_ready||wifi_ready;
     if(!ready) klog(KLOG_WARN,"net: no supported network adapter found (e1000 nor AX201)");
-    for(uint32_t index=0;index<net_device_count();index++){
-        struct net_device *dev=net_device_get(index);
-        if(dev && dev->name[0]=='e'){
-            (void)dhcp_start(dev);
-        } else if(dev && dev->name[0]=='w'){
-            klogf(KLOG_INFO,"net: %s registered, waiting for Wi-Fi association before DHCP",dev->name);
+    else {
+        for(uint32_t index=0;index<net_device_count();index++){
+            struct net_device *dev=net_device_get(index);
+            if(dev && dev->name[0]=='e'){
+                (void)dhcp_start(dev);
+            } else if(dev && dev->name[0]=='w'){
+                klogf(KLOG_INFO,"net: %s registered, waiting for Wi-Fi association before DHCP",dev->name);
+            }
         }
     }
     return ready;

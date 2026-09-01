@@ -21,7 +21,6 @@ C_SOURCES := \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
 	kernel/syscall/syscall.c \
-	kernel/module.c \
 	drivers/serial/serial.c \
 	drivers/display/vga.c \
 	drivers/interrupts/pic.c \
