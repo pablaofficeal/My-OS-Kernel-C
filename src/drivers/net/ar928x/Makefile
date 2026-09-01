@@ -1,4 +1,4 @@
-ROOT_DIR ?= $(abspath ../../..)
+ROOT_DIR ?= $(abspath ../../../..)
 include $(ROOT_DIR)/mk/toolchain.mk
 OBJ_DIR := $(BIN_DIR)/obj/modules/ar928x
 MOD_DIR := $(BIN_DIR)/modules

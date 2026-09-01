@@ -30,7 +30,7 @@ programs: libraries
 	$(MAKE) -C src/programs
 
 modules:
-	$(MAKE) -C src/modules/ar928x
+	$(MAKE) -C src/drivers/net/ar928x
 
 kernel: modules
 	$(MAKE) -C src/kernel
