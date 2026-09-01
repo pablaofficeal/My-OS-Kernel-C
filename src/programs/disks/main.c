@@ -47,6 +47,7 @@ static void disk_line(char *line,const struct storage_device_info *disk){
     (void)append_text(out,disk->writable ? "  writable" : "  read-only");
 }
 
+
 static void draw(struct pg_window *window,struct disk_app *app,
                  const struct pg_event *event){
     pg_window_begin(window);
