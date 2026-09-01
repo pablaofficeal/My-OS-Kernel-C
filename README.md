@@ -1,6 +1,6 @@
 # 🚀 PureC OS
 
-![PureC OS Logo](/docs/logo/purec-icon-catppuccin.svg)
+<img src="/docs/logo/purec-01-catppuccin-dark.svg" alt="PureC OS Logo" width="256" height="256" style="display: block; margin: 0 auto;" />
 
 
 PureC OS - это простая 64-битная операционная система, написанная на C и ассемблере. Она включает в себя 
@@ -107,13 +107,4 @@ purec-os/
 
 ## 📜 Лицензия
 
-Проект распространяется под лицензией [MIT](LICENSE).
-
-## 👥 Разработчики
-
-- [Ваше Имя](https://github.com/yourusername)
-- [Соавтор](https://github.com/collaborator)
-
----
-
-![Статистика](https://img.shields.io/github/repo-size/yourusername/purec-os?label=Размер%20репозитория&style=flat-square) ![Лицензия](https://img.shields.io/github/license/yourusername/purec-os?color=blue&style=flat-square)
+Проект распространяется под лицензией [GPLv3](LICENSE).
