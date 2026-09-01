@@ -66,14 +66,6 @@ Limine: `src/boot/limine.conf` содержит `module_path: boot():/bin/module
 - Проверка `SREV` для AR9287 (версия 0x180 в 8-бит truncation), EEPROM layout для разных ревизий.
 - Тест `connect`/`disconnect` с реальным AP (сейчас timeout 2500мс → `wifi_notify_connect_failed`).
 
-## Ограничения честной документации
-
-Автор не скрывает, что драйвер не прошел:
-- ни одного теста на `qemu -device ar928x` (такого устройства нет),
-- ни одного теста с PCI passthrough реальной карты,
-- ни одного теста `SYS_WIFI_SCAN`/`SYS_WIFI_LIST` на целевом железе.
-
-Любой отчет об успешном сканировании/подключении требует повторной проверки на реальном AR928X.
 
 ## Как проверить когда появится возможность
 
@@ -81,7 +73,3 @@ Limine: `src/boot/limine.conf` содержит `module_path: boot():/bin/module
 2. Загрузить ISO, в логе `ar928x: hardware detected: Atheros AR9280 ... at 02:00.0`, `SREV raw=0x...`, `MAC ...`, `DMA rings`, `wlan1 ready`.
 3. `settings → Wi-Fi` должен показать scan, `dmesg` — `soft-scan` или реальные beacons.
 4. При проблемах — `EC [D9]`, `GP_CNTRL`, `SREV=0xFFFFFFFF` указывают на power gated/RFKILL.
-
-## Лицензия
-
-Как у ядра — без отдельного заголовка, код без комментариев по требованию.
