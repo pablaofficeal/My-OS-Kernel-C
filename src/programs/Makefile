@@ -43,13 +43,13 @@ GENERAL_SOURCES := \
 	disks/main.c \
 	logview/main.c
 GENERAL_CPP_SOURCES := \
-	hexedit/src/main.cpp \
-	hexedit/src/buffer.cpp \
-	hexedit/src/tree.cpp \
-	hexedit/src/view.cpp \
-	hexedit/src/input.cpp \
-	hexedit/src/editor.cpp \
-	hexedit/src/window.cpp
+	hexedit/src/main/main.cpp \
+	hexedit/src/buffer/buffer.cpp \
+	hexedit/src/tree/tree.cpp \
+	hexedit/src/view/view.cpp \
+	hexedit/src/input/input.cpp \
+	hexedit/src/editor/editor.cpp \
+	hexedit/src/window/window.cpp
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_CPP_OBJECTS := $(GENERAL_CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
@@ -91,7 +91,7 @@ $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
 
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
+	$(CXX) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include -I$(ROOT_DIR)/src/programs/hexedit/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
 
 $(PROGRAM_DIR)/init: $(OBJ_DIR)/init/main.o $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)

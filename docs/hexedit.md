@@ -26,30 +26,30 @@ src/programs/hexedit/
   Makefile
   include/hexedit/
     types.hpp
-    buffer.hpp
-    tree.hpp
-    window.hpp
-    view.hpp
-    input.hpp
-    editor.hpp
+    buffer/buffer.hpp
+    tree/tree.hpp
+    window/window.hpp
+    view/view.hpp
+    input/input.hpp
+    editor/editor.hpp
   src/
-    main.cpp
-    buffer.cpp
-    tree.cpp
-    window.cpp
-    view.cpp
-    input.cpp
-    editor.cpp
+    main/main.cpp
+    buffer/buffer.cpp
+    tree/tree.cpp
+    window/window.cpp
+    view/view.cpp
+    input/input.cpp
+    editor/editor.cpp
 ```
 
 - `types.hpp` — константы `BYTES_PER_ROW=16`, размеры панелей, `HexDirEntry`, `HexPromptMode`.
-- `buffer.hpp/cpp` — буфер `pc_heap_grow` (`src/libc/include/purec.h:49`), `pc_file_open/read/write` (`src/libc/include/purec.h:51`), курсор, тетрада, `hex_visible_rows`, `hex_ensure_visible`, `hex_parse_hex`.
-- `tree.hpp/cpp` — VFS-директория `pc_directory_list` (`src/libc/include/purec.h:55`), `hex_normalize_dir`, `hex_join_path`, `hex_parent_dir`, `hex_refresh_dir`, сортировка директории первыми.
-- `window.hpp/cpp` — обертка над `libpuregui` (`src/libgui/include/puregui.h:56`) — `pg_window_center/begin/end/poll`, `HexWindow`.
-- `view.hpp/cpp` — отрисовка `pg_window_rect/text/clear` (`src/libgui/draw.c:41`), `SIDEBAR_W=240`, toolbar/header/status/sidebar/hex, индикатор `HEX/ASCII INS/OVR`.
-- `input.hpp/cpp` — `hex_handle_hex/ascii/special/mouse/prompt`, специальная клавиатура (`src/drivers/input/keyboard.h:6`).
-- `editor.hpp/cpp` — `hexedit_run()` — главный цикл `pg_event` (`src/libgui/include/puregui.h:34`), dispatch `PG_EVENT_CLOSE/MOVE/MINIMIZE/FOCUS/REPAINT/KEY/SPECIAL_KEY/MOUSE_UP`.
-- `main.cpp` — `_start`, `pc_get_command_line`/`pc_getenv("PWD")`/`pc_strlen`/`pc_copy`, резолв относительного пути → `hexedit_run`.
+- `buffer/buffer.hpp/cpp` — буфер `pc_heap_grow` (`src/libc/include/purec.h:49`), `pc_file_open/read/write` (`src/libc/include/purec.h:51`), курсор, тетрада, `hex_visible_rows`, `hex_ensure_visible`, `hex_parse_hex`.
+- `tree/tree.hpp/cpp` — VFS-директория `pc_directory_list` (`src/libc/include/purec.h:55`), `hex_normalize_dir`, `hex_join_path`, `hex_parent_dir`, `hex_refresh_dir`, сортировка директории первыми.
+- `window/window.hpp/cpp` — обертка над `libpuregui` (`src/libgui/include/puregui.h:56`) — `pg_window_center/begin/end/poll`, `HexWindow`.
+- `view/view.hpp/cpp` — отрисовка `pg_window_rect/text/clear` (`src/libgui/draw.c:41`), `SIDEBAR_W=240`, toolbar/header/status/sidebar/hex, индикатор `HEX/ASCII INS/OVR`.
+- `input/input.hpp/cpp` — `hex_handle_hex/ascii/special/mouse/prompt`, специальная клавиатура (`src/drivers/input/keyboard.h:6`).
+- `editor/editor.hpp/cpp` — `hexedit_run()` — главный цикл `pg_event` (`src/libgui/include/puregui.h:34`), dispatch `PG_EVENT_CLOSE/MOVE/MINIMIZE/FOCUS/REPAINT/KEY/SPECIAL_KEY/MOUSE_UP`.
+- `main/main.cpp` — `_start`, `pc_get_command_line`/`pc_getenv("PWD")`/`pc_strlen`/`pc_copy`, резолв относительного пути → `hexedit_run`.
 
 Все модули используют только `libpurec` и `libpuregui`, без костылей и без прямых `int 0x80`.
 

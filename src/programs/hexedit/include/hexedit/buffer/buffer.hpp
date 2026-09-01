@@ -1,5 +1,6 @@
 #pragma once
-#include "types.hpp"
+#include "../types.hpp"
+
 extern uint8_t* hex_buf;
 extern uint32_t hex_buf_len;
 extern uint32_t hex_buf_cap;
@@ -10,6 +11,7 @@ extern bool hex_insert_mode;
 extern bool hex_dirty;
 extern uint32_t hex_view_offset;
 extern char hex_file_path[128];
+
 bool hex_reserve(uint32_t need);
 bool hex_insert_byte(uint32_t off, uint8_t v);
 void hex_delete_byte(uint32_t off);

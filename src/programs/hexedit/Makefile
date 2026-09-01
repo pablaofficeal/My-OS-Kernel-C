@@ -7,7 +7,7 @@ LIB_DIR := $(BIN_DIR)/lib
 LIBPUREC := $(LIB_DIR)/libpurec.a
 LIBPUREGUI := $(LIB_DIR)/libpuregui.a
 LINKER := $(ROOT_DIR)/linker-userspace.ld
-SOURCES := src/main.cpp src/buffer.cpp src/tree.cpp src/view.cpp src/input.cpp src/editor.cpp src/window.cpp
+SOURCES := src/main/main.cpp src/buffer/buffer.cpp src/tree/tree.cpp src/view/view.cpp src/input/input.cpp src/editor/editor.cpp src/window/window.cpp
 OBJECTS := $(SOURCES:%.cpp=$(OBJ_DIR)/%.o)
 CPPFLAGS += -I$(ROOT_DIR)/src -I$(ROOT_DIR)/src/programs/hexedit/include
 DEPFLAGS := -MMD -MP
