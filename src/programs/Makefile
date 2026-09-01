@@ -41,7 +41,10 @@ GENERAL_SOURCES := \
 	settings/pages/wifi.c \
 	monitor/main.c \
 	disks/main.c \
-	logview/main.c
+	logview/main.c \
+	hexedit/main.c \
+	hexedit/editor.c \
+	hexedit/window.c
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 TARGETS := \
@@ -57,7 +60,8 @@ TARGETS := \
 	$(PROGRAM_DIR)/settings \
 	$(PROGRAM_DIR)/monitor \
 	$(PROGRAM_DIR)/disks \
-	$(PROGRAM_DIR)/logview
+	$(PROGRAM_DIR)/logview \
+	$(PROGRAM_DIR)/hexedit
 
 .NOTPARALLEL:
 .PHONY: all
@@ -126,5 +130,9 @@ $(PROGRAM_DIR)/logview: $(OBJ_DIR)/logview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LI
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/tetris: $(OBJ_DIR)/game/tetris/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
+
+$(PROGRAM_DIR)/hexedit: $(OBJ_DIR)/hexedit/main.o $(OBJ_DIR)/hexedit/editor.o $(OBJ_DIR)/hexedit/window.o $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)

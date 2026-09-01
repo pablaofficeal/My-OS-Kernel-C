@@ -57,6 +57,7 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/disks" "$(ISO_ROOT)/bin/program/disks"; \
 	cp "$(PROGRAM_DIR)/logview" "$(ISO_ROOT)/bin/program/logview"; \
 	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/program/tetris"; \
+	cp "$(PROGRAM_DIR)/hexedit" "$(ISO_ROOT)/bin/program/hexedit"; \
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
