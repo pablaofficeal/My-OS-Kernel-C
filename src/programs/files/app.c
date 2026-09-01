@@ -119,6 +119,18 @@ static void handle_key(struct files_app *app, int32_t key){
         if(!app->disk_view && files_model_up(&app->model)) reset_selection(app);
     } else if((key=='\r' || key=='\n') && app->selected>=0){
         open_selected(app);
+    } else if(key=='h' || key=='H'){
+        if(app->selected>=0 && !selected_is_directory(app)){
+            char path[FILES_PATH_CAPACITY];
+            if(!files_path_join(path,sizeof(path),app->model.path,app->model.entries[app->selected].name)){
+                set_status(app,"Path is too long"); return;
+            }
+            if(pc_strlen(path)>=128){ set_status(app,"Path is too long for hexedit"); return; }
+            int32_t pid=pc_exec_with_args("/bin/program/hexedit",path);
+            if(pid<0){ set_status(app,"Cannot open hexedit"); return; }
+            int32_t status=0; (void)pc_wait(pid,&status,false);
+            pc_desktop_redraw(); refresh(app);
+        }
     } else if(key=='r' || key=='R'){
         refresh(app);
     }

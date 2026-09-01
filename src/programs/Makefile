@@ -42,8 +42,13 @@ GENERAL_SOURCES := \
 	monitor/main.c \
 	disks/main.c \
 	logview/main.c
+GENERAL_CPP_SOURCES := \
+	hexedit/main.cpp \
+	hexedit/editor.cpp \
+	hexedit/window.cpp
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
+GENERAL_CPP_OBJECTS := $(GENERAL_CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
 TARGETS := \
 	$(PROGRAM_DIR)/init \
 	$(PROGRAM_DIR)/installer \
@@ -57,15 +62,17 @@ TARGETS := \
 	$(PROGRAM_DIR)/settings \
 	$(PROGRAM_DIR)/monitor \
 	$(PROGRAM_DIR)/disks \
-	$(PROGRAM_DIR)/logview
+	$(PROGRAM_DIR)/logview \
+	$(PROGRAM_DIR)/hexedit
 
 .NOTPARALLEL:
 .PHONY: all
 all: $(TARGETS)
 
--include $(PLAIN_OBJECTS:.o=.d) $(GENERAL_OBJECTS:.o=.d)
+-include $(PLAIN_OBJECTS:.o=.d) $(GENERAL_OBJECTS:.o=.d) $(GENERAL_CPP_OBJECTS:.o=.d)
 
 $(GENERAL_OBJECTS): PRIVATE_CFLAGS := -mgeneral-regs-only
+$(GENERAL_CPP_OBJECTS): PRIVATE_CXXFLAGS := -mgeneral-regs-only -std=c++20 -fno-exceptions -fno-rtti
 
 $(LIBPUREC):
 	$(MAKE) -C $(ROOT_DIR)/src/libc
@@ -76,6 +83,10 @@ $(LIBPUREGUI) $(LIBPGUIW):
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
 
 $(PROGRAM_DIR)/init: $(OBJ_DIR)/init/main.o $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
@@ -126,5 +137,9 @@ $(PROGRAM_DIR)/logview: $(OBJ_DIR)/logview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LI
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/tetris: $(OBJ_DIR)/game/tetris/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
+
+$(PROGRAM_DIR)/hexedit: $(GENERAL_CPP_OBJECTS) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)

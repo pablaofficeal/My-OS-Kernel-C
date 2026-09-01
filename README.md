@@ -1,8 +1,16 @@
 # 🚀 PureC OS
 
-![OS Demo](/demo/demo.png) <!-- Замените на реальный скриншот -->
+<img src="/docs/logo/purec-01-catppuccin-dark.svg" alt="PureC OS Logo" width="256" height="256" style="display: block; margin: 0 auto;" />
 
-PureC OS - это простая 32-битная операционная система, написанная на C и ассемблере. Она включает в себя базовую оболочку, поддержку дисков и файловую систему FAT16.
+
+PureC OS - это простая 64-битная операционная система, написанная на C и ассемблере. Она включает в себя 
+- базовую оболочку
+- поддержку дисков
+- файловую систему FAT32 и VFS
+- реализованы драйверы экрана, клавиатуры и диска
+- реализованы скрипты для автоматической сборки и запуска в QEMU
+
+
 
 ## 📋 Содержание
 1. [Особенности](#✨-особенности)
@@ -99,13 +107,4 @@ purec-os/
 
 ## 📜 Лицензия
 
-Проект распространяется под лицензией [MIT](LICENSE).
-
-## 👥 Разработчики
-
-- [Ваше Имя](https://github.com/yourusername)
-- [Соавтор](https://github.com/collaborator)
-
----
-
-![Статистика](https://img.shields.io/github/repo-size/yourusername/purec-os?label=Размер%20репозитория&style=flat-square) ![Лицензия](https://img.shields.io/github/license/yourusername/purec-os?color=blue&style=flat-square)
+Проект распространяется под лицензией [GPLv3](LICENSE).

@@ -64,44 +64,35 @@ static uint32_t level_color(struct pg_window *w, enum log_level l){
 }
 static enum log_level parse_level(const char *line){
     if(pc_strlen(line)<15) return LOG_LVL_INFO;
-    // format "[  7.259] [  OK  ] ..." or "[ INFO ]"
     if(pc_strcmp(line+9, "[ INFO ]")==0 || pc_strcmp(line+11, "[ INFO ]")==0) {
-        // fallback search
     }
-    // search substrings
     const char *p=line;
     while(*p){
         if(p[0]=='[' && p[1]==' '){
-            // check each level
             if(p[2]=='I' && p[3]=='N' && p[4]=='F' && p[5]=='O') return LOG_LVL_INFO;
             if(p[2]==' ' && p[3]=='O' && p[4]=='K') return LOG_LVL_OK;
             if(p[2]==' ' && p[3]=='W' && p[4]=='A' && p[5]=='R' && p[6]=='N') return LOG_LVL_WARN;
             if(p[2]==' ' && p[3]=='E' && p[4]=='R' && p[5]=='R') return LOG_LVL_ERROR;
             if(p[2]=='D' && p[3]=='E' && p[4]=='B' && p[5]=='U' && p[6]=='G') return LOG_LVL_DEBUG;
-            // second bracket after timestamp: "[  OK  ]" etc is at +~11
             if(p[2]=='O' && p[3]=='K') return LOG_LVL_OK;
             if(p[2]=='I' && p[3]=='N' && p[4]=='F' && p[5]=='O') return LOG_LVL_INFO;
             if(p[2]=='W' && p[3]=='A' && p[4]=='R' && p[5]=='N') return LOG_LVL_WARN;
             if(p[2]=='F' && p[3]=='A' && p[4]=='I' && p[5]=='L') return LOG_LVL_ERROR;
             if(p[2]=='D' && p[3]=='E' && p[4]=='B' && p[5]=='U' && p[6]=='G') return LOG_LVL_DEBUG;
         }
-        // also check for " [  OK  ]", " [ INFO ]", etc
         if(p[0]=='[' && p[5]==']'){
             // crude
         }
         p++;
     }
-    // fallback simple contains
     if(pc_strcmp(line, "INFO")>=0){ /* dummy */}
-    // use strstr via manual
     const char *s=line;
     while(*s){
         if(s[0]=='I' && s[1]=='N' && s[2]=='F' && s[3]=='O') return LOG_LVL_INFO;
         if(s[0]=='W' && s[1]=='A' && s[2]=='R' && s[3]=='N') return LOG_LVL_WARN;
         if(s[0]=='E' && s[1]=='R' && s[2]=='R' && s[3]=='O' && s[4]=='R') return LOG_LVL_ERROR;
         if(s[0]=='D' && s[1]=='E' && s[2]=='B' && s[3]=='U' && s[4]=='G') return LOG_LVL_DEBUG;
-        if(s[0]=='O' && s[1]=='K' && s[2]==' ') { // "OK" with spaces
-            // check surrounding [ and ]
+        if(s[0]=='O' && s[1]=='K' && s[2]==' ') {
             return LOG_LVL_OK;
         }
         s++;
@@ -144,7 +135,6 @@ static void load_logs(struct logview_state *st){
     st->line_count=0;
     st->filtered_count=0;
     st->scroll_offset=0;
-    // try /kernel.log then /dmesg.txt then /kernel/dmesg.txt
     const char *paths[]={"/kernel.log","/dmesg.txt","/kernel/dmesg.txt",0};
     int32_t fd=-1;
     for(int i=0;paths[i];i++){
@@ -155,7 +145,6 @@ static void load_logs(struct logview_state *st){
         pc_copy(st->status,"No log file (/kernel.log)", sizeof(st->status));
         return;
     }
-    // read in chunks
     static char buffer[LOGVIEW_BUFFER_SIZE];
     int32_t total=0;
     while(total < (int32_t)sizeof(buffer)-1){
@@ -166,7 +155,6 @@ static void load_logs(struct logview_state *st){
     }
     pc_file_close(fd);
     buffer[total]='\0';
-    // split lines
     char *p=buffer;
     int32_t line_idx=0;
     while(*p && line_idx < LOGVIEW_MAX_LINES){
@@ -174,13 +162,11 @@ static void load_logs(struct logview_state *st){
         while(*p && *p!='\n' && *p!='\r') p++;
         char saved=*p;
         *p='\0';
-        // copy line, truncate
         uint32_t len=pc_strlen(line_start);
         if(len>0){
             if(len>=LOGVIEW_MAX_LINE_LEN) len=LOGVIEW_MAX_LINE_LEN-1;
             for(uint32_t k=0;k<len;k++) st->lines[line_idx].text[k]=line_start[k];
             st->lines[line_idx].text[len]='\0';
-            // parse level - use simple contains
             enum log_level lvl=LOG_LVL_INFO;
             if(contains_substr(line_start,"ERROR") || contains_substr(line_start,"FAIL") || contains_substr(line_start,"FATAL")) lvl=LOG_LVL_ERROR;
             else if(contains_substr(line_start,"WARN")) lvl=LOG_LVL_WARN;
@@ -193,54 +179,43 @@ static void load_logs(struct logview_state *st){
             line_idx++;
         }
         if(saved=='\0') break;
-        // skip \r\n
         if(saved=='\r' && *(p+1)=='\n') p+=2;
         else p++;
     }
     st->line_count=line_idx;
     rebuild_filter(st);
     char tmp[64];
-    // build status
     st->status[0]='\0';
-    // will be updated in draw
     (void)tmp;
 }
 
 static void draw_ui(struct logview_state *st){
     struct pg_window *w=&st->window;
     pg_window_begin(w);
-    // background
     pg_window_clear(w, w->theme.window);
 
-    // header
     char header[128];
     header[0]='\0';
-    // title bar is window title, we draw internal header
     pg_window_text(w, 12, 10, "Filters: ", w->theme.muted_text);
-    // filter buttons for each level
     const char *names[LOG_LVL_COUNT]={"INFO","OK","WARN","ERROR","DEBUG"};
     uint32_t bx=80;
     for(int i=0;i<LOG_LVL_COUNT;i++){
         uint32_t col = st->filter_enabled[i] ? level_color(w, i) : w->theme.border;
         uint32_t bg = st->filter_enabled[i] ? 0x313244 : w->theme.window;
-        // draw button rect
         struct pg_rect r={bx, 6, 58, 18};
         pg_window_rect(w, r, bg);
         pg_window_rect(w, (struct pg_rect){r.x, r.y, r.width, 1}, col);
         pg_window_rect(w, (struct pg_rect){r.x, r.y+r.height-1, r.width, 1}, col);
         pg_window_rect(w, (struct pg_rect){r.x, r.y, 1, r.height}, col);
         pg_window_rect(w, (struct pg_rect){r.x+r.width-1, r.y, 1, r.height}, col);
-        // text centered approx
         pg_window_text(w, bx+8, 9, names[i], st->filter_enabled[i] ? col : w->theme.muted_text);
         bx+=66;
     }
-    // Save button
     struct pg_rect save_btn={w->client.width-80, 6, 68, 18};
     pg_window_rect(w, save_btn, 0x45475A);
     pg_window_rect(w, (struct pg_rect){save_btn.x, save_btn.y, save_btn.width, 1}, 0x89B4FA);
     pg_window_rect(w, (struct pg_rect){save_btn.x, save_btn.y+save_btn.height-1, save_btn.width, 1}, 0x89B4FA);
     pg_window_text(w, save_btn.x+18, 9, "Save", w->theme.text);
-    // search
     char search_line[96];
     search_line[0]='\0';
     pc_copy(search_line,"Search: ", sizeof(search_line));
@@ -254,13 +229,10 @@ static void draw_ui(struct logview_state *st){
         pg_window_text(w, 12, 30, search_line, w->theme.text);
         if(st->search[0]=='\0') pg_window_text(w, 12+70, 30, "(type / to search, r=refresh, q=close)", w->theme.muted_text);
     }
-    // quick filters hint
     pg_window_text(w, w->client.width-260, 30, "[a]=ax201 [e]=EC [w]=wifi [c]=clear", w->theme.muted_text);
 
-    // separator
     pg_window_rect(w, (struct pg_rect){12, 48, w->client.width-24, 1}, w->theme.border);
 
-    // log area
     int32_t start = st->scroll_offset;
     int32_t end = start + LOGVIEW_VISIBLE_LINES;
     if(end > st->filtered_count) end = st->filtered_count;
@@ -268,12 +240,10 @@ static void draw_ui(struct logview_state *st){
         int32_t idx = st->filtered_indices[i];
         struct log_line *line=&st->lines[idx];
         uint32_t y = 56 + (i - start)*22;
-        // level dot
         uint32_t col=level_color(w, line->level);
         pg_window_rect(w, (struct pg_rect){14, y+6, 6, 6}, col);
-        // text truncated to window width (~ 100 chars)
         char disp[128];
-        uint32_t max_chars = (w->client.width - 32) / 7; // approx 7px per char
+        uint32_t max_chars = (w->client.width - 32) / 7;
         if(max_chars>120) max_chars=120;
         if(max_chars>=sizeof(disp)) max_chars=sizeof(disp)-1;
         uint32_t tlen=pc_strlen(line->text);
@@ -288,7 +258,6 @@ static void draw_ui(struct logview_state *st){
     if(st->filtered_count==0){
         pg_window_text(w, 24, 60, "(no lines match filter)", w->theme.muted_text);
     }
-    // scrollbar
     if(st->filtered_count > LOGVIEW_VISIBLE_LINES){
         int32_t total=st->filtered_count;
         int32_t visible=LOGVIEW_VISIBLE_LINES;
@@ -299,17 +268,13 @@ static void draw_ui(struct logview_state *st){
         pg_window_rect(w, (struct pg_rect){w->client.width-10, bar_y, 4, bar_h}, w->theme.accent);
     }
 
-    // footer
     char footer[160];
     footer[0]='\0';
     char *p=footer;
     const char *pre="Lines: ";
     while(*pre) *p++=*pre++;
-    // filtered/total
     char num[32];
-    // simple itoa
     int32_t fc=st->filtered_count, tc=st->line_count;
-    // append fc
     char rev[12]; int rlen=0;
     if(fc==0) rev[rlen++]='0'; else { char r2[12]; int l2=0; int v=fc; while(v>0){ r2[l2++]='0'+v%10; v/=10; } while(l2) rev[rlen++]=r2[--l2]; }
     for(int i=0;i<rlen;i++) *p++=rev[i];
@@ -319,7 +284,6 @@ static void draw_ui(struct logview_state *st){
     for(int i=0;i<rlen;i++) *p++=rev[i];
     const char *mid="  Scroll: ";
     while(*mid) *p++=*mid++;
-    // scroll offset
     char rev2[12]; rlen=0;
     if(st->scroll_offset==0) rev2[rlen++]='0'; else { char r2[12]; int l2=0; int v=st->scroll_offset; while(v>0){ r2[l2++]='0'+v%10; v/=10; } while(l2) rev2[rlen++]=r2[--l2]; }
     for(int i=0;i<rlen;i++) *p++=rev2[i];
@@ -334,13 +298,11 @@ static void draw_ui(struct logview_state *st){
     *p='\0';
     pg_window_text(w, 12, w->client.height-18, footer, w->theme.muted_text);
     if(st->show_save_dialog){
-        // overlay dim
         pg_window_rect(w, (struct pg_rect){0,0,w->client.width,w->client.height}, 0x11111B);
         struct pg_rect dlg={w->client.width/2 - 180, 70, 360, 300};
         pg_window_rect(w, dlg, 0x1E1E2E);
         pg_window_rect(w, (struct pg_rect){dlg.x, dlg.y, dlg.width, 26}, 0x313244);
         pg_window_text(w, dlg.x+12, dlg.y+7, "Save logs to FAT32 device", w->theme.text);
-        // device list header
         pg_window_text(w, dlg.x+12, dlg.y+36, "Select device:", w->theme.muted_text);
         for(int i=0;i<st->save_disk_count && i<6;i++){
             struct pg_rect row={dlg.x+12, (uint32_t)(dlg.y+56+i*28), dlg.width-24, 24};
@@ -375,7 +337,6 @@ static void draw_ui(struct logview_state *st){
         if(st->save_disk_count==0){
             pg_window_text(w, dlg.x+12, dlg.y+70, "No writable FAT32 disks found", w->theme.danger);
         }
-        // path
         char path_line[96];
         pc_copy(path_line, "Path: ", sizeof(path_line));
         uint32_t pl=pc_strlen(path_line);
@@ -383,7 +344,6 @@ static void draw_ui(struct logview_state *st){
         path_line[pl]='\0';
         pg_window_text(w, dlg.x+12, dlg.y+230, path_line, w->theme.text);
         pg_window_text(w, dlg.x+12, dlg.y+250, "Enter to edit, S to save", w->theme.muted_text);
-        // buttons
         struct pg_rect save_b={dlg.x+40, dlg.y+270, 120, 28};
         struct pg_rect cancel_b={dlg.x+200, dlg.y+270, 120, 28};
         pg_window_rect(w, save_b, 0xA6E3A1);
@@ -397,7 +357,7 @@ static void draw_ui(struct logview_state *st){
 
 static void handle_key(struct logview_state *st, int32_t key){
     if(st->search_active){
-        if(key==27){ // esc
+        if(key==27){
             st->search_active=false;
             return;
         }
@@ -457,12 +417,10 @@ static void handle_key(struct logview_state *st, int32_t key){
         return;
     }
     if(key=='q' || key=='Q'){
-        // will be handled as close
         return;
     }
     if(key=='s' || key=='S'){
         st->show_save_dialog = true;
-        // enumerate disks - simple: list first few storage devices
         st->save_disk_count = pc_list_disks(st->save_disks, 8);
         if(st->save_disk_count < 0) st->save_disk_count = 0;
         if(st->save_disk_count > 8) st->save_disk_count = 8;
@@ -475,7 +433,6 @@ static void handle_key(struct logview_state *st, int32_t key){
 
 int main(void){
     static struct logview_state st;
-    // init
     for(int i=0;i<LOGVIEW_MAX_LINES;i++) st.lines[i].text[0]='\0';
     st.line_count=0;
     st.filtered_count=0;
@@ -503,35 +460,32 @@ int main(void){
                     break;
                 }
                 handle_key(&st, ev.key);
-                // scroll with special keys
                 draw_ui(&st);
             } else if(ev.type==PG_EVENT_SPECIAL_KEY){
-                // keyboard_special_key enum: UP=10 DOWN=11 PAGE_UP=6 PAGE_DOWN=7 HOME=4 END=5
-                if(ev.key==10){ // UP
+                if(ev.key==10){
                     if(st.scroll_offset>0) st.scroll_offset--;
                     draw_ui(&st);
-                } else if(ev.key==11){ // DOWN
+                } else if(ev.key==11){
                     if(st.scroll_offset + LOGVIEW_VISIBLE_LINES < st.filtered_count) st.scroll_offset++;
                     draw_ui(&st);
-                } else if(ev.key==6){ // PAGE_UP
+                } else if(ev.key==6){
                     st.scroll_offset -= LOGVIEW_VISIBLE_LINES;
                     if(st.scroll_offset<0) st.scroll_offset=0;
                     draw_ui(&st);
-                } else if(ev.key==7){ // PAGE_DOWN
+                } else if(ev.key==7){
                     st.scroll_offset += LOGVIEW_VISIBLE_LINES;
                     if(st.scroll_offset > st.filtered_count - LOGVIEW_VISIBLE_LINES) st.scroll_offset = st.filtered_count - LOGVIEW_VISIBLE_LINES;
                     if(st.scroll_offset<0) st.scroll_offset=0;
                     draw_ui(&st);
-                } else if(ev.key==4){ // HOME
+                } else if(ev.key==4){
                     st.scroll_offset=0;
                     draw_ui(&st);
-                } else if(ev.key==5){ // END
+                } else if(ev.key==5){
                     st.scroll_offset = st.filtered_count - LOGVIEW_VISIBLE_LINES;
                     if(st.scroll_offset<0) st.scroll_offset=0;
                     draw_ui(&st);
                 }
             } else if(ev.type==PG_EVENT_MOUSE_DOWN){
-                // check filter buttons
                 uint32_t bx=80;
                 for(int i=0;i<LOG_LVL_COUNT;i++){
                     struct pg_rect r={bx, 6, 58, 18};
@@ -543,7 +497,6 @@ int main(void){
                     }
                     bx+=66;
                 }
-                // search bar click
                 if(ev.y>=28 && ev.y<44 && ev.x>=12 && ev.x<400){
                     st.search_active=true;
                     draw_ui(&st);
@@ -582,7 +535,6 @@ int main(void){
                 break;
             }
         }
-                // mouse wheel? not yet, use polling
                 pc_sleep(16);
     }
     pg_window_close(&st.window);
