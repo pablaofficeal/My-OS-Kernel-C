@@ -26,6 +26,10 @@ static uint32_t g_cell_h = 28;
 static uint32_t g_preview_cell = 16;
 static uint32_t g_board_x = 12;
 static uint32_t g_board_y = 12;
+static uint32_t g_canvas_x = 12;
+static uint32_t g_canvas_y = 12;
+static uint32_t g_canvas_w = 280;
+static uint32_t g_canvas_h = 560;
 static uint32_t g_hud_x = 12;
 static uint32_t g_hud_y = 0;
 static uint32_t g_hud_h = 100;
@@ -113,22 +117,59 @@ static void compute_layout(void){
     uint32_t preview_box = 4*preview_cell + 10;
     uint32_t hud_h = preview_box + 34;
     if(hud_h<90) hud_h=90;
-    uint32_t by_width = (client_w>margin*2) ? (client_w-margin*2)/BOARD_W : 20;
-    uint32_t by_height = (client_h>hud_h+gap+margin*2)
-        ? (client_h-hud_h-gap-margin*2)/BOARD_H : 20;
-    if(by_width<14) by_width=14;
-    if(by_height<14) by_height=14;
-    uint32_t board_w=BOARD_W*by_width;
-    uint32_t board_h=BOARD_H*by_height;
+    uint32_t canvas_w = client_w>margin*2 ? client_w-margin*2 : 200;
+    uint32_t canvas_h = (client_h>hud_h+gap+margin*2)
+        ? client_h-hud_h-gap-margin*2 : 400;
+    uint32_t by_width = canvas_w/BOARD_W;
+    uint32_t by_height = canvas_h/BOARD_H;
+    uint32_t cell = by_width<by_height ? by_width : by_height;
+    if(cell<14) cell=14;
+    uint32_t board_w=BOARD_W*cell;
+    uint32_t board_h=BOARD_H*cell;
 
-    g_cell_w=by_width;
-    g_cell_h=by_height;
+    g_cell_w=cell;
+    g_cell_h=cell;
     g_preview_cell=preview_cell;
     g_hud_h=hud_h;
-    g_hud_w=board_w;
-    g_board_x=client_w>board_w ? (client_w-board_w)/2 : margin;
-    g_board_y=margin;
-    g_hud_x=g_board_x; g_hud_y=g_board_y+board_h+gap;
+    g_hud_w=canvas_w;
+    g_canvas_x=margin;
+    g_canvas_y=margin;
+    g_canvas_w=canvas_w;
+    g_canvas_h=canvas_h;
+    g_board_x=g_canvas_x + (canvas_w>board_w ? (canvas_w-board_w)/2 : 0);
+    g_board_y=g_canvas_y + (canvas_h>board_h ? (canvas_h-board_h)/2 : 0);
+    g_hud_x=g_canvas_x;
+    g_hud_y=g_canvas_y+canvas_h+gap;
+}
+
+static void recompute_layout_for_current_window(void){
+    const uint32_t margin=12;
+    const uint32_t gap=12;
+    uint32_t client_w = g_win_w - PG_WINDOW_BORDER*2;
+    uint32_t client_h = g_win_h - PG_TITLEBAR_HEIGHT - PG_WINDOW_BORDER*2;
+    uint32_t preview_box = 4*g_preview_cell + 10;
+    g_hud_h=preview_box+34;
+    if(g_hud_h<90) g_hud_h=90;
+    uint32_t canvas_w=(client_w>margin*2)?client_w-margin*2:200;
+    uint32_t canvas_h=(client_h>g_hud_h+gap+margin*2)
+        ? client_h-g_hud_h-gap-margin*2 : 400;
+    uint32_t by_width=canvas_w/BOARD_W;
+    uint32_t by_height=canvas_h/BOARD_H;
+    uint32_t cell=by_width<by_height ? by_width : by_height;
+    if(cell<14) cell=14;
+    uint32_t board_w=BOARD_W*cell;
+    uint32_t board_h=BOARD_H*cell;
+    g_cell_w=cell;
+    g_cell_h=cell;
+    g_hud_w=canvas_w;
+    g_canvas_x=margin;
+    g_canvas_y=margin;
+    g_canvas_w=canvas_w;
+    g_canvas_h=canvas_h;
+    g_board_x=g_canvas_x + (canvas_w>board_w ? (canvas_w-board_w)/2 : 0);
+    g_board_y=g_canvas_y + (canvas_h>board_h ? (canvas_h-board_h)/2 : 0);
+    g_hud_x=g_canvas_x;
+    g_hud_y=g_canvas_y+canvas_h+gap;
 }
 
 static uint32_t random_value(void){
@@ -282,7 +323,9 @@ static char *append_u32(char *dst,uint32_t v){
 static void draw_board(struct pg_window *window){
     uint32_t board_w = BOARD_W*g_cell_w;
     uint32_t board_h = BOARD_H*g_cell_h;
-    pg_window_rect(window,(struct pg_rect){g_board_x-2,g_board_y-2,board_w+4,board_h+4},window->theme.border);
+    pg_window_rect(window,(struct pg_rect){g_canvas_x-2,g_canvas_y-2,g_canvas_w+4,g_canvas_h+4},window->theme.border);
+    pg_window_rect(window,(struct pg_rect){g_canvas_x,g_canvas_y,g_canvas_w,g_canvas_h},0x11111B);
+    pg_window_rect(window,(struct pg_rect){g_board_x-1,g_board_y-1,board_w+2,board_h+2},0x45475A);
     pg_window_rect(window,(struct pg_rect){g_board_x,g_board_y,board_w,board_h},0x11111B);
     if(g_cell_w>=20 && g_cell_h>=20){
         for(uint32_t x=1;x<BOARD_W;x++){
@@ -501,26 +544,7 @@ static int tetris_main(void){
         }
         if(g_win_w>260) g_win_w-=40;
         if(g_win_h>520) g_win_h-=40;
-        uint32_t client_w = g_win_w - PG_WINDOW_BORDER*2;
-        uint32_t client_h = g_win_h - PG_TITLEBAR_HEIGHT - PG_WINDOW_BORDER*2;
-        uint32_t margin=12, gap=12;
-        uint32_t preview_box = 4*g_preview_cell + 10;
-        g_hud_h=preview_box+34;
-        if(g_hud_h<90) g_hud_h=90;
-        uint32_t by_width=(client_w>margin*2)?(client_w-margin*2)/BOARD_W:14;
-        uint32_t by_height=(client_h>g_hud_h+gap+margin*2)
-            ? (client_h-g_hud_h-gap-margin*2)/BOARD_H : 14;
-        if(by_width<14) by_width=14;
-        if(by_height<14) by_height=14;
-        g_cell_w=by_width;
-        g_cell_h=by_height;
-        uint32_t board_w=BOARD_W*g_cell_w;
-        uint32_t board_h=BOARD_H*g_cell_h;
-        g_hud_w=board_w;
-        g_board_x=client_w>board_w ? (client_w-board_w)/2 : margin;
-        g_board_y=margin;
-        g_hud_x=g_board_x;
-        g_hud_y=g_board_y+board_h+gap;
+        recompute_layout_for_current_window();
     }
     if(!opened) return 1;
     reset_game();
