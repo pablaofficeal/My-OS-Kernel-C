@@ -232,19 +232,28 @@ void wifi_page_draw(struct pg_window *window,const struct pg_event *event){
         }
         pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+42)+off), state_line, state_col);
         if(state.status.connected && state.status.ip_address){
-            char ipbuf[32]="IP ";
+            char ipbuf[40]="IP ";
             append_ip(ipbuf+3, state.status.ip_address);
+            // mark stub IP
+            if(state.status.ip_address == ((192U<<24)|(168U<<16)|(1U<<8)|77U)){
+                append_text(ipbuf+pc_strlen(ipbuf), " (stub)");
+            }
             pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), ipbuf, window->theme.muted_text);
         } else if(state.status.state==WIFI_STATE_SCANNING){
-            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), "Scanning...", 0xF9E2AF);
+            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), "Scanning... (demo if FW stuck)", 0xF9E2AF);
         } else if(state.status.state==WIFI_STATE_CONNECTING){
             char conn[64]="Connecting to ";
             pc_copy(conn+14, state.status.ssid, sizeof(conn)-14);
             pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), conn, 0xF9E2AF);
         } else if(state.status.state==WIFI_STATE_FAILED){
-            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), "Auth failed", window->theme.danger);
+            char fail[64]="Failed (code ";
+            char *f = fail + pc_strlen(fail);
+            // show last_error if negative? simplified
+            f = append_u32(f, (uint32_t)(state.status.last_error <0 ? -state.status.last_error : state.status.last_error));
+            append_text(f, ")");
+            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), fail, window->theme.danger);
         } else {
-            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), "Not connected", window->theme.muted_text);
+            pg_window_text(window, PAGE_LEFT+12, (uint32_t)((int32_t)(PAGE_TOP+58)+off), "Not connected – select net & Connect", window->theme.muted_text);
         }
         struct pg_rect scan_btn = {PAGE_LEFT + width - 90, (uint32_t)((int32_t)(PAGE_TOP+26)+off), 78, 22};
         bool do_scan = pg_button(window, scan_btn, state.status.state==WIFI_STATE_SCANNING ? "..." : "Scan", event);
@@ -285,7 +294,14 @@ void wifi_page_draw(struct pg_window *window,const struct pg_event *event){
     }
     pg_window_text(window, PAGE_LEFT+10, list_top+8, title, window->theme.text);
     if(state.network_count==0){
-        pg_window_text(window, PAGE_LEFT+10, list_top+34, state.status.state==WIFI_STATE_SCANNING ? "Scanning..." : "No networks", window->theme.muted_text);
+        if(state.status.state==WIFI_STATE_SCANNING){
+            pg_window_text(window, PAGE_LEFT+10, list_top+34, "Scanning... (soft-scan fallback if FW not alive)", window->theme.muted_text);
+        } else if(!state.status.has_device){
+            pg_window_text(window, PAGE_LEFT+10, list_top+34, "No adapter", window->theme.muted_text);
+        } else {
+            pg_window_text(window, PAGE_LEFT+10, list_top+34, "No networks – check RFKILL/BIOS, see dmesg", window->theme.muted_text);
+            pg_window_text(window, PAGE_LEFT+10, list_top+50, "If stub: 3 demo nets should appear after Scan", window->theme.muted_text);
+        }
     } else {
         if(state.selected>=0){
             if((uint32_t)state.selected < state.scroll_offset) state.scroll_offset = (uint32_t)state.selected;

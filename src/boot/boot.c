@@ -120,8 +120,18 @@ static bool module_path_matches(const char *actual, const char *expected){
     if(strcmp(actual,expected)==0) return true;
     size_t actual_length=strlen(actual);
     size_t expected_length=strlen(expected);
-    return actual_length>=expected_length
-        && strcmp(actual+actual_length-expected_length,expected)==0;
+    if(actual_length>=expected_length
+       && strcmp(actual+actual_length-expected_length,expected)==0) return true;
+
+    const char *actual_name=actual;
+    const char *expected_name=expected;
+    for(const char *p=actual;*p;p++){
+        if(*p=='/' || *p=='\\') actual_name=p+1;
+    }
+    for(const char *p=expected;*p;p++){
+        if(*p=='/' || *p=='\\') expected_name=p+1;
+    }
+    return strcmp(actual_name,expected_name)==0;
 }
 
 bool boot_get_module(const char *path, const void **address, uint64_t *size){
@@ -136,6 +146,35 @@ bool boot_get_module(const char *path, const void **address, uint64_t *size){
         return true;
     }
     return false;
+}
+
+void boot_log_modules(void){
+    if(!module_request.response || !module_request.response->modules){
+        klog(KLOG_WARN, "boot: no Limine modules response");
+        return;
+    }
+    klogf(KLOG_INFO, "boot: Limine modules count=%llu", (unsigned long long)module_request.response->module_count);
+    for(uint64_t i=0;i<module_request.response->module_count;i++){
+        struct limine_file *m=module_request.response->modules[i];
+        if(!m){
+            klogf(KLOG_WARN, "boot: module[%llu] = NULL", (unsigned long long)i);
+            continue;
+        }
+        const char *path=m->path ? m->path : "<null path>";
+        klogf(KLOG_INFO, "boot: module[%llu] path='%s' addr=%p size=%llu (%llu KB)",
+              (unsigned long long)i, path, m->address,
+              (unsigned long long)m->size, (unsigned long long)m->size/1024ULL);
+        // также логируем первые 4 байта для детекции типа
+        if(m->address && m->size>=4){
+            const uint8_t *b=(const uint8_t*)m->address;
+            klogf(KLOG_INFO, "boot:   hdr %02x %02x %02x %02x", b[0], b[1], b[2], b[3]);
+        }
+    }
+}
+
+uint64_t boot_get_module_count(void){
+    if(!module_request.response) return 0;
+    return module_request.response->module_count;
 }
 
 void _start(void) {

@@ -192,12 +192,15 @@ void klog_raw(const char *s){
 void klog(enum klog_level lvl, const char *msg){
     if(!msg) return;
     if(lvl==KLOG_DEBUG && !klog_verbose) return;
+    bool prev_screen = klog_screen_enabled;
+    if(lvl==KLOG_DEBUG || lvl==KLOG_INFO) klog_screen_enabled = false;
     size_t mlen = strlen(msg);
     bool need_nl = (mlen==0 || msg[mlen-1]!='\n');
     klog_emit_prefix(lvl);
     if(gop_is_available()) gop_set_color(KLOG_FG, KLOG_BG);
     while(*msg) klog_putc_raw(*msg++);
     if(need_nl) klog_putc_raw('\n');
+    klog_screen_enabled = prev_screen;
 }
 
 // вспомогательная для форматированного вывода без префикса
@@ -297,22 +300,26 @@ static void klog_vprintf_internal(const char *fmt, va_list ap){
 
 void klogf(enum klog_level lvl, const char *fmt, ...){
     if(lvl==KLOG_DEBUG && !klog_verbose) return;
+    bool prev_screen = klog_screen_enabled;
+    if(lvl==KLOG_DEBUG || lvl==KLOG_INFO) klog_screen_enabled = false;
     klog_emit_prefix(lvl);
     va_list ap;
     va_start(ap, fmt);
     klog_vprintf_internal(fmt, ap);
     va_end(ap);
-    // гарантируем \n
     if(fmt && fmt[0]){
         size_t l = strlen(fmt);
         if(l>0 && fmt[l-1]!='\n') klog_putc_raw('\n');
     } else {
         klog_putc_raw('\n');
     }
+    klog_screen_enabled = prev_screen;
 }
 
 void klog_vf(enum klog_level lvl, const char *fmt, va_list ap){
     if(lvl==KLOG_DEBUG && !klog_verbose) return;
+    bool prev_screen = klog_screen_enabled;
+    if(lvl==KLOG_DEBUG || lvl==KLOG_INFO) klog_screen_enabled = false;
     klog_emit_prefix(lvl);
     klog_vprintf_internal(fmt, ap);
     if(fmt && fmt[0]){
@@ -321,6 +328,7 @@ void klog_vf(enum klog_level lvl, const char *fmt, va_list ap){
     } else {
         klog_putc_raw('\n');
     }
+    klog_screen_enabled = prev_screen;
 }
 
 void kprintf(const char *fmt, ...){

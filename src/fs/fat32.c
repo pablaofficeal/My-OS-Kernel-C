@@ -1,4 +1,5 @@
 #include "fat32.h"
+#include "vfs.h"
 
 #include "../drivers/storage/block_device.h"
 #include "../kernel/diagnostics/klog.h"
@@ -56,6 +57,7 @@ struct fat32_volume {
     uint32_t root_cluster;
     uint32_t cluster_count;
     uint32_t total_sectors;
+    uint32_t next_free_cluster;
     uint8_t sectors_per_cluster;
     uint8_t fat_count;
     bool mounted;
@@ -316,10 +318,19 @@ static bool lfn_entry_matches(const uint8_t *entry, const char *component){
 static int32_t find_lfn_entry(uint32_t directory_cluster, const char *component,
                               struct fat32_entry_ref *result){
     if(!valid_cluster(directory_cluster)) return FS_ERROR_NOT_DIR;
-    uint32_t cluster=directory_cluster;
-    bool pending_match=false;
+    // поддержка цепочек LFN до 20 записей (255 символов) для firmware
+    char pending_long[256];
+    uint32_t pending_len=0;
     uint8_t pending_checksum=0;
+    uint8_t pending_expected=0;
+    uint32_t pending_count=0;
+    uint8_t pending_first_seq=0;
+    bool pending_valid=false;
+    pending_long[0]='\0';
 
+    static const uint8_t lfn_offsets[13]={1,3,5,7,9,14,16,18,20,22,24,28,30};
+
+    uint32_t cluster=directory_cluster;
     for(uint32_t visited=0;visited<volume.cluster_count;visited++){
         uint32_t first_lba=cluster_lba(cluster);
         for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
@@ -329,34 +340,84 @@ static int32_t find_lfn_entry(uint32_t directory_cluster, const char *component,
                 uint8_t first=sector_buffer[offset];
                 if(first==0) return FS_ERROR_NOT_FOUND;
                 if(first==FAT32_DELETED_ENTRY){
-                    pending_match=false;
+                    pending_valid=false;
+                    pending_len=0;
+                    pending_count=0;
                     continue;
                 }
                 uint8_t attributes=sector_buffer[offset+11];
                 if(attributes==FAT32_ATTRIBUTE_LFN){
-                    pending_match=lfn_entry_matches(&sector_buffer[offset],component);
-                    pending_checksum=sector_buffer[offset+13];
+                    uint8_t seq_raw=sector_buffer[offset];
+                    bool is_last=(seq_raw & 0x40)!=0;
+                    uint8_t seq=seq_raw & 0x1F;
+                    uint8_t cs=sector_buffer[offset+13];
+                    if(is_last){
+                        // начало новой цепочки
+                        if(seq==0 || seq>20){ pending_valid=false; continue; }
+                        pending_valid=true;
+                        pending_first_seq=seq;
+                        pending_expected=seq;
+                        pending_checksum=cs;
+                        pending_len=0;
+                        pending_count=0;
+                        pending_long[0]='\0';
+                    } else {
+                        if(!pending_valid) continue;
+                        if(seq != pending_expected - 1 || cs != pending_checksum){
+                            pending_valid=false;
+                            pending_len=0;
+                            pending_count=0;
+                            continue;
+                        }
+                        pending_expected=seq;
+                    }
+                    // извлекаем 13 символов этого LFN-блока в порядке offsets
+                    for(uint8_t j=0;j<13;j++){
+                        uint16_t c=read_u16(&sector_buffer[offset + lfn_offsets[j]]);
+                        if(c==0x0000){
+                            // терминатор - конец имени, остальное в этом блоке - 0xFFFF
+                            break;
+                        }
+                        if(c==0xFFFF) continue;
+                        if(pending_len < sizeof(pending_long)-1){
+                            pending_long[pending_len++]=(char)(c & 0xFF);
+                            pending_long[pending_len]='\0';
+                        }
+                    }
+                    pending_count++;
                     continue;
                 }
-                if(pending_match
-                   && pending_checksum==lfn_checksum(&sector_buffer[offset])){
-                    if(result){
-                        result->sector_lba=lba;
-                        result->offset=offset;
-                        result->attributes=attributes;
-                        result->first_cluster=
-                            ((uint32_t)read_u16(&sector_buffer[offset+20])<<16)
-                            |read_u16(&sector_buffer[offset+26]);
-                        result->size=read_u32(&sector_buffer[offset+28]);
-                        memcpy(result->short_name,&sector_buffer[offset],11);
-                        result->has_lfn=true;
+                // SFN entry
+                if(pending_valid){
+                    uint8_t sfn_cs=lfn_checksum(&sector_buffer[offset]);
+                    bool chain_ok = (pending_count == pending_first_seq)
+                                 && (pending_expected==1)
+                                 && (sfn_cs==pending_checksum);
+                    if(chain_ok && strcmp(pending_long, component)==0){
+                        if(result){
+                            result->sector_lba=lba;
+                            result->offset=offset;
+                            result->attributes=attributes;
+                            result->first_cluster=
+                                ((uint32_t)read_u16(&sector_buffer[offset+20])<<16)
+                                |read_u16(&sector_buffer[offset+26]);
+                            result->size=read_u32(&sector_buffer[offset+28]);
+                            memcpy(result->short_name,&sector_buffer[offset],11);
+                            result->has_lfn=true;
+                        }
+                        return 0;
                     }
-                    return 0;
+                    // цепочка не подошла - сбрасываем
+                    pending_valid=false;
+                    pending_len=0;
+                    pending_count=0;
                 }
-                pending_match=false;
+                // сброс если LFN цепочка не непосредственно перед SFN
+                pending_valid=false;
+                pending_len=0;
+                pending_count=0;
             }
         }
-
         uint32_t next;
         int32_t status=fat_next_cluster(cluster,&next);
         if(status<0) return status;
@@ -439,9 +500,14 @@ static int32_t resolve_creation_parent(const char *path, uint32_t *parent,
     return FS_ERROR_INVALID;
 }
 
-static int32_t allocate_cluster(uint32_t *cluster_result){
+static int32_t allocate_cluster_ex(uint32_t *cluster_result, bool clear_data){
     if(!cluster_result) return FS_ERROR_INVALID;
-    for(uint32_t cluster=2;cluster<volume.cluster_count+2;cluster++){
+    uint32_t first_candidate=volume.next_free_cluster;
+    if(!valid_cluster(first_candidate)) first_candidate=2;
+    for(uint32_t visited=0;visited<volume.cluster_count;visited++){
+        uint32_t cluster=first_candidate+visited;
+        if(cluster>=volume.cluster_count+2)
+            cluster=2+(cluster-(volume.cluster_count+2));
         if((cluster&0xFFU)==0) scheduler_yield();
         uint32_t value;
         int32_t status=fat_next_cluster(cluster,&value);
@@ -450,18 +516,26 @@ static int32_t allocate_cluster(uint32_t *cluster_result){
 
         status=fat_write_entry(cluster,0x0FFFFFFF);
         if(status<0) return status;
-        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
-        uint32_t first_lba=cluster_lba(cluster);
-        for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
-            if(!block_device_write(first_lba+sector,sector_buffer)){
-                (void)fat_write_entry(cluster,0);
-                return FS_ERROR_IO;
+        if(clear_data){
+            memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+            uint32_t first_lba=cluster_lba(cluster);
+            for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
+                if(!block_device_write(first_lba+sector,sector_buffer)){
+                    (void)fat_write_entry(cluster,0);
+                    return FS_ERROR_IO;
+                }
             }
         }
         *cluster_result=cluster;
+        volume.next_free_cluster=cluster+1;
+        if(!valid_cluster(volume.next_free_cluster)) volume.next_free_cluster=2;
         return 0;
     }
     return FS_ERROR_NO_SPACE;
+}
+
+static int32_t allocate_cluster(uint32_t *cluster_result){
+    return allocate_cluster_ex(cluster_result,true);
 }
 
 static int32_t find_free_entry(uint32_t directory_cluster, uint32_t *lba_result,
@@ -563,29 +637,41 @@ static bool fill_lfn_entry(uint8_t *entry, const char *long_name,
     return true;
 }
 
-static int32_t find_free_entry_pair(uint32_t directory_cluster,
-                                    uint32_t *lba_result,
-                                    uint16_t *offset_result){
+// === Multi-entry LFN support for firmware (до 255 символов) ===
+static uint32_t lfn_entries_needed(const char *long_name){
+    uint32_t len=(uint32_t)strlen(long_name);
+    if(len==0) return 0;
+    return (len+12U)/13U;
+}
+
+static int32_t find_free_lfn_chain(uint32_t directory_cluster, uint32_t total_needed,
+                                   uint32_t *lba_result, uint16_t *offset_result){
+    if(total_needed==0 || total_needed>20) return FS_ERROR_INVALID;
     uint32_t cluster=directory_cluster;
     for(uint32_t visited=0;visited<volume.cluster_count;visited++){
         uint32_t first_lba=cluster_lba(cluster);
         for(uint8_t sector=0;sector<volume.sectors_per_cluster;sector++){
             uint32_t lba=first_lba+sector;
             if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
-            for(uint16_t offset=0;offset+64<=BLOCK_SECTOR_SIZE;offset+=32){
-                uint8_t first=sector_buffer[offset];
-                uint8_t second=sector_buffer[offset+32];
-                bool first_free=first==0 || first==FAT32_DELETED_ENTRY;
-                bool second_free=first==0 || second==0
-                    || second==FAT32_DELETED_ENTRY;
-                if(first_free && second_free){
+            // ищем run внутри сектора (не跨 sector для простоты - 16 слотов на сектор)
+            for(uint16_t offset=0; offset + total_needed*32U <= BLOCK_SECTOR_SIZE; offset+=32){
+                bool all_free=true;
+                for(uint32_t k=0;k<total_needed;k++){
+                    uint8_t first=sector_buffer[offset + k*32];
+                    if(first!=0 && first!=FAT32_DELETED_ENTRY){ all_free=false; break; }
+                    // если первый слот цепочки ==0, все последующие считаются свободными (конец директории)
+                    if(sector_buffer[offset]==0){
+                        // начиная с 0 все свободно - не нужно проверять дальше, они тоже 0
+                        break;
+                    }
+                }
+                if(all_free){
                     *lba_result=lba;
                     *offset_result=offset;
                     return 0;
                 }
             }
         }
-
         uint32_t next;
         int32_t status=fat_next_cluster(cluster,&next);
         if(status<0) return status;
@@ -608,25 +694,97 @@ static int32_t find_free_entry_pair(uint32_t directory_cluster,
     return FS_ERROR_INVALID;
 }
 
-static int32_t create_lfn_file_entry(uint32_t parent, const char *long_name,
-                                     const uint8_t short_name[11]){
+static void fill_lfn_entry_chunk(uint8_t *entry, uint8_t seq, const char *long_name,
+                                 uint32_t chunk_index, uint32_t total_len, uint8_t checksum){
+    // chunk_index 0 = первые 13 символов, chunk_index n-1 = последние
+    memset(entry,0xFF,32);
+    entry[0]=seq;
+    entry[11]=FAT32_ATTRIBUTE_LFN;
+    entry[12]=0;
+    entry[13]=checksum;
+    write_u16(&entry[26],0);
+    write_u16(&entry[27],0);
+    for(uint8_t j=0;j<FAT32_LFN_CHARACTER_CAPACITY;j++){
+        uint32_t char_index=chunk_index*13U + j;
+        uint16_t c;
+        if(char_index < total_len) c=(uint8_t)long_name[char_index];
+        else if(char_index==total_len) c=0x0000;
+        else c=0xFFFF;
+        write_lfn_character(entry,j,c);
+    }
+}
+
+static int32_t create_lfn_file_entry_multi(uint32_t parent, const char *long_name,
+                                           const uint8_t short_name[11]){
+    uint32_t len=(uint32_t)strlen(long_name);
+    if(len==0 || len>255) return FS_ERROR_INVALID;
+    uint32_t n=lfn_entries_needed(long_name);
+    if(n==0) return FS_ERROR_INVALID;
+    if(n==1){
+        // делегация к старому пути для 13-символьных имен
+        int32_t status=find_entry(parent,short_name,0);
+        if(status==0) return FS_ERROR_EXISTS;
+        if(status!=FS_ERROR_NOT_FOUND) return status;
+        uint32_t lba; uint16_t off;
+        status=find_free_lfn_chain(parent,2,&lba,&off);
+        if(status<0) return status;
+        if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+        bool was_end=sector_buffer[off]==0;
+        if(!fill_lfn_entry(&sector_buffer[off],long_name,short_name)) return FS_ERROR_UNSUPPORTED;
+        fill_directory_entry(&sector_buffer[off+32],short_name,FAT32_ATTRIBUTE_ARCHIVE,0);
+        if(was_end && off+64<BLOCK_SECTOR_SIZE) sector_buffer[off+64]=0;
+        return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
+    }
+    // n >=2 (firmware 27-28 символов -> n=3)
     int32_t status=find_entry(parent,short_name,0);
     if(status==0) return FS_ERROR_EXISTS;
     if(status!=FS_ERROR_NOT_FOUND) return status;
-
-    uint32_t lba;
-    uint16_t offset;
-    status=find_free_entry_pair(parent,&lba,&offset);
+    uint32_t total_needed=n+1;
+    uint32_t lba; uint16_t off;
+    status=find_free_lfn_chain(parent,total_needed,&lba,&off);
     if(status<0) return status;
     if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
-    bool was_end_marker=sector_buffer[offset]==0;
-    if(!fill_lfn_entry(&sector_buffer[offset],long_name,short_name)){
-        return FS_ERROR_UNSUPPORTED;
+    bool was_end=sector_buffer[off]==0;
+    uint8_t checksum=lfn_checksum(short_name);
+    // LFN entries идут в порядке: [n с 0x40][n-1]...[1] затем SFN
+    for(uint32_t i=0;i<n;i++){
+        uint8_t seq=(uint8_t)(n - i);
+        if(i==0) seq|=0x40;
+        fill_lfn_entry_chunk(&sector_buffer[off + i*32], seq, long_name, i, len, checksum);
     }
-    fill_directory_entry(&sector_buffer[offset+32],short_name,
-                         FAT32_ATTRIBUTE_ARCHIVE,0);
-    if(was_end_marker && offset+64<BLOCK_SECTOR_SIZE) sector_buffer[offset+64]=0;
+    fill_directory_entry(&sector_buffer[off + n*32], short_name, FAT32_ATTRIBUTE_ARCHIVE,0);
+    if(was_end && off + total_needed*32 < BLOCK_SECTOR_SIZE) sector_buffer[off + total_needed*32]=0;
     return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
+}
+
+static int32_t find_free_entry_pair(uint32_t directory_cluster,
+                                    uint32_t *lba_result,
+                                    uint16_t *offset_result){
+    return find_free_lfn_chain(directory_cluster,2,lba_result,offset_result);
+}
+
+static int32_t create_lfn_file_entry(uint32_t parent, const char *long_name,
+                                     const uint8_t short_name[11]){
+    uint32_t len=(uint32_t)strlen(long_name);
+    if(len<=13) {
+        // старый быстрый путь
+        int32_t status=find_entry(parent,short_name,0);
+        if(status==0) return FS_ERROR_EXISTS;
+        if(status!=FS_ERROR_NOT_FOUND) return status;
+        uint32_t lba; uint16_t off;
+        status=find_free_entry_pair(parent,&lba,&off);
+        if(status<0) return status;
+        if(!block_device_read(lba,sector_buffer)) return FS_ERROR_IO;
+        bool was_end_marker=sector_buffer[off]==0;
+        if(!fill_lfn_entry(&sector_buffer[off],long_name,short_name)){
+            return FS_ERROR_UNSUPPORTED;
+        }
+        fill_directory_entry(&sector_buffer[off+32],short_name,
+                             FAT32_ATTRIBUTE_ARCHIVE,0);
+        if(was_end_marker && off+64<BLOCK_SECTOR_SIZE) sector_buffer[off+64]=0;
+        return block_device_write(lba,sector_buffer) ? 0 : FS_ERROR_IO;
+    }
+    return create_lfn_file_entry_multi(parent,long_name,short_name);
 }
 
 static int32_t write_lfn_file(const char *directory_path, const char *long_name,
@@ -720,6 +878,7 @@ static bool mount_boot_sector(uint32_t partition_lba){
     volume.root_cluster=root_cluster;
     volume.cluster_count=cluster_count;
     volume.total_sectors=total_sectors;
+    volume.next_free_cluster=3;
     volume.sectors_per_cluster=sectors_per_cluster;
     volume.fat_count=fat_count;
     volume.mounted=true;
@@ -1020,7 +1179,7 @@ static int32_t allocate_file_chain(uint32_t cluster_count,
     uint32_t previous=0;
     for(uint32_t index=0;index<cluster_count;index++){
         uint32_t cluster;
-        int32_t status=allocate_cluster(&cluster);
+        int32_t status=allocate_cluster_ex(&cluster,false);
         if(status<0){
             if(*first_cluster) (void)clear_cluster_chain(*first_cluster);
             return status;
@@ -1401,7 +1560,8 @@ static bool write_format_metadata(const struct fat32_format_layout *layout){
 
     build_format_boot_sector(layout,0,required_volume_label);
     if(!block_device_write(6,sector_buffer)) return false;
-    return block_device_write(0,sector_buffer);
+    if(!block_device_write(0,sector_buffer)) return false;
+    return block_device_flush();
 }
 
 int32_t fat32_format_device(const char *device_name,
@@ -1666,6 +1826,10 @@ static bool write_format_metadata_at(uint32_t part_lba,
         klogf(KLOG_ERROR,"write_format_at: boot LBA %u failed",part_lba);
         return false;
     }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"write_format_at: flush failed part %u",part_lba);
+        return false;
+    }
     klogf(KLOG_OK,"write_format_at: OK part %u",part_lba);
     return true;
 }
@@ -1686,10 +1850,15 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
     "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/tetris\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/program/settings\n"
+    "    module_path: boot():/bin/program/monitor\n"
+    "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1703,10 +1872,15 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/init\n"
     "    module_path: boot():/bin/installer\n"
     "    module_path: boot():/bin/snake\n"
+    "    module_path: boot():/bin/tetris\n"
     "    module_path: boot():/bin/program/terminal\n"
     "    module_path: boot():/bin/program/nano\n"
     "    module_path: boot():/bin/program/system\n"
     "    module_path: boot():/bin/program/files\n"
+    "    module_path: boot():/bin/program/settings\n"
+    "    module_path: boot():/bin/program/monitor\n"
+    "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
@@ -1772,6 +1946,93 @@ static int32_t install_gui_development_payload(void){
                                  (uint32_t)widget_header_size);
 }
 
+static int32_t install_firmware_payload(void){
+    // создаём /bin/firmware/Intel/wifi с учётом FAT32 8.3, прошивки храним с LFN
+    if(create_directory_checked("/bin/firmware")<0) return FS_ERROR_IO;
+    if(create_directory_checked("/bin/firmware/Intel")<0) return FS_ERROR_IO;
+    if(create_directory_checked("/bin/firmware/Intel/wifi")<0) return FS_ERROR_IO;
+
+    struct fw_entry {
+        const char *module_path; // Limine module путь (/firmware/...)
+        const char *long_name;   // имя файла в целевой ФС (может быть длинным)
+        const char *alias_name;  // 8.3 алиас
+        const char *alias_path;  // полный путь с алиасом
+    };
+    static const struct fw_entry fw_table[]={
+        {"/firmware/iwlwifi-so-a0-hr-b0-89.ucode", "iwlwifi-so-a0-hr-b0-89.ucode", "FW000001.UCO", "/bin/firmware/Intel/wifi/FW000001.UCO"},
+        {"/firmware/iwlwifi-so-a0-hr-b0-86.ucode", "iwlwifi-so-a0-hr-b0-86.ucode", "FW000002.UCO", "/bin/firmware/Intel/wifi/FW000002.UCO"},
+        {"/firmware/iwlwifi-so-a0-hr-b0-83.ucode", "iwlwifi-so-a0-hr-b0-83.ucode", "FW000003.UCO", "/bin/firmware/Intel/wifi/FW000003.UCO"},
+        {"/firmware/iwlwifi-so-a0-hr-b0-77.ucode", "iwlwifi-so-a0-hr-b0-77.ucode", "FW000004.UCO", "/bin/firmware/Intel/wifi/FW000004.UCO"},
+        {"/firmware/iwlwifi-so-a0-hr-b0-74.ucode", "iwlwifi-so-a0-hr-b0-74.ucode", "FW000005.UCO", "/bin/firmware/Intel/wifi/FW000005.UCO"},
+        {"/firmware/iwlwifi-so-a0-hr-b0-72.ucode", "iwlwifi-so-a0-hr-b0-72.ucode", "FW000006.UCO", "/bin/firmware/Intel/wifi/FW000006.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf-a0-89.ucode", "iwlwifi-so-a0-gf-a0-89.ucode", "FW000007.UCO", "/bin/firmware/Intel/wifi/FW000007.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf-a0-86.ucode", "iwlwifi-so-a0-gf-a0-86.ucode", "FW000008.UCO", "/bin/firmware/Intel/wifi/FW000008.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf-a0-83.ucode", "iwlwifi-so-a0-gf-a0-83.ucode", "FW000009.UCO", "/bin/firmware/Intel/wifi/FW000009.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf-a0-77.ucode", "iwlwifi-so-a0-gf-a0-77.ucode", "FW000010.UCO", "/bin/firmware/Intel/wifi/FW000010.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf4-a0-89.ucode", "iwlwifi-so-a0-gf4-a0-89.ucode", "FW000011.UCO", "/bin/firmware/Intel/wifi/FW000011.UCO"},
+        {"/firmware/iwlwifi-so-a0-gf4-a0-86.ucode", "iwlwifi-so-a0-gf4-a0-86.ucode", "FW000012.UCO", "/bin/firmware/Intel/wifi/FW000012.UCO"},
+        {"/firmware/iwlwifi-so-a0-jf-b0-77.ucode", "iwlwifi-so-a0-jf-b0-77.ucode", "FW000013.UCO", "/bin/firmware/Intel/wifi/FW000013.UCO"},
+        {"/firmware/iwlwifi-so-a0-jf-b0-72.ucode", "iwlwifi-so-a0-jf-b0-72.ucode", "FW000014.UCO", "/bin/firmware/Intel/wifi/FW000014.UCO"},
+        {"/firmware/iwlwifi-QuZ-a0-hr-b0-77.ucode", "iwlwifi-QuZ-a0-hr-b0-77.ucode", "FW000015.UCO", "/bin/firmware/Intel/wifi/FW000015.UCO"},
+        {"/firmware/iwlwifi-QuZ-a0-hr-b0-74.ucode", "iwlwifi-QuZ-a0-hr-b0-74.ucode", "FW000016.UCO", "/bin/firmware/Intel/wifi/FW000016.UCO"},
+        {"/firmware/iwlwifi-Qu-b0-hr-b0-77.ucode", "iwlwifi-Qu-b0-hr-b0-77.ucode", "FW000017.UCO", "/bin/firmware/Intel/wifi/FW000017.UCO"},
+        {"/firmware/iwlwifi-cc-a0-77.ucode", "iwlwifi-cc-a0-77.ucode", "FW000018.UCO", "/bin/firmware/Intel/wifi/FW000018.UCO"},
+    };
+    for(uint32_t i=0;i<sizeof(fw_table)/sizeof(fw_table[0]);i++){
+        const void *data=NULL; uint64_t size=0;
+        if(!boot_get_module(fw_table[i].module_path, &data, &size) || !data || size>UINT32_MAX || size<8){
+            klogf(KLOG_INFO, "install: firmware %s not present as Limine module, skip", fw_table[i].long_name);
+            continue;
+        }
+        uint32_t sz=(uint32_t)size;
+        // проверка magic для .ucode
+        if(size>=8){
+            uint32_t magic=((uint32_t)((const uint8_t*)data)[4]) | ((uint32_t)((const uint8_t*)data)[5]<<8) | ((uint32_t)((const uint8_t*)data)[6]<<16) | ((uint32_t)((const uint8_t*)data)[7]<<24);
+            // 0x0A4C5749 little-endian 'IWL*'?
+            if(magic!=0x0A4C5749U){
+                klogf(KLOG_WARN, "install: firmware %s bad magic 0x%08x, still copying", fw_table[i].long_name, magic);
+            }
+        }
+        // используем LFN: long_name + alias
+        int32_t st=write_lfn_file("/bin/firmware/Intel/wifi", fw_table[i].long_name, fw_table[i].alias_path, fw_table[i].alias_name, data, sz);
+        if(st<0){
+            klogf(KLOG_WARN, "install: write firmware %s -> %s failed %d, try fallback short", fw_table[i].long_name, fw_table[i].alias_path, st);
+            // fallback: пробуем записать напрямую по короткому пути (без LFN)
+            st=fat32_write_file(fw_table[i].alias_path, data, sz);
+            if(st<0){
+                klogf(KLOG_ERROR, "install: firmware %s fallback also failed %d", fw_table[i].long_name, st);
+                // не фатально - продолжаем с остальными
+                continue;
+            }
+        }
+        klogf(KLOG_OK, "install: firmware %s (%u KB) -> %s [alias %s]", fw_table[i].long_name, sz/1024U, fw_table[i].alias_path, fw_table[i].alias_name);
+        // верификация по короткому пути (LFN чтение через длинное тоже проверим)
+        int32_t v=verify_installed_file(fw_table[i].alias_path, sz);
+        if(v<0){
+            klogf(KLOG_WARN, "install: verify firmware %s alias failed %d", fw_table[i].alias_path, v);
+        } else {
+            // также проверим что длинное имя резолвится (LFN)
+            char long_path[64];
+            // "/bin/firmware/Intel/wifi/" + long_name
+            // собираем путь
+            const char *prefix="/bin/firmware/Intel/wifi/";
+            uint32_t p=0;
+            for(uint32_t k=0;prefix[k] && p+1<sizeof(long_path);k++) long_path[p++]=prefix[k];
+            for(uint32_t k=0;fw_table[i].long_name[k] && p+1<sizeof(long_path);k++) long_path[p++]=fw_table[i].long_name[k];
+            long_path[p]='\0';
+            struct fat32_entry_ref e;
+            int32_t ls=resolve_entry(long_path,&e,0);
+            if(ls<0){
+                klogf(KLOG_WARN, "install: LFN resolve %s failed %d (short alias ok)", long_path, ls);
+            } else {
+                klogf(KLOG_INFO, "install: LFN %s resolves to cluster %u size %u", long_path, e.first_cluster, e.size);
+            }
+        }
+    }
+    klog(KLOG_OK, "install: firmware payload complete");
+    return 0;
+}
+
 static int32_t install_program_payload(void){
     if(create_directory_checked("/bin")<0
        || create_directory_checked("/bin/program")<0
@@ -1781,9 +2042,11 @@ static int32_t install_program_payload(void){
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -1795,6 +2058,14 @@ static int32_t install_program_payload(void){
     if(!boot_get_module("/bin/snake",&snake_image,&snake_size)){
         klog(KLOG_ERROR,"install: missing /bin/snake");
         return FS_ERROR_NOT_FOUND;
+    }
+    // tetris is optional for backward ISO compatibility but preferred
+    bool has_tetris=boot_get_module("/bin/tetris",&tetris_image,&tetris_size);
+    if(!has_tetris) has_tetris=boot_get_module("/bin/program/tetris",&tetris_image,&tetris_size);
+    if(!has_tetris){
+        klog(KLOG_WARN,"install: missing /bin/tetris (will skip tetris payload)");
+        tetris_image=0;
+        tetris_size=0;
     }
     if(!boot_get_module("/bin/program/terminal",&terminal_image,&terminal_size)){
         klog(KLOG_ERROR,"install: missing /bin/program/terminal");
@@ -1812,6 +2083,26 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /bin/program/files");
         return FS_ERROR_NOT_FOUND;
     }
+    if(!boot_get_module("/bin/program/settings",&settings_image,&settings_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/settings (non-fatal)");
+        settings_image=0;
+        settings_size=0;
+    }
+    if(!boot_get_module("/bin/program/monitor",&monitor_image,&monitor_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/monitor (non-fatal)");
+        monitor_image=0;
+        monitor_size=0;
+    }
+    if(!boot_get_module("/bin/program/disks",&disks_image,&disks_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/disks (non-fatal)");
+        disks_image=0;
+        disks_size=0;
+    }
+    if(!boot_get_module("/bin/program/logview",&logview_image,&logview_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/logview (non-fatal)");
+        logview_image=0;
+        logview_size=0;
+    }
     if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
         klog(KLOG_ERROR,"install: missing /bin/gui-demo");
         return FS_ERROR_NOT_FOUND;
@@ -1820,7 +2111,7 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -1868,6 +2159,51 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write files %d",status);
         return status;
     }
+    if(settings_image && settings_size){
+        status=fat32_write_file("/bin/program/settings",settings_image,(uint32_t)settings_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write settings %d",status);
+            return status;
+        }
+    }
+    if(monitor_image && monitor_size){
+        status=fat32_write_file("/bin/program/monitor",monitor_image,(uint32_t)monitor_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write monitor %d",status);
+            return status;
+        }
+    }
+    if(disks_image && disks_size){
+        status=fat32_write_file("/bin/program/disks",disks_image,(uint32_t)disks_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write disks %d",status);
+            return status;
+        }
+    }
+    if(logview_image && logview_size){
+        status=fat32_write_file("/bin/program/logview",logview_image,(uint32_t)logview_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write logview %d",status);
+            return status;
+        }
+    }
+    if(tetris_image && tetris_size){
+        status=fat32_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write tetris %d",status);
+            return status;
+        }
+        status=fat32_write_file("/bin/program/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write program/tetris %d",status);
+            return status;
+        }
+        status=fat32_write_file("/game/tetris",tetris_image,(uint32_t)tetris_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write game/tetris %d",status);
+            return status;
+        }
+    }
     status=fat32_write_file("/bin/gui-demo",gui_demo_image,
                             (uint32_t)gui_demo_size);
     if(status<0){
@@ -1884,6 +2220,35 @@ static int32_t install_program_payload(void){
     if(status<0) return status;
     status=verify_installed_file("/bin/program/files",(uint32_t)files_size);
     if(status<0) return status;
+    if(settings_image && settings_size){
+        status=verify_installed_file("/bin/program/settings",(uint32_t)settings_size);
+        if(status<0) return status;
+    }
+    if(monitor_image && monitor_size){
+        status=verify_installed_file("/bin/program/monitor",(uint32_t)monitor_size);
+        if(status<0) return status;
+    }
+    if(disks_image && disks_size){
+        status=verify_installed_file("/bin/program/disks",(uint32_t)disks_size);
+        if(status<0) return status;
+    }
+    if(logview_image && logview_size){
+        status=verify_installed_file("/bin/program/logview",(uint32_t)logview_size);
+        if(status<0) return status;
+    }
+    if(tetris_image && tetris_size){
+        status=verify_installed_file("/bin/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+        status=verify_installed_file("/bin/program/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+        status=verify_installed_file("/game/tetris",(uint32_t)tetris_size);
+        if(status<0) return status;
+    }
+    // firmware в /bin/firmware/Intel/wifi (LFN, 8.3 алиасы FW0000XX.UCO)
+    int32_t fw_st=install_firmware_payload();
+    if(fw_st<0){
+        klogf(KLOG_WARN, "install: firmware payload failed %d (non-fatal, will continue)", fw_st);
+    }
     return install_gui_development_payload();
 }
 
@@ -2010,6 +2375,8 @@ static int32_t install_uefi_payload(void){
         if(status<0) return status;
     }
 
+    if(!block_device_flush()) return FS_ERROR_IO;
+
     status=verify_installed_file("/EFI/BOOT/BOOTX64.EFI",efi_loader_size);
     if(status<0) return status;
     status=verify_installed_file("/boot/kernel.elf",kernel_image_size);
@@ -2081,6 +2448,10 @@ int32_t fat32_format_uefi_device_progress(
         klogf(KLOG_ERROR,"fat32_uefi: GPT write failed");
         return FS_ERROR_IO;
     }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: GPT flush failed");
+        return FS_ERROR_IO;
+    }
     if(callback) callback(18,"Formatting EFI system partition");
     if(!write_format_metadata_at(
             FAT32_ESP_START_LBA,&esp_layout,esp_volume_label,
@@ -2100,6 +2471,10 @@ int32_t fat32_format_uefi_device_progress(
     if(status<0){
         klogf(KLOG_ERROR,"fat32_uefi: boot payload failed %d",status);
         return status;
+    }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: boot payload flush failed");
+        return FS_ERROR_IO;
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
@@ -2122,6 +2497,10 @@ int32_t fat32_format_uefi_device_progress(
         klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
         return status;
     }
+    if(!block_device_flush()){
+        klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
+        return FS_ERROR_IO;
+    }
     if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
@@ -2130,4 +2509,140 @@ int32_t fat32_format_uefi_device_progress(
 int32_t fat32_format_uefi_device(const char *device_name,
                                  const char *serial_confirmation){
     return fat32_format_uefi_device_progress(device_name,serial_confirmation,0);
+}
+
+bool fat32_mount_specific(const char *device){
+    if(!device || !device[0]) return false;
+    int32_t idx=block_device_find(device);
+    if(idx<0) return false;
+    if(!block_device_select((uint32_t)idx)) return false;
+    // попробуем смонтировать как в fat32_init но только для этого устройства
+    // сначала пробуем GPT
+    if(mount_gpt_partition(gpt_basic_data_type_guid)) return true;
+    if(mount_gpt_partition(gpt_esp_type_guid)) return true;
+    // затем MBR
+    if(!block_device_read(0,sector_buffer)) return false;
+    uint32_t part_lbas[4]; uint8_t part_cnt=0;
+    for(uint8_t i=0;i<4;i++){
+        uint16_t off=(uint16_t)(446+i*16);
+        uint8_t type=sector_buffer[off+4];
+        if(type==0x0B || type==0x0C || type==0x1B || type==0x1C){
+            uint32_t lba=read_u32(&sector_buffer[off+8]);
+            if(lba) part_lbas[part_cnt++]=lba;
+        }
+    }
+    for(uint8_t i=0;i<part_cnt;i++) if(mount_boot_sector(part_lbas[i])) return true;
+    if(mount_boot_sector(0)) return true;
+    if(mount_boot_sector(2048)) return true;
+    return false;
+}
+
+int32_t fat32_format_custom_device(const char *device, uint32_t partition_count, const uint64_t *sizes_gb){
+    if(!device || !device[0] || !partition_count || partition_count>4 || !sizes_gb) return FS_ERROR_INVALID;
+    int32_t idx=block_device_find(device);
+    if(idx<0) return FS_ERROR_NOT_FOUND;
+    struct storage_device_info info;
+    if(!block_device_get_info((uint32_t)idx,&info)) return FS_ERROR_INVALID;
+    if(!info.operational || !info.writable) return FS_ERROR_READ_ONLY;
+    if(info.sector_size!=BLOCK_SECTOR_SIZE) return FS_ERROR_UNSUPPORTED;
+    uint32_t total_sectors=(uint32_t)info.sector_count;
+    if(total_sectors < 65536) return FS_ERROR_TOO_SMALL;
+    // проверим что сумма GB не превышает размер диска (с запасом 1GB на GPT)
+    uint64_t total_gb=0;
+    for(uint32_t i=0;i<partition_count;i++) total_gb+=sizes_gb[i];
+    uint64_t total_bytes_needed=total_gb*1024ULL*1024ULL*1024ULL;
+    uint64_t disk_bytes=(uint64_t)total_sectors*BLOCK_SECTOR_SIZE;
+    if(total_bytes_needed==0 || total_bytes_needed > disk_bytes - 2*1024*1024) return FS_ERROR_NO_SPACE;
+    if(!block_device_select((uint32_t)idx)) return FS_ERROR_INVALID;
+    // для 1 раздела - простой FAT32 на весь диск (совместимо с fat32_format_device)
+    if(partition_count==1){
+        struct fat32_format_layout layout;
+        if(!calculate_format_layout(total_sectors,&layout)) return FS_ERROR_TOO_SMALL;
+        if(!write_format_metadata(&layout)) return FS_ERROR_IO;
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        return fat32_init()?0:FS_ERROR_IO;
+    }
+    // для N>1 - GPT с N разделами
+    // рассчитаем стартовые LBA для каждого раздела
+    uint32_t gpt_sectors=34+32; // 34 для GPT header+32 для entries
+    uint32_t current_lba=34;
+    uint32_t part_starts[4], part_sectors_arr[4];
+    for(uint32_t i=0;i<partition_count;i++){
+        uint64_t bytes=sizes_gb[i]*1024ULL*1024ULL*1024ULL;
+        uint32_t sectors=(uint32_t)(bytes/BLOCK_SECTOR_SIZE);
+        if(sectors<32768) sectors=32768; // минимум 16MB
+        part_starts[i]=current_lba;
+        part_sectors_arr[i]=sectors;
+        current_lba+=sectors;
+        // выравниваем на 1MiB (2048 секторов)
+        uint32_t align=2048;
+        uint32_t rem=current_lba % align;
+        if(rem) current_lba+=align - rem;
+    }
+    if(current_lba > total_sectors-33) return FS_ERROR_NO_SPACE;
+    // пишем GPT
+    uint8_t disk_guid[16], part_guid[16];
+    // используем info.serial для генерации
+    generate_guid(disk_guid,info.serial,0x47505444U^total_sectors);
+    // очищаем первые сектора
+    memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+    sector_buffer[510]=0x55; sector_buffer[511]=0xAA;
+    // protective MBR
+    sector_buffer[446+4]=0xEE;
+    write_u32(&sector_buffer[446+8],1);
+    write_u32(&sector_buffer[446+12],total_sectors-1);
+    if(!block_device_write(0,sector_buffer)) return FS_ERROR_IO;
+    // GPT entries
+    uint32_t entries_crc=0xFFFFFFFFU;
+    // подготовим entries в second_sector_buffer как временный буфер для CRC
+    // сначала запишем все entries и посчитаем CRC
+    uint8_t gpt_entries[32*128]={0};
+    for(uint32_t i=0;i<partition_count;i++){
+        uint8_t *e=&gpt_entries[i*128];
+        memcpy(e,gpt_basic_data_type_guid,16);
+        generate_guid(part_guid,info.serial,0x44415441U ^ i ^ total_sectors);
+        memcpy(e+16,part_guid,16);
+        write_u64(e+32,part_starts[i]);
+        write_u64(e+40,part_starts[i]+part_sectors_arr[i]-1);
+        write_gpt_name(e, i==0?"PureC System":"PureC Data");
+        // атрибуты 0
+    }
+    // CRC
+    entries_crc=crc32(gpt_entries,sizeof(gpt_entries));
+    // пишем primary GPT header
+    build_gpt_header(1,total_sectors-1,2,total_sectors-33-1,disk_guid,entries_crc);
+    if(!block_device_write(1,sector_buffer)) return FS_ERROR_IO;
+    // пишем entries primary
+    for(uint32_t s=0;s<32;s++){
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        memcpy(sector_buffer, &gpt_entries[s*512], 512);
+        if(!block_device_write(2+s,sector_buffer)) return FS_ERROR_IO;
+    }
+    // backup header
+    build_gpt_header(total_sectors-1,1,total_sectors-32,total_sectors-33-1,disk_guid,entries_crc);
+    if(!block_device_write(total_sectors-1,sector_buffer)) return FS_ERROR_IO;
+    for(uint32_t s=0;s<32;s++){
+        memset(sector_buffer,0,BLOCK_SECTOR_SIZE);
+        memcpy(sector_buffer, &gpt_entries[s*512], 512);
+        if(!block_device_write(total_sectors-32+s,sector_buffer)) return FS_ERROR_IO;
+    }
+    // форматируем каждый раздел
+    for(uint32_t i=0;i<partition_count;i++){
+        struct fat32_format_layout layout;
+        if(!calculate_format_layout(part_sectors_arr[i],&layout)) return FS_ERROR_TOO_SMALL;
+        if(!write_format_metadata_at(part_starts[i],&layout,required_volume_label,0,0,0,"")) return FS_ERROR_IO;
+    }
+    // пробуем смонтировать первый раздел как root
+    memset(&volume,0,sizeof(volume));
+    memset(handles,0,sizeof(handles));
+    // выберем устройство снова и попробуем смонтировать первый раздел
+    block_device_select((uint32_t)idx);
+    if(!mount_boot_sector(part_starts[0])){
+        // fallback - общий mount
+    vfs_mount_root();
+    }
+    klogf(KLOG_OK,"fat32_custom: device %s formatted %u partitions",device,partition_count);
+    for(uint32_t i=0;i<partition_count;i++) klogf(KLOG_INFO," fat32_custom: part%u start %u sectors %u (%llu GB)",i,part_starts[i],part_sectors_arr[i],sizes_gb[i]);
+    return 0;
 }

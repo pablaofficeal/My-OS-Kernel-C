@@ -355,7 +355,8 @@ int32_t process_fd_close(int32_t descriptor){
 }
 
 bool process_user_buffer(const void *buffer, uint64_t size, bool writable){
-    if(!process_current_is_user()) return buffer || size==0;
+    if(size==0) return true;
+    if(!process_current_is_user()) return buffer != NULL;
     return buffer && vmm_user_range_accessible(process_current_address_space(),
         (uint64_t)(uintptr_t)buffer,size,writable);
 }
