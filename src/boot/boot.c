@@ -148,6 +148,16 @@ bool boot_get_module(const char *path, const void **address, uint64_t *size){
     return false;
 }
 
+bool boot_get_module_by_index(uint64_t index, const void **address, uint64_t *size, const char **path){
+    if(!address || !size || !path || !module_request.response || !module_request.response->modules) return false;
+    if(index >= module_request.response->module_count) return false;
+    struct limine_file *m=module_request.response->modules[index];
+    if(!m || !m->address) return false;
+    *address=m->address;
+    *size=m->size;
+    *path=m->path;
+    return true;
+}
 void boot_log_modules(void){
     if(!module_request.response || !module_request.response->modules){
         klog(KLOG_WARN, "boot: no Limine modules response");

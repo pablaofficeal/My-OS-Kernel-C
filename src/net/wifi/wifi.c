@@ -10,7 +10,7 @@
 #define WIFI_SCAN_INTERVAL_MS 5000ULL
 #define WIFI_SCAN_TIMEOUT_MS 4000ULL
 
-#define WIFI_MAX_DEVICES 2
+#define WIFI_MAX_DEVICES 4
 
 struct wifi_slot {
     bool used;

@@ -18,7 +18,7 @@ AX201_FW_PNVM_LIST :=
 export ROOT_DIR BIN_DIR
 
 .DEFAULT_GOAL := all
-.PHONY: all libraries programs kernel iso clean help
+.PHONY: all libraries programs kernel modules iso clean help
 
 all: iso
 
@@ -29,7 +29,10 @@ libraries:
 programs: libraries
 	$(MAKE) -C src/programs
 
-kernel:
+modules:
+	$(MAKE) -C src/modules/ar928x
+
+kernel: modules
 	$(MAKE) -C src/kernel
 
 iso: kernel programs
@@ -100,6 +103,9 @@ iso: kernel programs
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
 	cp "$(ROOT_DIR)/src/libgui/include/puregui.h" "$(ISO_ROOT)/include/puregui.h"; \
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
+	mkdir -p "$(ISO_ROOT)/bin/modules"; \
+	if [ -f "$(BIN_DIR)/modules/ar928x.ko" ]; then cp "$(BIN_DIR)/modules/ar928x.ko" "$(ISO_ROOT)/bin/modules/ar928x.ko"; echo "modules: ar928x.ko -> ISO"; fi; \
+	if [ -f "$(BIN_DIR)/modules/ar928x.a" ]; then cp "$(BIN_DIR)/modules/ar928x.a" "$(ISO_ROOT)/bin/modules/ar928x.a"; fi; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/limine.conf"; \
 	cp "$$limine_share/limine-bios.sys" "$(ISO_ROOT)/boot/limine/limine-bios.sys"; \

@@ -21,6 +21,7 @@ C_SOURCES := \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
 	kernel/syscall/syscall.c \
+	kernel/module.c \
 	drivers/serial/serial.c \
 	drivers/display/vga.c \
 	drivers/interrupts/pic.c \
@@ -85,7 +86,14 @@ ASM_SOURCES := \
 C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
 CPP_OBJECTS := $(CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.asm.o)
+MODULES_A := $(BIN_DIR)/modules/ar928x.a
+HAVE_MODULES_A := $(shell test -f $(MODULES_A) && echo yes)
 OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
+ifeq ($(HAVE_MODULES_A),yes)
+MODULES_LD := --whole-archive $(MODULES_A) --no-whole-archive
+else
+MODULES_LD :=
+endif
 
 .PHONY: all
 all: $(TARGET)
@@ -93,10 +101,10 @@ all: $(TARGET)
 
 -include $(C_OBJECTS:.o=.d) $(CPP_OBJECTS:.o=.d)
 
-$(TARGET): $(OBJECTS) $(LINKER_SCRIPT)
+$(TARGET): $(OBJECTS) $(LINKER_SCRIPT) $(MODULES_A)
 	@mkdir -p $(@D)
 	@if [ -f $@ ]; then cp $@ $(FALLBACK); fi
-	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS) $(MODULES_LD)
 	@if [ ! -f $(FALLBACK) ]; then cp $@ $(FALLBACK); fi
 
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/%.c
