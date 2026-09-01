@@ -9,7 +9,6 @@
 #include "../diagnostics/icmp.h"
 #include "../../drivers/net/e1000_82540em.h"
 #include "../../drivers/net/intel_ax201.h"
-#include "../../kernel/module.h"
 #include "../wifi/wifi.h"
 #include "../../drivers/interrupts/timer.h"
 #include "../../kernel/diagnostics/klog.h"
@@ -37,18 +36,14 @@ bool net_service_init(void){
     }
     bool eth_ready=e1000_82540em_init();
     bool wifi_ready=intel_ax201_init();
-    modules_init();
-    bool mod_ready=net_device_count()>0;
-    ready=eth_ready||wifi_ready||mod_ready;
+    ready=eth_ready||wifi_ready;
     if(!ready) klog(KLOG_WARN,"net: no supported network adapter found (e1000 nor AX201)");
-    else {
-        for(uint32_t index=0;index<net_device_count();index++){
-            struct net_device *dev=net_device_get(index);
-            if(dev && dev->name[0]=='e'){
-                (void)dhcp_start(dev);
-            } else if(dev && dev->name[0]=='w'){
-                klogf(KLOG_INFO,"net: %s registered, waiting for Wi-Fi association before DHCP",dev->name);
-            }
+    for(uint32_t index=0;index<net_device_count();index++){
+        struct net_device *dev=net_device_get(index);
+        if(dev && dev->name[0]=='e'){
+            (void)dhcp_start(dev);
+        } else if(dev && dev->name[0]=='w'){
+            klogf(KLOG_INFO,"net: %s registered, waiting for Wi-Fi association before DHCP",dev->name);
         }
     }
     return ready;

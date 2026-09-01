@@ -73,6 +73,7 @@ uint64_t ar928x_pci_bar_address(void){
     return pci_read_bar(g_ar928x.pci.bus,g_ar928x.pci.slot,g_ar928x.pci.function,0);
 }
 void ar928x_pci_ensure_power(void){
+    if(!g_ar928x.hardware_found) return;
     uint32_t pm_cap_ptr=0;
     uint32_t cap=pci_read_config32(g_ar928x.pci.bus,g_ar928x.pci.slot,g_ar928x.pci.function,0x34)&0xFF;
     for(int i=0;i<12 && cap>=0x40 && cap<0xFF;i++){

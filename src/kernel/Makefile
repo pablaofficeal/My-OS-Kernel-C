@@ -86,14 +86,9 @@ ASM_SOURCES := \
 C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
 CPP_OBJECTS := $(CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(OBJ_DIR)/%.asm.o)
-MODULES_A := $(BIN_DIR)/modules/ar928x.a
-HAVE_MODULES_A := $(shell test -f $(MODULES_A) && echo yes)
 OBJECTS := $(C_OBJECTS) $(CPP_OBJECTS) $(ASM_OBJECTS)
-ifeq ($(HAVE_MODULES_A),yes)
-MODULES_LD := --whole-archive $(MODULES_A) --no-whole-archive
-else
+MODULES_A := $(BIN_DIR)/modules/ar928x.a
 MODULES_LD :=
-endif
 
 .PHONY: all
 all: $(TARGET)
@@ -101,7 +96,7 @@ all: $(TARGET)
 
 -include $(C_OBJECTS:.o=.d) $(CPP_OBJECTS:.o=.d)
 
-$(TARGET): $(OBJECTS) $(LINKER_SCRIPT) $(MODULES_A)
+$(TARGET): $(OBJECTS) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	@if [ -f $@ ]; then cp $@ $(FALLBACK); fi
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(OBJECTS) $(MODULES_LD)

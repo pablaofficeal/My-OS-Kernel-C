@@ -32,7 +32,7 @@ programs: libraries
 modules:
 	$(MAKE) -C src/drivers/net/ar928x
 
-kernel: modules
+kernel:
 	$(MAKE) -C src/kernel
 
 iso: kernel programs
