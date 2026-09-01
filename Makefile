@@ -10,7 +10,7 @@ LIMINE_CONFIG := $(ROOT_DIR)/src/boot/limine.conf
 export ROOT_DIR BIN_DIR
 
 .DEFAULT_GOAL := all
-.PHONY: all libraries programs kernel iso clean help
+.PHONY: all libraries programs kernel iso hexedit clean help
 
 all: iso
 
@@ -20,6 +20,9 @@ libraries:
 
 programs: libraries
 	$(MAKE) -C src/programs
+
+hexedit: libraries
+	$(MAKE) -C src/programs/hexedit
 
 kernel:
 	$(MAKE) -C src/kernel
@@ -88,4 +91,5 @@ help:
 	@echo "make kernel       собрать только ядро"
 	@echo "make libraries    собрать только библиотеки"
 	@echo "make programs     собрать библиотеки и ring-3 программы"
+	@echo "make hexedit      собрать только HexEdit (C++)"
 	@echo "make iso          собрать итоговый ISO"

@@ -43,9 +43,13 @@ GENERAL_SOURCES := \
 	disks/main.c \
 	logview/main.c
 GENERAL_CPP_SOURCES := \
-	hexedit/main.cpp \
-	hexedit/editor.cpp \
-	hexedit/window.cpp
+	hexedit/src/main.cpp \
+	hexedit/src/buffer.cpp \
+	hexedit/src/tree.cpp \
+	hexedit/src/view.cpp \
+	hexedit/src/input.cpp \
+	hexedit/src/editor.cpp \
+	hexedit/src/window.cpp
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_CPP_OBJECTS := $(GENERAL_CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
@@ -66,8 +70,9 @@ TARGETS := \
 	$(PROGRAM_DIR)/hexedit
 
 .NOTPARALLEL:
-.PHONY: all
+.PHONY: all hexedit
 all: $(TARGETS)
+hexedit: $(PROGRAM_DIR)/hexedit
 
 -include $(PLAIN_OBJECTS:.o=.d) $(GENERAL_OBJECTS:.o=.d) $(GENERAL_CPP_OBJECTS:.o=.d)
 

@@ -1,8 +1,7 @@
 #pragma once
 extern "C" {
-#include "../../libgui/include/puregui.h"
+#include "../../../../libgui/include/puregui.h"
 }
-
 struct HexWindow {
     pg_window gui{};
     bool render_active{false};
@@ -14,3 +13,4 @@ struct HexWindow {
     void shutdown();
     pg_rect client() const;
 };
+extern HexWindow hex_window;
