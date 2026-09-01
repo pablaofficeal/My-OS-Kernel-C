@@ -4,8 +4,10 @@ OBJ_DIR := $(BIN_DIR)/obj/modules/ar928x
 MOD_DIR := $(BIN_DIR)/modules
 TARGET := $(MOD_DIR)/ar928x.ko
 TARGET_A := $(MOD_DIR)/ar928x.a
-C_SOURCES := ar928x_pci.c ar928x_hw.c ar928x_eeprom.c ar928x_mac.c ar928x_dma.c ar928x_wifi.c ar928x_main.c
+C_SOURCES := core/ar928x_main.c pci/ar928x_pci.c hw/ar928x_hw.c hw/ar928x_eeprom.c hw/ar928x_mac.c dma/ar928x_dma.c wifi/ar928x_wifi.c
 C_OBJECTS := $(C_SOURCES:%.c=$(OBJ_DIR)/%.o)
+EXTRA_INCLUDES := -I$(CURDIR)/include -I$(CURDIR)/core -I$(CURDIR)/pci -I$(CURDIR)/hw -I$(CURDIR)/dma -I$(CURDIR)/wifi
+CPPFLAGS += $(EXTRA_INCLUDES)
 .PHONY: all clean
 all: $(TARGET) $(TARGET_A)
 $(OBJ_DIR)/%.o: %.c
