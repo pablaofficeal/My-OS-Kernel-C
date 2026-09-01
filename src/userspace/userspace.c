@@ -52,6 +52,7 @@ static uint32_t installer_icon_x=328,installer_icon_y=ICON_Y;
 static uint32_t disks_icon_x=400,disks_icon_y=130;
 static uint32_t tetris_icon_x=472,tetris_icon_y=130;
 static uint32_t logview_icon_x=544,logview_icon_y=130;
+static uint32_t hexedit_icon_x=40,hexedit_icon_y=210;
 static bool installer_icon_visible=true;
 static bool external_program_active;
 static uint32_t desktop_redraw_requested;
@@ -142,6 +143,7 @@ static void draw_desktop_icons(void){
     draw_app_icon(disks_icon_x,disks_icon_y,"HD","Disks",0xF9E2AF);
     draw_app_icon(tetris_icon_x,tetris_icon_y,"[]","Tetris",0xF38BA8);
     draw_app_icon(logview_icon_x,logview_icon_y,"LOG","Logs",0x89B4FA);
+    draw_app_icon(hexedit_icon_x,hexedit_icon_y,"HX","HexEdit",0xF5C2E7);
 }
 
 static bool installation_present(void){
@@ -386,7 +388,7 @@ static void handle_desktop_mouse(void){
         );
         redraw=redraw || app_redraw;
     }
-    uint32_t *icon_positions[11]={
+    uint32_t *icon_positions[12]={
         &explorer_icon_x,
         &htop_icon_x,
         &terminal_icon_x,
@@ -397,9 +399,10 @@ static void handle_desktop_mouse(void){
         &installer_icon_x,
         &disks_icon_x,
         &tetris_icon_x,
-        &logview_icon_x
+        &logview_icon_x,
+        &hexedit_icon_x
     };
-    uint32_t *icon_y_positions[11]={
+    uint32_t *icon_y_positions[12]={
         &explorer_icon_y,
         &htop_icon_y,
         &terminal_icon_y,
@@ -410,10 +413,11 @@ static void handle_desktop_mouse(void){
         &installer_icon_y,
         &disks_icon_y,
         &tetris_icon_y,
-        &logview_icon_y
+        &logview_icon_y,
+        &hexedit_icon_y
     };
     if(pressed && !consumed){
-        for(int8_t index=0;index<11;index++){
+        for(int8_t index=0;index<12;index++){
             if(index==7 && !installer_icon_visible) continue;
             if(point_inside(
                     mouse.x,mouse.y,
@@ -466,6 +470,8 @@ static void handle_desktop_mouse(void){
                 (void)userspace_run_program("/bin/program/tetris");
             else if(icon==10)
                 (void)userspace_run_program("/bin/program/logview");
+            else if(icon==11)
+                (void)userspace_run_program("/bin/program/hexedit");
             else desktop_apps_open((enum desktop_app)(icon-3),desktop_width,desktop_height);
         }
         if(!icon_drag_moved) redraw=true;
