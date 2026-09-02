@@ -63,6 +63,11 @@ int32_t pf_move(const char *path, const char *destination_directory){
     return pc_file_move(path, destination_directory);
 }
 
+int32_t pf_append_file(const char *path, const void *buffer, uint32_t size){
+    if(!path) return PF_ERROR_INVALID;
+    return (int32_t)pc_syscall(SYS_FILE_APPEND,(uint64_t)(uintptr_t)path,(uint64_t)(uintptr_t)buffer,(uint64_t)size);
+}
+
 int32_t pf_read_all(const char *path, void *buffer, uint32_t capacity){
     if(!path || !buffer || !capacity) return PF_ERROR_INVALID;
     int32_t fd = pc_file_open(path);

@@ -1,5 +1,6 @@
 #include "settings/wifi_page.h"
 #include "../../../libgui/include/pguiw.h"
+#include "../../../libfs/include/purefs.h"
 #include "../../../libc/include/purec.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -45,11 +46,11 @@ static void append_ip(char *out, uint32_t ip){
     p=append_u32(p, ip&255);
 }
 static void load_saved_config(void){
-    int32_t fd = pc_file_open(WIFI_INI_PATH);
+    int32_t fd = pf_open(WIFI_INI_PATH);
     if(fd<0) return;
     char buf[256]={0};
-    int32_t n = pc_file_read(fd, buf, sizeof(buf)-1);
-    (void)pc_file_close(fd);
+    int32_t n = pf_read(fd, buf, sizeof(buf)-1);
+    (void)pf_close(fd);
     if(n<=0) return;
     buf[n]='\0';
     char ssid[WIFI_SSID_CAPACITY]={0};
@@ -89,8 +90,8 @@ static void save_config(const char *ssid, const char *password){
     p=append_text(p, "\npassword=");
     p=append_text(p, password ? password : "");
     p=append_text(p, "\n");
-    (void)pc_directory_create(WIFI_INI_DIR);
-    int32_t r = pc_file_write(WIFI_INI_PATH, buf, (uint32_t)(p-buf));
+    (void)pf_create_dir(WIFI_INI_DIR);
+    int32_t r = pf_write_file(WIFI_INI_PATH, buf, (uint32_t)(p-buf));
     if(r>=0){
         pc_copy(state.message, "Saved to /config/wifi.ini", sizeof(state.message));
     } else {

@@ -7,6 +7,7 @@ LIB_DIR := $(BIN_DIR)/lib
 LIBPUREC := $(LIB_DIR)/libpurec.a
 LIBPUREGUI := $(LIB_DIR)/libpuregui.a
 LIBPGUIW := $(LIB_DIR)/libpguiw.a
+LIBPUREFS := $(LIB_DIR)/libpurefs.a
 LINKER_SCRIPT := $(ROOT_DIR)/linker-userspace.ld
 
 PLAIN_SOURCES := \
@@ -85,6 +86,9 @@ $(LIBPUREC):
 $(LIBPUREGUI) $(LIBPGUIW):
 	$(MAKE) -C $(ROOT_DIR)/src/libgui
 
+$(LIBPUREFS):
+	$(MAKE) -C $(ROOT_DIR)/src/libfs
+
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CFLAGS) -c $< -o $@
@@ -97,7 +101,7 @@ $(PROGRAM_DIR)/init: $(OBJ_DIR)/init/main.o $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/installer: $(OBJ_DIR)/installer/main.o $(OBJ_DIR)/installer/progress.o $(OBJ_DIR)/terminal/window.o $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/installer: $(OBJ_DIR)/installer/main.o $(OBJ_DIR)/installer/progress.o $(OBJ_DIR)/terminal/window.o $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
@@ -109,11 +113,11 @@ $(PROGRAM_DIR)/terminal: $(OBJ_DIR)/terminal/main.o $(OBJ_DIR)/terminal/shell.o 
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/nano: $(OBJ_DIR)/nano/main.o $(OBJ_DIR)/nano/editor.o $(OBJ_DIR)/nano/window.o $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/nano: $(OBJ_DIR)/nano/main.o $(OBJ_DIR)/nano/editor.o $(OBJ_DIR)/nano/window.o $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/system: $(OBJ_DIR)/system/main.o $(OBJ_DIR)/system/commands.o $(OBJ_DIR)/system/filesystem.o $(OBJ_DIR)/system/system.o $(OBJ_DIR)/terminal/path.o $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/system: $(OBJ_DIR)/system/main.o $(OBJ_DIR)/system/commands.o $(OBJ_DIR)/system/filesystem.o $(OBJ_DIR)/system/system.o $(OBJ_DIR)/terminal/path.o $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
@@ -121,11 +125,11 @@ $(PROGRAM_DIR)/gui-demo: $(OBJ_DIR)/gui_demo/main.o $(LIBPGUIW) $(LIBPUREGUI) $(
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/files: $(OBJ_DIR)/files/main.o $(OBJ_DIR)/files/app.o $(OBJ_DIR)/files/model.o $(OBJ_DIR)/files/path.o $(OBJ_DIR)/files/view.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/files: $(OBJ_DIR)/files/main.o $(OBJ_DIR)/files/app.o $(OBJ_DIR)/files/model.o $(OBJ_DIR)/files/path.o $(OBJ_DIR)/files/view.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/settings: $(OBJ_DIR)/settings/main.o $(OBJ_DIR)/settings/core/model.o $(OBJ_DIR)/settings/core/app.o $(OBJ_DIR)/settings/pages/audio.o $(OBJ_DIR)/settings/pages/wifi.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/settings: $(OBJ_DIR)/settings/main.o $(OBJ_DIR)/settings/core/model.o $(OBJ_DIR)/settings/core/app.o $(OBJ_DIR)/settings/pages/audio.o $(OBJ_DIR)/settings/pages/wifi.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
@@ -137,7 +141,7 @@ $(PROGRAM_DIR)/disks: $(OBJ_DIR)/disks/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUR
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/logview: $(OBJ_DIR)/logview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/logview: $(OBJ_DIR)/logview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
@@ -145,6 +149,6 @@ $(PROGRAM_DIR)/tetris: $(OBJ_DIR)/game/tetris/main.o $(LIBPGUIW) $(LIBPUREGUI) $
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
-$(PROGRAM_DIR)/hexedit: $(GENERAL_CPP_OBJECTS) $(LIBPUREGUI) $(LIBPUREC) $(LINKER_SCRIPT)
+$(PROGRAM_DIR)/hexedit: $(GENERAL_CPP_OBJECTS) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)

@@ -22,6 +22,9 @@
 #define PF_ERROR_UNSUPPORTED -8
 #define PF_ERROR_BUSY        -9
 #define PF_ERROR_READ_ONLY  -10
+#define PF_ERROR_CONFIRMATION -11
+#define PF_ERROR_NOT_BLANK    -12
+#define PF_ERROR_TOO_SMALL    -13
 
 #define PF_ATTR_DIRECTORY 0x10
 
@@ -45,6 +48,7 @@ int32_t pf_create_file(const char *path);
 int32_t pf_delete(const char *path);
 int32_t pf_rename(const char *path, const char *new_name);
 int32_t pf_move(const char *path, const char *destination_directory);
+int32_t pf_append_file(const char *path, const void *buffer, uint32_t size);
 
 // directory ops
 int32_t pf_list(const char *path, struct pf_entry *entries, uint32_t capacity);

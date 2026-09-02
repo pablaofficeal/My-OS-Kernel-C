@@ -1,5 +1,6 @@
 #include "editor.h"
 #include "window.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
 #define NANO_INITIAL_CAPACITY 4096
@@ -130,26 +131,26 @@ static bool redraw(const char *message){
 }
 
 static int load_file(void){
-    int32_t descriptor=pc_file_open(editor_path);
+    int32_t descriptor=pf_open(editor_path);
     if(descriptor<0) return 0;
     for(;;){
         char chunk[NANO_READ_CHUNK];
-        int32_t count=pc_file_read(descriptor,chunk,sizeof(chunk));
-        if(count<0){ (void)pc_file_close(descriptor); return -1; }
+        int32_t count=pf_read(descriptor,chunk,sizeof(chunk));
+        if(count<0){ (void)pf_close(descriptor); return -1; }
         if(!count) break;
         if((uint32_t)count>UINT32_MAX-editor_length
            || !reserve_buffer(editor_length+(uint32_t)count)){
-            (void)pc_file_close(descriptor); return -2;
+            (void)pf_close(descriptor); return -2;
         }
         for(int32_t index=0;index<count;index++)
             editor_buffer[editor_length++]=chunk[index];
     }
-    (void)pc_file_close(descriptor);
+    (void)pf_close(descriptor);
     return 1;
 }
 
 static bool save_file(void){
-    if(pc_file_write(editor_path,editor_buffer,editor_length)<0) return false;
+    if(pf_write_file(editor_path,editor_buffer,editor_length)<0) return false;
     editor_dirty=false;
     return true;
 }
