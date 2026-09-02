@@ -2122,14 +2122,21 @@ static int32_t install_program_payload(void){
        || payload_mkdir("/game")<0
        || payload_mkdir("/lib")<0
        || payload_mkdir("/include")<0) return FS_ERROR_IO;
+    (void)payload_mkdir("/src");
+    (void)payload_mkdir("/src/demo");
+    (void)payload_mkdir("/demo");
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
-    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image,*hexedit_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image,*hexedit_image,*imgview_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
-    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size,hexedit_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size,hexedit_size,imgview_size;
+    if(!boot_get_module("/bin/program/imgview",&imgview_image,&imgview_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/imgview (non-fatal)");
+        imgview_image=0; imgview_size=0;
+    }
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -2345,6 +2352,18 @@ static int32_t install_program_payload(void){
     if(hexedit_image && hexedit_size){
         status=payload_verify_file("/bin/program/hexedit",(uint32_t)hexedit_size);
         if(status<0) return status;
+    }
+    if(imgview_image && imgview_size){
+        status=payload_write_file("/bin/program/imgview",imgview_image,(uint32_t)imgview_size);
+        if(status>=0) (void)payload_verify_file("/bin/program/imgview",(uint32_t)imgview_size);
+    }
+    const void *demo_bmp=NULL, *demo_png=NULL; uint64_t demo_bmp_sz=0, demo_png_sz=0;
+    if(boot_get_module("/src/demo/screenshot.bmp",&demo_bmp,&demo_bmp_sz) && demo_bmp && demo_bmp_sz<=UINT32_MAX){
+        (void)payload_write_file("/src/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
+        (void)payload_write_file("/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
+    }
+    if(boot_get_module("/src/demo/screenshot.png",&demo_png,&demo_png_sz) && demo_png && demo_png_sz<=UINT32_MAX){
+        (void)payload_write_file("/src/demo/screenshot.png",demo_png,(uint32_t)demo_png_sz);
     }
     if(tetris_image && tetris_size){
         status=payload_verify_file("/bin/tetris",(uint32_t)tetris_size);

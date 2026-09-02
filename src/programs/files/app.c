@@ -46,6 +46,24 @@ static bool selected_is_directory(const struct files_app *app){
              & PF_ATTR_DIRECTORY)!=0;
 }
 
+static bool is_image_filename(const char *name) {
+    if (!name) return false;
+    uint32_t len = pc_strlen(name);
+    if (len < 4) return false;
+    const char *ext = name + len - 4;
+    if (pc_strcmp(ext, ".bmp") == 0 || pc_strcmp(ext, ".BMP") == 0 ||
+        pc_strcmp(ext, ".png") == 0 || pc_strcmp(ext, ".PNG") == 0 ||
+        pc_strcmp(ext, ".ppm") == 0 || pc_strcmp(ext, ".PPM") == 0 ||
+        pc_strcmp(ext, ".jpg") == 0 || pc_strcmp(ext, ".JPG") == 0 ||
+        pc_strcmp(ext, ".raw") == 0 || pc_strcmp(ext, ".RAW") == 0 ||
+        pc_strcmp(ext, ".img") == 0 || pc_strcmp(ext, ".IMG") == 0) return true;
+    if (len >= 5) {
+        const char *ext5 = name + len - 5;
+        if (pc_strcmp(ext5, ".jpeg") == 0 || pc_strcmp(ext5, ".JPEG") == 0) return true;
+    }
+    return false;
+}
+
 static void open_selected(struct files_app *app){
     if(app->selected<0) return;
     if(selected_is_directory(app)){
@@ -60,12 +78,14 @@ static void open_selected(struct files_app *app){
         return;
     }
     if(pc_strlen(path)>=128){
-        set_status(app,"Path is too long for the editor");
+        set_status(app,"Path is too long");
         return;
     }
-    int32_t pid=pc_exec_with_args("/bin/program/nano",path);
+    const char *viewer = is_image_filename(app->model.entries[app->selected].name)
+        ? "/bin/program/imgview" : "/bin/program/nano";
+    int32_t pid=pc_exec_with_args(viewer,path);
     if(pid<0){
-        set_status(app,"Cannot open the file editor");
+        set_status(app,"Cannot open viewer");
         return;
     }
     int32_t status=0;

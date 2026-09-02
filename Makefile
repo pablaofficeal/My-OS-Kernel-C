@@ -46,7 +46,11 @@ iso: kernel programs
 	fi; \
 	rm -rf "$(ISO_ROOT)"; \
 	mkdir -p "$(ISO_ROOT)/boot/limine" "$(ISO_ROOT)/EFI/BOOT" \
-		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/bin/modules" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include"; \
+		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/bin/modules" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include" \
+		"$(ISO_ROOT)/src/demo" "$(ISO_ROOT)/demo"; \
+	if gcc -O2 src/demo/create_demo.c -o /tmp/create_demo 2>/dev/null; then \
+		/tmp/create_demo src/demo/screenshot.bmp 2>/dev/null || true; \
+	fi; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
@@ -64,6 +68,7 @@ iso: kernel programs
 	cp "$(PROGRAM_DIR)/logview" "$(ISO_ROOT)/bin/program/logview"; \
 	cp "$(PROGRAM_DIR)/tetris" "$(ISO_ROOT)/bin/program/tetris"; \
 	cp "$(PROGRAM_DIR)/hexedit" "$(ISO_ROOT)/bin/program/hexedit"; \
+	if [ -f "$(PROGRAM_DIR)/imgview" ]; then cp "$(PROGRAM_DIR)/imgview" "$(ISO_ROOT)/bin/program/imgview"; fi; \
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
@@ -73,6 +78,8 @@ iso: kernel programs
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
 	cp "$(ROOT_DIR)/src/libfs/include/purefs.h" "$(ISO_ROOT)/include/purefs.h"; \
 	cp "$(ROOT_DIR)/src/libaudio/include/pureaudio.h" "$(ISO_ROOT)/include/pureaudio.h"; \
+	if [ -d "$(ROOT_DIR)/src/demo" ]; then cp -r $(ROOT_DIR)/src/demo/* "$(ISO_ROOT)/src/demo/" 2>/dev/null || true; fi; \
+	if [ -f "$(ROOT_DIR)/src/demo/screenshot.bmp" ]; then cp "$(ROOT_DIR)/src/demo/screenshot.bmp" "$(ISO_ROOT)/demo/screenshot.bmp"; fi; \
 	if [ -f "$(BIN_DIR)/modules/ext2.elf" ]; then cp "$(BIN_DIR)/modules/ext2.elf" "$(ISO_ROOT)/bin/modules/ext2.elf"; fi; \
 	if [ -f "$(BIN_DIR)/modules/ext2.ko" ]; then cp "$(BIN_DIR)/modules/ext2.ko" "$(ISO_ROOT)/bin/modules/ext2.ko"; fi; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \

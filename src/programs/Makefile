@@ -43,7 +43,8 @@ GENERAL_SOURCES := \
 	settings/pages/wifi.c \
 	monitor/main.c \
 	disks/main.c \
-	logview/main.c
+	logview/main.c \
+	imgview/main.c
 GENERAL_CPP_SOURCES := \
 	hexedit/src/main/main.cpp \
 	hexedit/src/buffer/buffer.cpp \
@@ -69,7 +70,8 @@ TARGETS := \
 	$(PROGRAM_DIR)/monitor \
 	$(PROGRAM_DIR)/disks \
 	$(PROGRAM_DIR)/logview \
-	$(PROGRAM_DIR)/hexedit
+	$(PROGRAM_DIR)/hexedit \
+	$(PROGRAM_DIR)/imgview
 
 .NOTPARALLEL:
 .PHONY: all hexedit
@@ -151,5 +153,9 @@ $(PROGRAM_DIR)/tetris: $(OBJ_DIR)/game/tetris/main.o $(LIBPGUIW) $(LIBPUREGUI) $
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
 
 $(PROGRAM_DIR)/hexedit: $(GENERAL_CPP_OBJECTS) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
+
+$(PROGRAM_DIR)/imgview: $(OBJ_DIR)/imgview/main.o $(LIBPGUIW) $(LIBPUREGUI) $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(filter-out $(LINKER_SCRIPT),$^)
