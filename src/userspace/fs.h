@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "../fs/fs_types.h"
+#include "../fs/types/fs_types.h"
 
 #ifdef __cplusplus
 extern "C" {

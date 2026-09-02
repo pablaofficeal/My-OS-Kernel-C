@@ -1,7 +1,7 @@
 #include "filesystem.h"
 #include "../terminal/path.h"
 #include "../../libc/include/purec.h"
-#include "../../fs/fs_types.h"
+#include "../../fs/types/fs_types.h"
 
 #define SYSTEM_PATH_CAPACITY 128
 

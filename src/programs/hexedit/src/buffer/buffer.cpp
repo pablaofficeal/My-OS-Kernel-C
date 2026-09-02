@@ -3,7 +3,7 @@
 
 extern "C" {
 #include "../../../../libc/include/purec.h"
-#include "../../../../fs/fs_types.h"
+#include "../../../../fs/types/fs_types.h"
 }
 
 #include <stdint.h>

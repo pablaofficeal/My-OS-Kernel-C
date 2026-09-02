@@ -1,5 +1,5 @@
 #include "vfs.h"
-#include "fat32.h"
+#include "./fat/include/fat32.h"
 #include "../lib/string.h"
 #include "../kernel/diagnostics/klog.h"
 #include "../drivers/storage/block_device.h"

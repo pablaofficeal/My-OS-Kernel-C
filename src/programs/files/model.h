@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "path.h"
-#include "../../fs/fs_types.h"
+#include "../../fs/types/fs_types.h"
 #include "../../drivers/storage/storage_types.h"
 
 #define FILES_ENTRY_CAPACITY 96

@@ -53,7 +53,7 @@ C_SOURCES := \
 	drivers/storage/storage_probe.c \
 	drivers/usb/xhci.c \
 	drivers/usb/ehci.c \
-	fs/fat32.c \
+	fs/fat/fat32.c \
 	fs/vfs.c \
 	userspace/display.c \
 	userspace/fs.c \
