@@ -2009,8 +2009,29 @@ static int32_t install_gui_development_payload(void){
     status=payload_verify_file("/include/pguiw.h",
                                 (uint32_t)widget_header_size);
     if(status<0) return status;
-    return payload_verify_file("/include/purefs.h",
+    status=payload_verify_file("/include/purefs.h",
                                 (uint32_t)fs_header_size);
+    if(status<0) return status;
+
+    const void *audio_library, *audio_header;
+    uint64_t audio_library_size, audio_header_size;
+    if(boot_get_module("/lib/libpureaudio.a", &audio_library, &audio_library_size)
+       && boot_get_module("/include/pureaudio.h", &audio_header, &audio_header_size)){
+        if(audio_library_size<=UINT32_MAX && audio_header_size<=UINT32_MAX){
+            int32_t st=payload_write_alias(
+                "/lib","libpureaudio.a","/lib/libpur~3.a","libpur~3.a",
+                audio_library,(uint32_t)audio_library_size
+            );
+            if(st>=0){
+                st=payload_write_file("/include/pureaudio.h",audio_header,(uint32_t)audio_header_size);
+            }
+            if(st>=0){
+                (void)payload_verify_file("/lib/libpureaudio.a",(uint32_t)audio_library_size);
+                (void)payload_verify_file("/include/pureaudio.h",(uint32_t)audio_header_size);
+            }
+        }
+    }
+    return 0;
 }
 
 static int32_t install_firmware_payload(void){
