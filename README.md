@@ -13,9 +13,9 @@ PureC OS - это простая 64-битная операционная сис
 
 ## Сборка и запуск
 <details>
-<summary><b>🐧 Linux (Debian-based / Fedora)</b></summary>
+<summary><b>Linux (Ubuntu)</b></summary>
 
-For Debian-based distributions:
+На Ubuntu:
 ```bash
 sudo apt update
 sudo apt install make gcc g++ limine nasm
@@ -56,12 +56,25 @@ mkdir build-gcc && cd build-gcc
 make all-gcc -j$(nproc) && sudo make install-gcc
 make all-target-libgcc -j$(nproc) && sudo make install-target-libgcc
 ```
+</details>
 
-For Fedora:
+<details>
+<summary><b>Linux (Fedora)</b></summary>
+На Fedora:
 ```bash
 sudo dnf update --refresh
 sudo dnf install make gcc g++ limine nasm
 ```
+Если нет в репах (старый Fedora), то нужно установить `limine` вручную.
+
+```bash
+sudo dnf install xorriso mtools
+git clone https://github.com/limine-bootloader/limine.git --depth=1
+cd limine && make
+```
+
+### Ставив Кросс-компилятор для x86_64 Fedora
+
 
 ```bash
 sudo dnf install gcc gcc-c++ make bison flex gmp-devel libmpc-devel mpfr-devel texinfo
@@ -89,7 +102,7 @@ make all-target-libgcc -j$(nproc) && sudo make install-target-libgcc
 </details>
 
 <details>
-<summary><b>Arch Linux</b></summary>
+<summary><b>Linux (Arch)</b></summary>
 
 ```bash
 sudo pacman -Syu
