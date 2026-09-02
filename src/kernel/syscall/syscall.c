@@ -84,14 +84,7 @@ static void install_worker(void *argument){
     filesystem_syscall_lock();
     block_device_begin_exclusive_io();
     int32_t result;
-    if(install_fs_type == FS_TYPE_EXT2){
-        klogf(KLOG_WARN, "install: ext2 boot not yet implemented, falling back to FAT32 UEFI for bootable disk");
-        install_progress(5, "ext2 boot fallback: creating FAT32 ESP");
-        result=vfs_format_uefi_device_progress(install_device,install_serial,install_progress);
-        if(result==0) install_progress(40, "ESP FAT32 ready (ext2 data requires manual Disks format)");
-    } else {
-        result=vfs_format_uefi_device_progress(install_device,install_serial,install_progress);
-    }
+    result=fat32_format_uefi_device_progress_ex(install_device,install_serial,install_progress,install_fs_type);
     block_device_end_exclusive_io();
     filesystem_syscall_unlock();
     install_job.result=result;

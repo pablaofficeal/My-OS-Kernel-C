@@ -1,8 +1,11 @@
 #include "include/ext2_types.h"
 #include "include/ext2_block.h"
 #include "include/ext2_super.h"
+#include "include/ext2_format.h"
 #include "../../drivers/storage/block_device.h"
 #include "../../lib/string.h"
+
+int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors);
 
 int32_t ext2_format_device_impl(const char *device_name, const char *serial_confirmation, const char *erase_confirmation) {
     struct ext2_volume *vol = ext2_volume();
@@ -36,6 +39,12 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     if (total_blocks < 1024) {
         return -13;
     }
+    return ext2_format_at(0, info.sector_count);
+}
+
+int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
+    uint32_t total_blocks = part_sectors / (1024 / BLOCK_SECTOR_SIZE);
+    if (total_blocks < 128) return -13;
     uint32_t blocks_per_group = 8192;
     uint32_t inodes_per_group = 1024;
     uint32_t groups = (total_blocks + blocks_per_group - 1) / blocks_per_group;
@@ -57,7 +66,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     ext2_write_u16(sb + 58, 1);
     ext2_write_u16(sb + 88, 128);
     ext2_write_u32(sb + 92, 1);
-    uint32_t sb_lba = 2;
+    uint32_t sb_lba = part_lba + 2;
     memcpy(sec, sb, 512);
     if (!block_device_write(sb_lba, sec)) {
         return -1;
@@ -76,7 +85,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     ext2_write_u16(gd + 16, 2);
     memset(blk, 0, 1024);
     memcpy(blk, gd, 32);
-    uint32_t gd_lba = 4;
+    uint32_t gd_lba = part_lba + 4;
     memcpy(sec, blk, 512);
     if (!block_device_write(gd_lba, sec)) {
         return -1;
@@ -89,7 +98,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     for (uint32_t b = 0; b < 134; b++) {
         blk[b / 8] |= (uint8_t)(1 << (b % 8));
     }
-    uint32_t bm_lba = 6;
+    uint32_t bm_lba = part_lba + 6;
     memcpy(sec, blk, 512);
     if (!block_device_write(bm_lba, sec)) {
         return -1;
@@ -102,7 +111,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     for (int i = 0; i < 11; i++) {
         blk[i / 8] |= (uint8_t)(1 << (i % 8));
     }
-    uint32_t ibm_lba = 8;
+    uint32_t ibm_lba = part_lba + 8;
     memcpy(sec, blk, 512);
     if (!block_device_write(ibm_lba, sec)) {
         return -1;
@@ -121,7 +130,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
             ext2_write_u32(ino2 + 40, 134);
             ext2_write_u16(ino2 + 24, 1);
         }
-        uint32_t lba = 10 + b * 2;
+        uint32_t lba = part_lba + 10 + b * 2;
         memcpy(sec, blk, 512);
         if (!block_device_write(lba, sec)) {
             return -1;
@@ -143,7 +152,7 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     blk[19] = 2;
     blk[20] = '.';
     blk[21] = '.';
-    uint32_t root_lba = 134 * 2;
+    uint32_t root_lba = part_lba + 134 * 2;
     memcpy(sec, blk, 512);
     if (!block_device_write(root_lba, sec)) {
         return -1;
@@ -155,6 +164,6 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
     if (!block_device_flush()) {
         return -1;
     }
-    memset(vol, 0, sizeof(*vol));
+    memset(ext2_volume(), 0, sizeof(struct ext2_volume));
     return 0;
 }

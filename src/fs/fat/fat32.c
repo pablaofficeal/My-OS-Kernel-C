@@ -1,4 +1,6 @@
 #include "./include/fat32.h"
+#include "../ext2/include/ext2_format.h"
+#include "../ext2/include/ext2_types.h"
 #include "../vfs.h"
 
 #include "../../drivers/storage/block_device.h"
@@ -2460,9 +2462,10 @@ static int32_t install_uefi_payload(void){
 }
 
 // UEFI install: GPT, a 512 MiB ESP, and a separate system partition.
-int32_t fat32_format_uefi_device_progress(
+int32_t fat32_format_uefi_device_progress_ex(
     const char *device_name, const char *serial_confirmation,
-    fat32_progress_callback callback){
+    fat32_progress_callback callback, uint8_t fs_type){
+    bool use_ext2 = (fs_type == 1);
     if(callback) callback(2,"Validating target disk");
     if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
     int32_t idx=block_device_find(device_name);
@@ -2528,12 +2531,33 @@ int32_t fat32_format_uefi_device_progress(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
-    if(!write_format_metadata_at(
-            data_start,&data_layout,required_volume_label,
-            callback,70,85,"Formatting PureC system partition"
-        )){
-        klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
-        return FS_ERROR_IO;
+    if(use_ext2){
+        if(callback) callback(70,"Formatting PureC system partition as ext2");
+        if(ext2_format_at(data_start, data_sectors)!=0){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 system partition format failed");
+            return FS_ERROR_IO;
+        }
+        if(!block_device_flush()){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 format flush failed");
+            return FS_ERROR_IO;
+        }
+        if(callback) callback(88,"Copying programs to ext2 (not yet - fallback to fat32)");
+        if(!write_format_metadata_at(
+                data_start,&data_layout,required_volume_label,
+                callback,70,85,"Formatting PureC system partition (ext2 fallback fat32)"
+            )){
+            klogf(KLOG_ERROR,"fat32_uefi: fallback system partition format failed");
+            return FS_ERROR_IO;
+        }
+        klogf(KLOG_WARN,"fat32_uefi: ext2 system partition requested but payload still fat32 for boot compatibility");
+    } else {
+        if(!write_format_metadata_at(
+                data_start,&data_layout,required_volume_label,
+                callback,70,85,"Formatting PureC system partition"
+            )){
+            klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
+            return FS_ERROR_IO;
+        }
     }
     memset(&volume,0,sizeof(volume));
     memset(handles,0,sizeof(handles));
@@ -2554,6 +2578,12 @@ int32_t fat32_format_uefi_device_progress(
     if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
+}
+
+int32_t fat32_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback){
+    return fat32_format_uefi_device_progress_ex(device_name, serial_confirmation, callback, 0);
 }
 
 int32_t fat32_format_uefi_device(const char *device_name,

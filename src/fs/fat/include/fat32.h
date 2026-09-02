@@ -30,5 +30,8 @@ int32_t fat32_format_uefi_device(const char *device_name, const char *serial_con
 int32_t fat32_format_uefi_device_progress(
     const char *device_name, const char *serial_confirmation,
     fat32_progress_callback callback);
+int32_t fat32_format_uefi_device_progress_ex(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback, uint8_t fs_type);
 int32_t fat32_format_custom_device(const char *device, uint32_t partition_count, const uint64_t *sizes_gb);
 bool fat32_mount_specific(const char *device);
