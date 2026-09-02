@@ -59,7 +59,7 @@ bool ext2_super_read(uint32_t partition_lba) {
     }
     uint32_t ipb = block_size / inode_size;
     vol->inodes_per_block = ipb ? ipb : 1;
-    if (vol->groups_count > 4096) {
+    if (vol->groups_count > 300000) {
         return false;
     }
     return true;

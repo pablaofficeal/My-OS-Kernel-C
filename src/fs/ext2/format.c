@@ -39,8 +39,10 @@ int32_t ext2_format_device_impl(const char *device_name, const char *serial_conf
 }
 
 int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
+    if (part_sectors > 0xFFFFFF00) part_sectors = 0xFFFFFF00;
     uint32_t total_blocks = part_sectors / (1024 / BLOCK_SECTOR_SIZE);
     if (total_blocks < 128) return -13;
+    if (total_blocks > 0x7FFFFFFF) total_blocks = 0x7FFFFFFF;
     uint32_t blocks_per_group = 8192;
     uint32_t inodes_per_group = 1024;
     uint32_t groups = (total_blocks + blocks_per_group - 1) / blocks_per_group;
