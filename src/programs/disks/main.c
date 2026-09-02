@@ -1,6 +1,7 @@
 #include "../../libgui/include/puregui.h"
 #include "../../libgui/include/pguiw.h"
 #include "../../libc/include/purec.h"
+#include "../../libfs/include/purefs.h"
 
 #define DISK_LIMIT 12
 #define MIB (1024ULL*1024ULL)
@@ -141,13 +142,13 @@ static void draw(struct pg_window *win, struct disk_app *app, const struct pg_ev
                 int32_t r = (int32_t)pc_syscall(SYS_FAT32_FORMAT_CUSTOM, (uint64_t)(uintptr_t)&req, 0, 0);
                 app->confirm_format = false;
                 if (r == 0) pc_copy(app->status, "Custom FAT32 format done.", sizeof(app->status));
-                else { pc_copy(app->status, "Format failed, error ", sizeof(app->status)); char num[24]; char *no = num; if (r < 0) *no++ = '-'; (void)append_u64(no, r < 0 ? (uint64_t)(-(int64_t)r) : (uint64_t)r); append_text(app->status + pc_strlen(app->status), num); }
+                else { char msg[96]; pc_copy(msg, pf_strerror(r), sizeof(msg)); pc_copy(app->status, msg, sizeof(app->status)); if (r == PF_ERROR_BUSY) pc_copy(app->status, "busy - system disk, pick another", sizeof(app->status)); }
                 refresh(app);
             } else {
                 int32_t r = pc_format_device_ex(d->name, d->serial, app->fs_type);
                 app->confirm_format = false;
                 if (r == 0) pc_copy(app->status, app->fs_type == FS_TYPE_EXT2 ? "EXT2 format done." : "FAT32 format done.", sizeof(app->status));
-                else { pc_copy(app->status, "Format failed, error ", sizeof(app->status)); char num[24]; char *no = num; if (r < 0) *no++ = '-'; (void)append_u64(no, r < 0 ? (uint64_t)(-(int64_t)r) : (uint64_t)r); append_text(app->status + pc_strlen(app->status), num); }
+                else { char msg[96]; pc_copy(msg, pf_strerror(r), sizeof(msg)); pc_copy(app->status, msg, sizeof(app->status)); if (r == PF_ERROR_BUSY) pc_copy(app->status, "busy - system disk, pick another", sizeof(app->status)); }
                 refresh(app);
             }
         }
