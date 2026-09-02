@@ -1863,12 +1863,22 @@ static int32_t payload_write_alias(const char *directory, const char *long_name,
                                    const char *alias_path, const char *alias_name,
                                    const void *data, uint32_t size){
     if(install_target_is_ext2){
-        (void)directory;
         (void)alias_path;
         (void)alias_name;
-        return ext2_write_file(long_name,data,size);
+        char full_path[256];
+        uint32_t dlen = (uint32_t)strlen(directory);
+        uint32_t nlen = (uint32_t)strlen(long_name);
+        if(dlen + 1 + nlen >= sizeof(full_path)) return FS_ERROR_INVALID;
+        memcpy(full_path, directory, dlen);
+        if(dlen == 0 || full_path[dlen-1] != '/') {
+            full_path[dlen] = '/';
+            dlen++;
+        }
+        memcpy(full_path + dlen, long_name, nlen);
+        full_path[dlen + nlen] = '\0';
+        return ext2_write_file(full_path, data, size);
     }
-    return write_lfn_file(directory,long_name,alias_path,alias_name,data,size);
+    return write_lfn_file(directory, long_name, alias_path, alias_name, data, size);
 }
 
 static int32_t payload_verify_file(const char *path, uint32_t expected_size){
