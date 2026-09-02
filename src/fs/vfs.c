@@ -84,6 +84,10 @@ uint8_t vfs_root_fs_type(void) {
     return vfs_active_fs;
 }
 
+void vfs_set_active_fs(uint8_t fs_type) {
+    vfs_active_fs = fs_type;
+}
+
 bool vfs_mount_root(void) {
     return vfs_mount_root_with_fs(VFS_FS_AUTO);
 }
