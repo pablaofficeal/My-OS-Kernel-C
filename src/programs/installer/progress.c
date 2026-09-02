@@ -1,4 +1,5 @@
 #include "progress.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
 #define INSTALL_PROGRESS_BAR_WIDTH 44
@@ -59,15 +60,15 @@ void installer_progress_update(struct installer_progress_view *view,
 
 const char *installer_progress_error_text(int32_t status){
     switch(status){
-        case FS_ERROR_IO: return "disk read/write failed";
-        case FS_ERROR_NOT_FOUND: return "target disk disappeared";
-        case FS_ERROR_INVALID: return "invalid disk state";
-        case FS_ERROR_NO_SPACE: return "not enough space";
-        case FS_ERROR_UNSUPPORTED: return "unsupported disk geometry";
-        case FS_ERROR_BUSY: return "storage is busy";
-        case FS_ERROR_READ_ONLY: return "target is read-only";
-        case FS_ERROR_CONFIRMATION: return "disk identity changed";
-        case FS_ERROR_TOO_SMALL: return "target disk is too small";
+        case PF_ERROR_IO: return "disk read/write failed";
+        case PF_ERROR_NOT_FOUND: return "target disk disappeared";
+        case PF_ERROR_INVALID: return "invalid disk state";
+        case PF_ERROR_NO_SPACE: return "not enough space";
+        case PF_ERROR_UNSUPPORTED: return "unsupported disk geometry";
+        case PF_ERROR_BUSY: return "storage is busy";
+        case PF_ERROR_READ_ONLY: return "target is read-only";
+        case PF_ERROR_CONFIRMATION: return "disk identity changed";
+        case PF_ERROR_TOO_SMALL: return "target disk is too small";
         default: return "unknown storage error";
     }
 }

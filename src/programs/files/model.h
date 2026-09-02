@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "path.h"
-#include "../../fs/types/fs_types.h"
+#include "../../libfs/include/purefs.h"
 #include "../../drivers/storage/storage_types.h"
 
 #define FILES_ENTRY_CAPACITY 96
@@ -11,7 +11,7 @@
 
 struct files_model {
     char path[FILES_PATH_CAPACITY];
-    struct fs_directory_entry entries[FILES_ENTRY_CAPACITY];
+    struct pf_entry entries[FILES_ENTRY_CAPACITY];
     struct storage_device_info disks[FILES_DISK_CAPACITY];
     int32_t entry_count;
     int32_t disk_count;

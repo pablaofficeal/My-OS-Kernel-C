@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "model.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libgui/include/puregui.h"
 
 enum files_input_mode {
@@ -17,7 +18,7 @@ struct files_app {
     struct pg_window window;
     struct files_model model;
     enum files_input_mode input_mode;
-    char input[FS_DIRECTORY_NAME_CAPACITY];
+    char input[PF_NAME_CAPACITY];
     char status[80];
     int32_t selected;
     uint32_t page;

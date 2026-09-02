@@ -1,4 +1,5 @@
 #include "settings/model.h"
+#include "../../../libfs/include/purefs.h"
 #include "../../../libc/include/purec.h"
 
 #define SETTINGS_DIRECTORY "/config"
@@ -51,11 +52,11 @@ void settings_model_init(struct settings_model *model){
 }
 
 bool settings_model_load(struct settings_model *model){
-    int32_t descriptor=pc_file_open(SETTINGS_PATH);
+    int32_t descriptor=pf_open(SETTINGS_PATH);
     if(descriptor<0) return false;
     char buffer[256]={0};
-    int32_t amount=pc_file_read(descriptor,buffer,sizeof(buffer)-1);
-    (void)pc_file_close(descriptor);
+    int32_t amount=pf_read(descriptor,buffer,sizeof(buffer)-1);
+    (void)pf_close(descriptor);
     if(amount<=0) return false;
     buffer[amount]='\0';
     for(char *line=buffer;*line;){
@@ -89,8 +90,8 @@ bool settings_model_save(const struct settings_model *model){
     out=append_text(out,"\ndevice=");
     out=append_u32(out,(uint32_t)model->device);
     out=append_text(out,"\n");
-    (void)pc_directory_create(SETTINGS_DIRECTORY);
-    return pc_file_write(SETTINGS_PATH,buffer,(uint32_t)(out-buffer))>=0;
+    (void)pf_create_dir(SETTINGS_DIRECTORY);
+    return pf_write_file(SETTINGS_PATH,buffer,(uint32_t)(out-buffer))>=0;
 }
 
 bool settings_model_apply(struct settings_model *model){

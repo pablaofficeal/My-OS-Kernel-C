@@ -1,5 +1,6 @@
 #include "app.h"
 #include "view.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
 static void set_status(struct files_app *app, const char *text){
@@ -42,7 +43,7 @@ static void begin_input(struct files_app *app, enum files_input_mode mode){
 static bool selected_is_directory(const struct files_app *app){
     return app->selected>=0
         && (app->model.entries[app->selected].attributes
-            &FS_ATTRIBUTE_DIRECTORY)!=0;
+             & PF_ATTR_DIRECTORY)!=0;
 }
 
 static void open_selected(struct files_app *app){

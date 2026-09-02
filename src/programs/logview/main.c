@@ -1,4 +1,5 @@
 #include "../../libgui/include/puregui.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
 #define LOGVIEW_WIDTH 1020
@@ -138,7 +139,7 @@ static void load_logs(struct logview_state *st){
     const char *paths[]={"/kernel.log","/dmesg.txt","/kernel/dmesg.txt",0};
     int32_t fd=-1;
     for(int i=0;paths[i];i++){
-        fd=pc_file_open(paths[i]);
+        fd=pf_open(paths[i]);
         if(fd>=0) break;
     }
     if(fd<0){
@@ -148,12 +149,12 @@ static void load_logs(struct logview_state *st){
     static char buffer[LOGVIEW_BUFFER_SIZE];
     int32_t total=0;
     while(total < (int32_t)sizeof(buffer)-1){
-        int32_t r=pc_file_read(fd, buffer+total, sizeof(buffer)-1 - total);
+        int32_t r=pf_read(fd, buffer+total, sizeof(buffer)-1 - total);
         if(r<=0) break;
         total+=r;
         if(total >= (int32_t)sizeof(buffer)-1) break;
     }
-    pc_file_close(fd);
+    pf_close(fd);
     buffer[total]='\0';
     char *p=buffer;
     int32_t line_idx=0;

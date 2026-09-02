@@ -3,7 +3,7 @@
 
 extern "C" {
 #include "../../../../libc/include/purec.h"
-#include "../../../../fs/types/fs_types.h"
+#include "../../../../libfs/include/purefs.h"
 }
 
 #include <stdint.h>
@@ -289,7 +289,7 @@ bool hex_load_file(const char* path)
     void hex_refresh_dir();
     void hex_normalize_dir(char* out, uint32_t cap, const char* src);
 
-    int32_t d = pc_file_open(path);
+    int32_t d = pf_open(path);
 
     if (d < 0)
     {
@@ -329,17 +329,17 @@ bool hex_load_file(const char* path)
 
     if (!hex_reserve(4096))
     {
-        pc_file_close(d);
+        pf_close(d);
         return false;
     }
 
     for (;;)
     {
         uint8_t chunk[512];
-        int32_t c = pc_file_read(d, chunk, sizeof(chunk));
+        int32_t c = pf_read(d, chunk, sizeof(chunk));
         if (c < 0)
         {
-            pc_file_close(d);
+            pf_close(d);
             return false;
         }
         if (c == 0)
@@ -348,7 +348,7 @@ bool hex_load_file(const char* path)
         }
         if (!hex_reserve(hex_buf_len + uint32_t(c)))
         {
-            pc_file_close(d);
+            pf_close(d);
             return false;
         }
         for (int i = 0; i < c; ++i)
@@ -357,7 +357,7 @@ bool hex_load_file(const char* path)
         }
     }
 
-    pc_file_close(d);
+    pf_close(d);
     pc_copy(hex_file_path, path, sizeof(hex_file_path));
 
     char tmp[128];
@@ -404,7 +404,7 @@ bool hex_save_file()
     {
         return false;
     }
-    if (pc_file_write(hex_file_path, hex_buf, hex_buf_len) < 0)
+    if (pf_write_file(hex_file_path, hex_buf, hex_buf_len) < 0)
     {
         return false;
     }

@@ -1,3 +1,4 @@
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 #include "../terminal/window.h"
 #include "progress.h"
@@ -135,12 +136,9 @@ static bool write_install_config(void) {
         "installer=console-ring3\n"
         "filesystem=fat32\n";
 
-    (void)pc_syscall(SYS_DIR_CREATE, (uint64_t)(uintptr_t)directory, 0, 0);
-    (void)pc_syscall(SYS_FILE_CREATE, (uint64_t)(uintptr_t)path, 0, 0);
-    int64_t result = pc_syscall(SYS_FILE_WRITE,
-        (uint64_t)(uintptr_t)path,
-        (uint64_t)(uintptr_t)config,
-        sizeof(config) - 1);
+    (void)pf_create_dir(directory);
+    (void)pf_create_file(path);
+    int64_t result = pf_write_file(path, config, sizeof(config) - 1);
     if (result < 0) {
         pc_write("[96%] Cannot write /purec/install.cfg\n");
         return false;

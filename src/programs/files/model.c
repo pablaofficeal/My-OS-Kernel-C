@@ -1,8 +1,9 @@
 #include "model.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
-static bool is_directory(const struct fs_directory_entry *entry){
-    return (entry->attributes&FS_ATTRIBUTE_DIRECTORY)!=0;
+static bool is_directory(const struct pf_entry *entry){
+    return pf_is_dir(entry);
 }
 
 static void sort_entries(struct files_model *model){
@@ -14,7 +15,7 @@ static void sort_entries(struct files_model *model){
                || (right_directory==left_directory
                    && pc_strcmp(model->entries[right].name,
                                 model->entries[left].name)<0)){
-                struct fs_directory_entry temporary=model->entries[left];
+                struct pf_entry temporary=model->entries[left];
                 model->entries[left]=model->entries[right];
                 model->entries[right]=temporary;
             }
@@ -33,7 +34,7 @@ bool files_model_refresh(struct files_model *model){
     if(!model) return false;
     model->disk_count=pc_list_disks(model->disks,FILES_DISK_CAPACITY);
     if(model->disk_count<0) model->disk_count=0;
-    model->entry_count=pc_directory_list(model->path,model->entries,
+    model->entry_count=pf_list(model->path,model->entries,
                                          FILES_ENTRY_CAPACITY);
     model->error=model->entry_count<0 ? model->entry_count : 0;
     if(model->entry_count<0) model->entry_count=0;
@@ -65,7 +66,7 @@ bool files_model_create(struct files_model *model, const char *name,
     char path[FILES_PATH_CAPACITY];
     if(!model || !files_path_join(path,sizeof(path),model->path,name))
         return false;
-    int32_t result=directory ? pc_directory_create(path) : pc_file_create(path);
+    int32_t result=directory ? pf_create_dir(path) : pf_create_file(path);
     model->error=result;
     if(result<0) return false;
     return files_model_refresh(model);
@@ -76,7 +77,7 @@ bool files_model_delete(struct files_model *model, uint32_t index){
     if(!model || index>=(uint32_t)model->entry_count
        || !files_path_join(path,sizeof(path),model->path,
                            model->entries[index].name)) return false;
-    int32_t result=pc_file_delete(path);
+    int32_t result=pf_delete(path);
     model->error=result;
     if(result<0) return false;
     return files_model_refresh(model);
@@ -88,7 +89,7 @@ bool files_model_rename(struct files_model *model, uint32_t index,
     if(!model || index>=(uint32_t)model->entry_count || !new_name[0]
        || !files_path_join(path,sizeof(path),model->path,
                            model->entries[index].name)) return false;
-    int32_t result=pc_file_rename(path,new_name);
+    int32_t result=pf_rename(path,new_name);
     model->error=result;
     if(result<0) return false;
     return files_model_refresh(model);

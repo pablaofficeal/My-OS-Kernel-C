@@ -17,6 +17,7 @@ all: iso
 libraries:
 	$(MAKE) -C src/libc
 	$(MAKE) -C src/libgui
+	$(MAKE) -C src/libfs
 
 programs: libraries
 	$(MAKE) -C src/programs
@@ -64,8 +65,10 @@ iso: kernel programs
 	cp "$(LIB_DIR)/libpurec.a" "$(ISO_ROOT)/lib/libpurec.a"; \
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
+	cp "$(LIB_DIR)/libpurefs.a" "$(ISO_ROOT)/lib/libpurefs.a"; \
 	cp "$(ROOT_DIR)/src/libgui/include/puregui.h" "$(ISO_ROOT)/include/puregui.h"; \
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
+	cp "$(ROOT_DIR)/src/libfs/include/purefs.h" "$(ISO_ROOT)/include/purefs.h"; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/limine.conf"; \
 	cp "$$limine_share/limine-bios.sys" "$(ISO_ROOT)/boot/limine/limine-bios.sys"; \

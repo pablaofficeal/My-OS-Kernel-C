@@ -3,7 +3,7 @@
 
 extern "C" {
 #include "../../../../libc/include/purec.h"
-#include "../../../../fs/types/fs_types.h"
+#include "../../../../libfs/include/purefs.h"
 }
 
 char hex_dir_path[128] = "/";
@@ -15,8 +15,8 @@ uint32_t hex_tree_visible_rows = 0;
 
 bool hex_is_dir_path(const char* p)
 {
-    fs_directory_entry tmp[1];
-    int32_t r = pc_directory_list(p, tmp, 1);
+    struct pf_entry tmp[1];
+    int32_t r = pf_list(p, tmp, 1);
     return r >= 0;
 }
 
@@ -119,8 +119,8 @@ void hex_refresh_dir()
     hex_entry_count = 0;
     hex_sel_entry = -1;
 
-    fs_directory_entry raw[64];
-    int32_t r = pc_directory_list(hex_dir_path, raw, 64);
+    struct pf_entry raw[64];
+    int32_t r = pf_list(hex_dir_path, raw, 64);
 
     if (r < 0)
     {
@@ -133,7 +133,7 @@ void hex_refresh_dir()
     for (int i = 0; i < hex_entry_count; ++i)
     {
         pc_copy(hex_entries[i].name, raw[i].name, sizeof(hex_entries[i].name));
-        hex_entries[i].is_dir = (raw[i].attributes & FS_ATTRIBUTE_DIRECTORY) != 0;
+        hex_entries[i].is_dir = pf_is_dir(&raw[i]) != 0;
         hex_entries[i].size = raw[i].size;
     }
 

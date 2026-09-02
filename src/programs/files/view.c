@@ -1,5 +1,6 @@
 #include "view.h"
 #include "../../libgui/include/pguiw.h"
+#include "../../libfs/include/purefs.h"
 #include "../../libc/include/purec.h"
 
 #define SIDEBAR_WIDTH 150
@@ -200,7 +201,7 @@ static void draw_entries(struct files_app *app, const struct pg_event *event,
                          : (row&1 ? 0x202131 : 0x1E1E2E);
         pg_window_rect(&app->window,bounds,color);
         bool directory=(app->model.entries[index].attributes
-                        &FS_ATTRIBUTE_DIRECTORY)!=0;
+                         & PF_ATTR_DIRECTORY)!=0;
         if(directory) draw_folder_icon(&app->window,left+10,y+3);
         else draw_file_icon(&app->window,left+10,y+3);
         pg_window_text(&app->window,left+42,y+11,
