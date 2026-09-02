@@ -5,6 +5,7 @@
 #include "include/ext2_file.h"
 #include "../../lib/string.h"
 #include "../../kernel/diagnostics/klog.h"
+#include "../../mm/pmm.h"
 
 static struct ext2_handle g_handles[EXT2_MAX_OPEN];
 
@@ -66,71 +67,74 @@ int32_t ext2_file_read(int32_t descriptor, void *buffer, uint32_t count) {
 
 static int32_t ext2_write_data(uint32_t ino, const uint8_t *data, uint32_t size) {
     uint8_t ib[256];
+    uint8_t old_ib[256];
     if (!ext2_inode_read(ino, ib)) return -1;
+    memcpy(old_ib, ib, 256);
     uint32_t bcnt = (size + 1023) / 1024;
     memset(ib + 40, 0, 60);
     uint8_t single[1024] = {0};
     uint8_t dind_buf[1024] = {0};
     uint8_t tind_buf[1024] = {0};
     uint32_t single_blk = 0, dind_blk = 0, tind_blk = 0;
-    uint32_t single_used = 0, dind_used = 0, tind_used = 0;
+    uint32_t single_used = 0, dind_used = 0;
     uint8_t cur_ind[1024] = {0};
     uint32_t cur_ind_blk = 0;
+    bool fail = false;
     for (uint32_t i = 0; i < bcnt; i++) {
         uint32_t nb = ext2_alloc_block();
-        if (!nb) { klogf(KLOG_ERROR,"ext2: alloc block failed i=%u bcnt=%u size=%u",i,bcnt,size); return -4; }
+        if (!nb) { klogf(KLOG_ERROR,"ext2: alloc block failed i=%u bcnt=%u size=%u",i,bcnt,size); fail = true; break; }
         uint8_t tmp[1024] = {0};
         uint32_t off = i * 1024;
         uint32_t left = size - off;
         uint32_t cur = left > 1024 ? 1024 : left;
         memcpy(tmp, data + off, cur);
-        if (!ext2_write_block(nb, tmp)) return -1;
+        if (!ext2_write_block(nb, tmp)) { ext2_free_block(nb); fail = true; break; }
         if (i < 12) {
             ext2_write_u32(ib + 40 + i * 4, nb);
         } else if (i < 12 + 256) {
-            if (!single_blk) { single_blk = ext2_alloc_block(); if (!single_blk) return -4; }
+            if (!single_blk) { single_blk = ext2_alloc_block(); if (!single_blk) { ext2_free_block(nb); fail = true; break; } }
             ext2_write_u32(single + (i - 12) * 4, nb);
             single_used = i - 12 + 1;
         } else if (i < 12 + 256 + 256 * 256) {
-            if (!dind_blk) { dind_blk = ext2_alloc_block(); if (!dind_blk) return -4; }
+            if (!dind_blk) { dind_blk = ext2_alloc_block(); if (!dind_blk) { ext2_free_block(nb); fail = true; break; } }
             uint32_t idx = i - (12 + 256);
             uint32_t which = idx / 256;
             uint32_t inner = idx % 256;
             if (which != dind_used) {
                 if (cur_ind_blk) {
-                    if (!ext2_write_block(cur_ind_blk, cur_ind)) return -1;
+                    if (!ext2_write_block(cur_ind_blk, cur_ind)) { fail = true; break; }
                     ext2_write_u32(dind_buf + (which - 1) * 4, cur_ind_blk);
                 }
                 cur_ind_blk = ext2_alloc_block();
-                if (!cur_ind_blk) return -4;
+                if (!cur_ind_blk) { ext2_free_block(nb); fail = true; break; }
                 memset(cur_ind, 0, 1024);
                 dind_used = which + 1;
             } else if (!cur_ind_blk) {
                 cur_ind_blk = ext2_alloc_block();
-                if (!cur_ind_blk) return -4;
+                if (!cur_ind_blk) { ext2_free_block(nb); fail = true; break; }
                 memset(cur_ind, 0, 1024);
                 dind_used = 1;
             }
             ext2_write_u32(cur_ind + inner * 4, nb);
             if (inner == 255 || i + 1 == bcnt) {
-                if (!ext2_write_block(cur_ind_blk, cur_ind)) return -1;
+                if (!ext2_write_block(cur_ind_blk, cur_ind)) { fail = true; break; }
                 ext2_write_u32(dind_buf + which * 4, cur_ind_blk);
                 cur_ind_blk = 0;
             }
         } else {
-            if (!tind_blk) { tind_blk = ext2_alloc_block(); if (!tind_blk) return -4; memset(tind_buf,0,1024); }
+            if (!tind_blk) { tind_blk = ext2_alloc_block(); if (!tind_blk) { ext2_free_block(nb); fail = true; break; } memset(tind_buf,0,1024); }
             uint32_t idx = i - (12 + 256 + 65536);
             uint32_t d = idx / (256 * 256);
             uint32_t r = idx % (256 * 256);
             uint32_t w = r / 256;
             uint32_t inner = r % 256;
-            if (d >= 256) return -4;
+            if (d >= 256) { ext2_free_block(nb); fail = true; break; }
             uint32_t dblk = ext2_read_u32(tind_buf + d * 4);
             if (!dblk) {
                 dblk = ext2_alloc_block();
-                if (!dblk) return -4;
+                if (!dblk) { ext2_free_block(nb); fail = true; break; }
                 uint8_t zero[1024]={0};
-                if (!ext2_write_block(dblk, zero)) return -1;
+                if (!ext2_write_block(dblk, zero)) { ext2_free_block(dblk); ext2_free_block(nb); fail = true; break; }
                 ext2_write_u32(tind_buf + d * 4, dblk);
             }
             uint8_t dbuf2[1024];
@@ -138,38 +142,69 @@ static int32_t ext2_write_data(uint32_t ino, const uint8_t *data, uint32_t size)
             uint32_t iblk = ext2_read_u32(dbuf2 + w * 4);
             if (!iblk) {
                 iblk = ext2_alloc_block();
-                if (!iblk) return -4;
+                if (!iblk) { ext2_free_block(nb); fail = true; break; }
                 uint8_t zero2[1024]={0};
-                if (!ext2_write_block(iblk, zero2)) return -1;
+                if (!ext2_write_block(iblk, zero2)) { ext2_free_block(iblk); ext2_free_block(nb); fail = true; break; }
                 ext2_write_u32(dbuf2 + w * 4, iblk);
-                if (!ext2_write_block(dblk, dbuf2)) return -1;
+                if (!ext2_write_block(dblk, dbuf2)) { fail = true; break; }
             }
             uint8_t sbuf[1024];
             if (!ext2_read_block(iblk, sbuf)) memset(sbuf,0,1024);
             ext2_write_u32(sbuf + inner * 4, nb);
-            if (!ext2_write_block(iblk, sbuf)) return -1;
+            if (!ext2_write_block(iblk, sbuf)) { fail = true; break; }
         }
     }
+    if (fail) {
+        // free any partially allocated new blocks to avoid leak
+        // Use current ib (partially built) to free what we allocated
+        if (single_blk) ext2_write_u32(ib + 40 + 12 * 4, single_blk);
+        if (dind_blk) {
+            if (cur_ind_blk) {
+                // cur_ind not yet flushed - free it
+                ext2_free_block(cur_ind_blk);
+                // dind_buf still holds previous entries, but not yet written? we wrote dind_buf partly
+                // To be safe, free dind already allocated and its children via inode free
+            }
+            if (dind_used > 0) {
+                // ensure dind_buf written? if not, can't free via inode walk - free manually
+                // Instead let inode free walk handle: temporarily set dind pointer
+                ext2_write_u32(ib + 40 + 13 * 4, dind_blk);
+            } else {
+                ext2_free_block(dind_blk);
+            }
+        }
+        if (tind_blk) ext2_write_u32(ib + 40 + 14 * 4, tind_blk);
+        // if we set pointers, free via helper which understands structure
+        // For single, need to ensure pointer set before free walk
+        // We'll do a best-effort cleanup using the helper
+        ext2_inode_free_blocks(ib);
+        return -4;
+    }
     if (single_blk) {
-        if (!ext2_write_block(single_blk, single)) return -1;
+        if (!ext2_write_block(single_blk, single)) { ext2_inode_free_blocks(ib); return -1; }
         ext2_write_u32(ib + 40 + 12 * 4, single_blk);
     }
     if (dind_blk) {
         if (cur_ind_blk) {
-            if (!ext2_write_block(cur_ind_blk, cur_ind)) return -1;
+            if (!ext2_write_block(cur_ind_blk, cur_ind)) { ext2_inode_free_blocks(ib); return -1; }
             ext2_write_u32(dind_buf + (dind_used - 1) * 4, cur_ind_blk);
         }
-        if (!ext2_write_block(dind_blk, dind_buf)) return -1;
+        if (!ext2_write_block(dind_blk, dind_buf)) { ext2_inode_free_blocks(ib); return -1; }
         ext2_write_u32(ib + 40 + 13 * 4, dind_blk);
     }
     if (tind_blk) {
-        if (!ext2_write_block(tind_blk, tind_buf)) return -1;
+        if (!ext2_write_block(tind_blk, tind_buf)) { ext2_inode_free_blocks(ib); return -1; }
         ext2_write_u32(ib + 40 + 14 * 4, tind_blk);
     }
     ext2_write_u32(ib + 4, size);
     ext2_write_u32(ib + 28, bcnt * 2);
     ext2_write_u16(ib + 24, 1);
-    ext2_write_u16(ib, 0x81A4);
+    // preserve mode type but ensure regular file
+    uint16_t old_mode = ext2_read_u16(old_ib);
+    if ((old_mode & 0xF000) == 0x4000) ext2_write_u16(ib, 0x41ED);
+    else ext2_write_u16(ib, 0x81A4);
+    // free old blocks after successful new allocation
+    ext2_inode_free_blocks(old_ib);
     return ext2_write_inode(ino, ib) ? (int32_t)size : -1;
 }
 
@@ -259,19 +294,31 @@ int32_t ext2_file_append(const char *path, const void *buffer, uint32_t count) {
     uint32_t ino;
     int32_t st = ext2_dir_resolve(path, &ino);
     if (st < 0) return ext2_file_write(path, buffer, count);
+    if (count == 0) return 0;
     uint8_t ib[256];
     if (!ext2_inode_read(ino, ib)) return -1;
     uint32_t old = ext2_read_u32(ib + 4);
-    uint8_t *old_data = 0;
-    if (old) {
-        old_data = (uint8_t*)ext2_scratch_sector() + 2048;
-        if (ext2_inode_read_data(ib, 0, old_data, old) < 0) return -1;
-    }
+    if (old == 0) return ext2_write_data(ino, (const uint8_t*)buffer, count);
     uint32_t nsize = old + count;
-    uint8_t *combined = (uint8_t*)ext2_scratch_sector() + 4096;
-    if (old) memcpy(combined, old_data, old);
+    // guard against overflow
+    if (nsize < old) return -3;
+    // allocate temporary buffer using pmm to avoid scratch overflow
+    uint64_t pages = (nsize + 4095) / 4096;
+    if (pages == 0) pages = 1;
+    // limit to 64 MiB to avoid huge allocation starvation
+    if (nsize > 64 * 1024 * 1024) return -4;
+    uint64_t phys = pmm_allocate_contiguous(pages);
+    if (!phys) return -4;
+    uint8_t *combined = (uint8_t*)pmm_physical_to_virtual(phys);
+    int32_t r = ext2_inode_read_data(ib, 0, combined, old);
+    if (r < 0 || (uint32_t)r != old) {
+        pmm_free_contiguous(phys, pages);
+        return -1;
+    }
     memcpy(combined + old, buffer, count);
-    return ext2_write_data(ino, combined, nsize);
+    int32_t res = ext2_write_data(ino, combined, nsize);
+    pmm_free_contiguous(phys, pages);
+    return res;
 }
 
 int32_t ext2_file_create_dir(const char *path) {

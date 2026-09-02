@@ -61,6 +61,7 @@ C_SOURCES := \
 	fs/ext2/file.c \
 	fs/ext2/format.c \
 	fs/ext2/ext2.c \
+	fs/ext2/debug.c \
 	fs/vfs.c \
 	userspace/display.c \
 	userspace/fs.c \

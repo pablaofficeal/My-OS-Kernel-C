@@ -802,6 +802,41 @@ int64_t syscall_handler(struct syscall_regs *r){
             filesystem_syscall_unlock();
             return res;
         }
+        case SYS_EXT2_STAT: {
+            const char *path=(const char*)(uintptr_t)a1;
+            struct ext2_stat_info *out=(struct ext2_stat_info*)(uintptr_t)a2;
+            if(!readable_string(path) || !writable(out,sizeof(*out))) return -1;
+            filesystem_syscall_lock();
+            int32_t r=vfs_ext2_stat(path,out);
+            filesystem_syscall_unlock();
+            return r;
+        }
+        case SYS_EXT2_INODE: {
+            uint32_t ino=(uint32_t)a1;
+            struct ext2_stat_info *out=(struct ext2_stat_info*)(uintptr_t)a2;
+            if(!writable(out,sizeof(*out))) return -1;
+            filesystem_syscall_lock();
+            int32_t r=vfs_ext2_inode(ino,out);
+            filesystem_syscall_unlock();
+            return r;
+        }
+        case SYS_EXT2_SUPER: {
+            struct ext2_super_info *out=(struct ext2_super_info*)(uintptr_t)a1;
+            if(!writable(out,sizeof(*out))) return -1;
+            filesystem_syscall_lock();
+            int32_t r=vfs_ext2_super(out);
+            filesystem_syscall_unlock();
+            return r;
+        }
+        case SYS_EXT2_BLOCKS: {
+            const char *path=(const char*)(uintptr_t)a1;
+            struct ext2_blocks_info *out=(struct ext2_blocks_info*)(uintptr_t)a2;
+            if(!readable_string(path) || !writable(out,sizeof(*out))) return -1;
+            filesystem_syscall_lock();
+            int32_t r=vfs_ext2_blocks(path,out);
+            filesystem_syscall_unlock();
+            return r;
+        }
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");
             return -1;

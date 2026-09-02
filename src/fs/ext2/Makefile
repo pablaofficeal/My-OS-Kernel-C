@@ -6,7 +6,7 @@ MODULE_DIR := $(BIN_DIR)/modules
 TARGET_ELF := $(MODULE_DIR)/ext2.elf
 TARGET_KO := $(MODULE_DIR)/ext2.ko
 
-SOURCES := block.c super.c inode.c dir.c file.c format.c ext2.c
+SOURCES := block.c super.c inode.c dir.c file.c format.c ext2.c debug.c
 OBJECTS := $(SOURCES:%.c=$(OBJ_DIR)/%.o)
 DEPS := $(OBJECTS:.o=.d)
 

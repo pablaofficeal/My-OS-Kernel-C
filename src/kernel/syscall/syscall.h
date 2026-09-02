@@ -363,6 +363,53 @@ struct fat32_custom_format_request {
 };
 
 #define SYS_GET_FS_TYPE 270
+#define SYS_EXT2_STAT 271
+#define SYS_EXT2_INODE 272
+#define SYS_EXT2_SUPER 273
+#define SYS_EXT2_BLOCKS 274
+
+struct ext2_stat_info {
+    uint32_t ino;
+    uint16_t mode;
+    uint16_t links;
+    uint32_t size;
+    uint32_t blocks; // in 512-byte sectors
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t atime;
+    uint32_t ctime;
+    uint32_t mtime;
+    uint32_t dtime;
+    uint32_t flags;
+    uint32_t blocks_ptr[15];
+    uint32_t generation;
+    uint32_t file_acl;
+    uint32_t dir_acl;
+};
+
+struct ext2_super_info {
+    uint32_t total_inodes;
+    uint32_t total_blocks;
+    uint32_t free_blocks;
+    uint32_t free_inodes;
+    uint32_t block_size;
+    uint32_t blocks_per_group;
+    uint32_t inodes_per_group;
+    uint32_t groups_count;
+    uint32_t first_data_block;
+    uint32_t inodes_per_block;
+    uint16_t inode_size;
+    uint16_t magic;
+    uint32_t partition_lba;
+    uint32_t state;
+    uint32_t errors;
+};
+
+struct ext2_blocks_info {
+    uint32_t ino;
+    uint32_t logical_count;
+    uint32_t blocks[64];
+};
 
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;

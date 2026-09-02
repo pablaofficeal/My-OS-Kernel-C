@@ -1,9 +1,11 @@
 #include "vfs.h"
 #include "./fat/include/fat32.h"
 #include "./ext2/include/ext2.h"
+#include "./ext2/include/ext2_debug.h"
 #include "../lib/string.h"
 #include "../kernel/diagnostics/klog.h"
 #include "../drivers/storage/block_device.h"
+#include "../kernel/syscall/syscall.h"
 
 #define VFS_MAX_OPEN_FILES 32
 
@@ -408,4 +410,25 @@ int32_t vfs_save_klog_to_device(const char *device, const char *path) {
     }
     if (total_written == 0) return FS_ERROR_IO;
     return (int32_t)total_written;
+}
+
+int32_t vfs_ext2_stat(const char *path, struct ext2_stat_info *out) {
+    if (vfs_active_fs != VFS_FS_EXT2) return FS_ERROR_UNSUPPORTED;
+    return ext2_stat_path(path, out);
+}
+int32_t vfs_ext2_inode(uint32_t ino, struct ext2_stat_info *out) {
+    if (vfs_active_fs != VFS_FS_EXT2) return FS_ERROR_UNSUPPORTED;
+    return ext2_stat_ino(ino, out);
+}
+int32_t vfs_ext2_super(struct ext2_super_info *out) {
+    if (vfs_active_fs != VFS_FS_EXT2) return FS_ERROR_UNSUPPORTED;
+    return ext2_super_info(out);
+}
+int32_t vfs_ext2_blocks(const char *path, struct ext2_blocks_info *out) {
+    if (vfs_active_fs != VFS_FS_EXT2) return FS_ERROR_UNSUPPORTED;
+    return ext2_file_blocks(path, out);
+}
+int32_t vfs_ext2_inode_blocks(uint32_t ino, struct ext2_blocks_info *out) {
+    if (vfs_active_fs != VFS_FS_EXT2) return FS_ERROR_UNSUPPORTED;
+    return ext2_inode_blocks(ino, out);
 }

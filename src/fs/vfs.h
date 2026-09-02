@@ -5,6 +5,7 @@
 #include "types/fs_types.h"
 #include "./fat/include/fat32.h"
 #include "./ext2/include/ext2.h"
+#include "../kernel/syscall/syscall.h"
 
 #define VFS_FD_STDIN 0
 #define VFS_FD_STDOUT 1
@@ -38,3 +39,8 @@ int32_t vfs_format_device_ex(const char *device_name, const char *serial_confirm
 int32_t vfs_format_uefi_device(const char *device_name, const char *serial_confirmation);
 int32_t vfs_format_uefi_device_progress(const char *device_name, const char *serial_confirmation, fat32_progress_callback callback);
 int32_t vfs_save_klog_to_device(const char *device, const char *path);
+int32_t vfs_ext2_stat(const char *path, struct ext2_stat_info *out);
+int32_t vfs_ext2_inode(uint32_t ino, struct ext2_stat_info *out);
+int32_t vfs_ext2_super(struct ext2_super_info *out);
+int32_t vfs_ext2_blocks(const char *path, struct ext2_blocks_info *out);
+int32_t vfs_ext2_inode_blocks(uint32_t ino, struct ext2_blocks_info *out);

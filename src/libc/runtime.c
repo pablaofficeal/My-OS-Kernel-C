@@ -422,6 +422,22 @@ int32_t pc_get_fs_type(char *buffer, uint32_t capacity){
     if(!buffer || !capacity) return -1;
     return (int32_t)pc_syscall(SYS_GET_FS_TYPE, (uint64_t)(uintptr_t)buffer, capacity, 0);
 }
+int32_t pc_ext2_stat(const char *path, struct ext2_stat_info *out){
+    if(!path || !out) return -1;
+    return (int32_t)pc_syscall(SYS_EXT2_STAT,(uint64_t)(uintptr_t)path,(uint64_t)(uintptr_t)out,0);
+}
+int32_t pc_ext2_inode(uint32_t ino, struct ext2_stat_info *out){
+    if(!out) return -1;
+    return (int32_t)pc_syscall(SYS_EXT2_INODE,(uint64_t)ino,(uint64_t)(uintptr_t)out,0);
+}
+int32_t pc_ext2_super(struct ext2_super_info *out){
+    if(!out) return -1;
+    return (int32_t)pc_syscall(SYS_EXT2_SUPER,(uint64_t)(uintptr_t)out,0,0);
+}
+int32_t pc_ext2_blocks(const char *path, struct ext2_blocks_info *out){
+    if(!path || !out) return -1;
+    return (int32_t)pc_syscall(SYS_EXT2_BLOCKS,(uint64_t)(uintptr_t)path,(uint64_t)(uintptr_t)out,0);
+}
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");
