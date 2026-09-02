@@ -12,7 +12,7 @@
 #include "../drivers/audio/audio_hda.h"
 #include "../drivers/usb/xhci.h"
 #include "../drivers/usb/ehci.h"
-#include "../arch/x86_64/gdt.h"
+#include "../arch/x86_64/gdt/include/gdt.h"
 #include "../arch/x86_64/idt.h"
 #include "../arch/x86_64/mmio.h"
 #include "../kernel/core/kernel.h"

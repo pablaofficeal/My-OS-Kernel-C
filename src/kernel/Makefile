@@ -17,7 +17,7 @@ C_SOURCES := \
 	kernel/process/elf.c \
 	mm/pmm.c \
 	mm/vmm.c \
-	arch/x86_64/gdt.c \
+	arch/x86_64/gdt/c/gdt.c \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
 	kernel/syscall/syscall.c \
@@ -72,7 +72,7 @@ C_SOURCES := \
 	drivers/audio/audio.c
 CPP_SOURCES := userspace/apps/audio_panel.cpp
 ASM_SOURCES := \
-	arch/x86_64/gdt.asm \
+	arch/x86_64/gdt/asm/gdt.asm \
 	arch/x86_64/idt.asm \
 	arch/x86_64/scheduler.asm \
 	arch/x86_64/user.asm
