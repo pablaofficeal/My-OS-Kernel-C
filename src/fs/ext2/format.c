@@ -78,14 +78,20 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
     }
     uint8_t gd[1024];
     memset(gd, 0, 1024);
-    ext2_write_u32(gd + 0, 3);
-    ext2_write_u32(gd + 4, 4);
-    ext2_write_u32(gd + 8, 5);
-    ext2_write_u16(gd + 12, 8180);
-    ext2_write_u16(gd + 14, 1013);
-    ext2_write_u16(gd + 16, 2);
+    for (uint32_t g = 0; g < groups && g < 32; g++) {
+        uint32_t bmb, imb, itb;
+        uint16_t free_blocks, free_inodes;
+        if (g == 0) { bmb = 3; imb = 4; itb = 5; free_blocks = 8192 - 135; free_inodes = 1024 - 11; }
+        else { bmb = g * 8192; imb = bmb + 1; itb = bmb + 2; free_blocks = 8192; free_inodes = 1024; }
+        ext2_write_u32(gd + g * 32, bmb);
+        ext2_write_u32(gd + g * 32 + 4, imb);
+        ext2_write_u32(gd + g * 32 + 8, itb);
+        ext2_write_u16(gd + g * 32 + 12, free_blocks);
+        ext2_write_u16(gd + g * 32 + 14, free_inodes);
+        if (g == 0) ext2_write_u16(gd + g * 32 + 16, 2);
+    }
     memset(blk, 0, 1024);
-    memcpy(blk, gd, 32);
+    memcpy(blk, gd, 1024);
     uint32_t gd_lba = part_lba + 4;
     memcpy(sec, blk, 512);
     if (!block_device_write(gd_lba, sec)) {
@@ -183,16 +189,6 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
             memcpy(sec, blk + 512, 512);
             if (!block_device_write(itb + b * 2 + 1, sec)) return -1;
         }
-        uint8_t gd2[32] = {0};
-        ext2_write_u32(gd2, bmb / 2);
-        ext2_write_u32(gd2 + 4, imb / 2);
-        ext2_write_u32(gd2 + 8, itb / 2);
-        ext2_write_u16(gd2 + 12, 8192);
-        ext2_write_u16(gd2 + 14, 1024);
-        uint8_t gdblk[1024];
-        if (!ext2_read_block(2, gdblk)) {}
-        memcpy(gdblk + g * 32, gd2, 32);
-        ext2_write_block(2, gdblk);
     }
     if (!block_device_flush()) {
         return -1;
