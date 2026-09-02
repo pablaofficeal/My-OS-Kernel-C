@@ -18,6 +18,7 @@ libraries:
 	$(MAKE) -C src/libc
 	$(MAKE) -C src/libgui
 	$(MAKE) -C src/libfs
+	$(MAKE) -C src/libaudio
 
 programs: libraries
 	$(MAKE) -C src/programs
@@ -67,9 +68,11 @@ iso: kernel programs
 	cp "$(LIB_DIR)/libpuregui.a" "$(ISO_ROOT)/lib/libpuregui.a"; \
 	cp "$(LIB_DIR)/libpguiw.a" "$(ISO_ROOT)/lib/libpguiw.a"; \
 	cp "$(LIB_DIR)/libpurefs.a" "$(ISO_ROOT)/lib/libpurefs.a"; \
+	cp "$(LIB_DIR)/libpureaudio.a" "$(ISO_ROOT)/lib/libpureaudio.a"; \
 	cp "$(ROOT_DIR)/src/libgui/include/puregui.h" "$(ISO_ROOT)/include/puregui.h"; \
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
 	cp "$(ROOT_DIR)/src/libfs/include/purefs.h" "$(ISO_ROOT)/include/purefs.h"; \
+	cp "$(ROOT_DIR)/src/libaudio/include/pureaudio.h" "$(ISO_ROOT)/include/pureaudio.h"; \
 	if [ -f "$(BIN_DIR)/modules/ext2.elf" ]; then cp "$(BIN_DIR)/modules/ext2.elf" "$(ISO_ROOT)/bin/modules/ext2.elf"; fi; \
 	if [ -f "$(BIN_DIR)/modules/ext2.ko" ]; then cp "$(BIN_DIR)/modules/ext2.ko" "$(ISO_ROOT)/bin/modules/ext2.ko"; fi; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \
