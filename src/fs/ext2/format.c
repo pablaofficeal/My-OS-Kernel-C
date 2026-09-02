@@ -8,12 +8,8 @@
 int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors);
 
 int32_t ext2_format_device_impl(const char *device_name, const char *serial_confirmation, const char *erase_confirmation) {
-    struct ext2_volume *vol = ext2_volume();
     if (!device_name || !serial_confirmation || !erase_confirmation) {
         return -3;
-    }
-    if (vol->mounted && strcmp(block_device_name(), device_name) == 0) {
-        return -9;
     }
     int32_t idx = block_device_find(device_name);
     if (idx < 0) {

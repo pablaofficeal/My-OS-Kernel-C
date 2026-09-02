@@ -1578,16 +1578,6 @@ int32_t fat32_format_device(const char *device_name,
         klogf(KLOG_ERROR,"fat32_format: INVALID args dev='%s'",device_name?device_name:"(null)");
         return FS_ERROR_INVALID;
     }
-    // Разрешаем форматировать другой диск даже когда примонтирован текущий том.
-    // BUSY только если цель совпадает с примонтированным.
-    if(volume.mounted){
-        const char *mounted=block_device_name();
-        if(mounted && strcmp(mounted,device_name)==0){
-            klogf(KLOG_WARN,"fat32_format: BUSY mounted='%s' target='%s'",mounted,device_name);
-            return FS_ERROR_BUSY;
-        }
-        klogf(KLOG_INFO,"fat32_format: volume mounted on '%s', formatting other dev '%s' (unmount not needed)",mounted?mounted:"?",device_name);
-    }
 
     int32_t device_index=block_device_find(device_name);
     if(device_index<0){

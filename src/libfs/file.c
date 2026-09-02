@@ -17,11 +17,11 @@ const char *pf_strerror(int32_t error){
         case PF_ERROR_NOT_FILE: return "not a file";
         case PF_ERROR_NOT_DIR: return "not a directory";
         case PF_ERROR_UNSUPPORTED: return "unsupported";
-        case PF_ERROR_BUSY: return "busy - system disk in use";
+        case PF_ERROR_BUSY: return "busy";
         case PF_ERROR_READ_ONLY: return "read only";
         case PF_ERROR_CONFIRMATION: return "confirmation failed";
-        case PF_ERROR_NOT_BLANK: return "disk not blank";
-        case PF_ERROR_TOO_SMALL: return "disk too small";
+        case PF_ERROR_NOT_BLANK: return "not blank - already has data";
+        case PF_ERROR_TOO_SMALL: return "too small";
         default: return "unknown error";
     }
 }

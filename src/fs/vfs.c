@@ -281,10 +281,6 @@ int32_t vfs_format_device_force(const char *device_name, const char *serial_conf
 
 int32_t vfs_format_device_ex(const char *device_name, const char *serial_confirmation, const char *erase_confirmation, uint8_t fs_type) {
     if (!device_name || !device_name[0]) return FS_ERROR_INVALID;
-    if (vfs_is_root_mounted()) {
-        const char *root = vfs_root_device_name();
-        if (root && root[0] && strcmp(root, device_name) == 0) return FS_ERROR_BUSY;
-    }
     if (fs_type == VFS_FS_EXT2) return ext2_format_device(device_name, serial_confirmation, erase_confirmation);
     return fat32_format_device(device_name, serial_confirmation, erase_confirmation);
 }
