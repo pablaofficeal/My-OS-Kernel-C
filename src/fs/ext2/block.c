@@ -194,7 +194,7 @@ uint32_t ext2_alloc_inode(void) {
         if (!imb) continue;
         uint8_t bmp[4096];
         if (!ext2_read_block(imb, bmp)) continue;
-        uint32_t start = (g == 0) ? 12 : 0;
+        uint32_t start = (g == 0) ? 11 : 0;
         for (uint32_t i = start; i < g_vol.inodes_per_group; i++) {
             uint32_t byte = i / 8;
             uint32_t bit = i % 8;
