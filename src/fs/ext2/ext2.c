@@ -25,11 +25,14 @@ bool ext2_mount_specific(const char *device) {
     if (!block_device_select((uint32_t)idx)) {
         return false;
     }
-    if (ext2_super_mount_at(0)) {
-        return true;
-    }
     uint8_t *sec = ext2_scratch_sector();
-    if (block_device_read(1, sec) && memcmp(sec, "EFI PART", 8) == 0) {
+    bool has_gpt = block_device_read(1, sec) && memcmp(sec, "EFI PART", 8) == 0;
+    if (!has_gpt) {
+        if (ext2_super_mount_at(0)) {
+            return true;
+        }
+    }
+    if (has_gpt) {
         uint64_t entries_lba = 0;
         for (int b = 0; b < 8; b++) {
             entries_lba |= (uint64_t)sec[72 + b] << (b * 8);
@@ -39,6 +42,7 @@ bool ext2_mount_specific(const char *device) {
         if (entry_count && entry_size == 128 && entries_lba <= UINT32_MAX) {
             uint32_t per = BLOCK_SECTOR_SIZE / 128;
             uint8_t type_basic[16] = {0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7};
+            uint8_t type_linux[16] = {0xAF, 0x3C, 0x4C, 0x24, 0x00, 0x00, 0x42, 0x4D, 0xA0, 0x76, 0x4D, 0x89, 0x41, 0xFF, 0x86, 0xFE};
             for (uint32_t i = 0; i < entry_count; i++) {
                 if (i % per == 0) {
                     if (!block_device_read((uint32_t)entries_lba + i / per, sec)) {
@@ -46,7 +50,9 @@ bool ext2_mount_specific(const char *device) {
                     }
                 }
                 uint32_t off = (i % per) * 128;
-                if (memcmp(sec + off, type_basic, 16) != 0) {
+                bool typed = memcmp(sec + off, type_basic, 16) == 0
+                    || memcmp(sec + off, type_linux, 16) == 0;
+                if (!typed) {
                     continue;
                 }
                 uint64_t first = 0;
@@ -62,7 +68,7 @@ bool ext2_mount_specific(const char *device) {
             }
         }
     }
-    if (block_device_read(0, sec)) {
+    if (!has_gpt && block_device_read(0, sec)) {
         for (int i = 0; i < 4; i++) {
             uint16_t o = 446 + i * 16;
             uint8_t type = sec[o + 4];
@@ -73,9 +79,6 @@ bool ext2_mount_specific(const char *device) {
                 }
             }
         }
-    }
-    if (ext2_super_mount_at(2048)) {
-        return true;
     }
     return false;
 }
@@ -94,9 +97,6 @@ bool ext2_init(void) {
             continue;
         }
         if (ext2_mount_specific(block_device_name())) {
-            return true;
-        }
-        if (ext2_super_mount_at(0)) {
             return true;
         }
     }
