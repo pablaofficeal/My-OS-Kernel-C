@@ -2548,24 +2548,26 @@ int32_t fat32_format_uefi_device_progress_ex(
         // minimal ext2 payload via direct ext2 calls
         {
             int32_t st;
-            st = ext2_create_directory("/bin"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin %d",st); return st;}
-            st = ext2_create_directory("/bin/program"); if(st<0 && st!=-5) return st;
-            st = ext2_create_directory("/game"); if(st<0 && st!=-5) return st;
-            st = ext2_create_directory("/lib"); if(st<0 && st!=-5) return st;
-            st = ext2_create_directory("/include"); if(st<0 && st!=-5) return st;
+            st = ext2_create_directory("/bin"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin %d",st); if(callback) callback(88,"Failed mkdir /bin"); return st;}
+            if(callback) callback(88,"Creating /bin/program");
+            st = ext2_create_directory("/bin/program"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin/program %d",st); if(callback) callback(88,"Failed mkdir /bin/program"); return st;}
+            st = ext2_create_directory("/game"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /game %d",st); return st;}
+            st = ext2_create_directory("/lib"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /lib %d",st); return st;}
+            st = ext2_create_directory("/include"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /include %d",st); return st;}
             // helper to write file
-            #define EXT2_WRITE(path, data, sz) do{ int32_t _r=ext2_write_file(path,data,sz); if(_r<0){klogf(KLOG_ERROR,"ext2 write %s %d",path,_r); return _r;} }while(0)
+            #define EXT2_WRITE(path, data, sz) do{ int32_t _r=ext2_write_file(path,data,sz); if(_r<0){klogf(KLOG_ERROR,"ext2 write %s %d sz=%u",path,_r,(uint32_t)sz); if(callback) callback(88,path); return _r;} }while(0)
             const void *p; uint64_t sz;
-            if(!boot_get_module("/bin/init",&p,&sz)) return FS_ERROR_NOT_FOUND;
+            if(callback) callback(88,"Writing /bin/init");
+            if(!boot_get_module("/bin/init",&p,&sz)) {klogf(KLOG_ERROR,"ext2 missing /bin/init"); return FS_ERROR_NOT_FOUND;}
             EXT2_WRITE("/bin/init",p,(uint32_t)sz);
-            if(boot_get_module("/bin/installer",&p,&sz)) EXT2_WRITE("/bin/installer",p,(uint32_t)sz);
-            if(boot_get_module("/bin/snake",&p,&sz)) { EXT2_WRITE("/bin/snake",p,(uint32_t)sz); EXT2_WRITE("/game/snake",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/program/terminal",&p,&sz)) EXT2_WRITE("/bin/program/terminal",p,(uint32_t)sz);
-            if(boot_get_module("/bin/program/nano",&p,&sz)) EXT2_WRITE("/bin/program/nano",p,(uint32_t)sz);
-            if(boot_get_module("/bin/program/system",&p,&sz)) EXT2_WRITE("/bin/program/system",p,(uint32_t)sz);
-            if(boot_get_module("/bin/program/files",&p,&sz)) EXT2_WRITE("/bin/program/files",p,(uint32_t)sz);
-            if(boot_get_module("/lib/libpurec.a",&p,&sz)) EXT2_WRITE("/lib/libpurec.a",p,(uint32_t)sz);
-            if(boot_get_module("/bin/gui-demo",&p,&sz)) EXT2_WRITE("/bin/gui-demo",p,(uint32_t)sz);
+            if(boot_get_module("/bin/installer",&p,&sz)) { if(callback) callback(88,"Writing /bin/installer"); EXT2_WRITE("/bin/installer",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/snake",&p,&sz)) { if(callback) callback(88,"Writing /bin/snake"); EXT2_WRITE("/bin/snake",p,(uint32_t)sz); if(callback) callback(88,"Writing /game/snake"); EXT2_WRITE("/game/snake",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/terminal",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/terminal"); EXT2_WRITE("/bin/program/terminal",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/nano",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/nano"); EXT2_WRITE("/bin/program/nano",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/system",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/system"); EXT2_WRITE("/bin/program/system",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/files",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/files"); EXT2_WRITE("/bin/program/files",p,(uint32_t)sz); }
+            if(boot_get_module("/lib/libpurec.a",&p,&sz)) { if(callback) callback(88,"Writing /lib/libpurec.a"); EXT2_WRITE("/lib/libpurec.a",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/gui-demo",&p,&sz)) { if(callback) callback(88,"Writing /bin/gui-demo"); EXT2_WRITE("/bin/gui-demo",p,(uint32_t)sz); }
             #undef EXT2_WRITE
             if(!block_device_flush()) return FS_ERROR_IO;
             klogf(KLOG_OK,"fat32_uefi: ext2 system payload installed");

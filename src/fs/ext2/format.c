@@ -117,7 +117,7 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
         return -1;
     }
     memset(blk, 0, 1024);
-    for (uint32_t b = 0; b < 134; b++) {
+    for (uint32_t b = 0; b < 135; b++) {
         blk[b / 8] |= (uint8_t)(1 << (b % 8));
     }
     uint32_t bm_lba = part_lba + 6;
@@ -164,12 +164,12 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
     }
     memset(blk, 0, 1024);
     blk[0] = 2;
-    blk[4] = 12;
+    ext2_write_u16(blk + 4, 12);
     blk[6] = 1;
     blk[7] = 2;
     blk[8] = '.';
     blk[12] = 2;
-    blk[16] = 12;
+    ext2_write_u16(blk + 16, 1012);
     blk[18] = 2;
     blk[19] = 2;
     blk[20] = '.';
