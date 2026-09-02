@@ -2370,8 +2370,9 @@ static int32_t install_uefi_payload(void){
                         &fallback_kernel_image_size)){
         if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
                             &fallback_kernel_image_size)){
-            klog(KLOG_ERROR,"install: missing fallback");
-            return FS_ERROR_NOT_FOUND;
+            klog(KLOG_WARN,"install: fallback kernel missing, using primary kernel.elf");
+            fallback_kernel_image = kernel_image;
+            fallback_kernel_image_size = (uint64_t)kernel_image_size;
         }
     }
     if(fallback_kernel_image_size>UINT32_MAX){
@@ -2573,6 +2574,7 @@ int32_t fat32_format_uefi_device_progress_ex(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
+    install_target_is_ext2 = use_ext2;
     if(use_ext2){
         if(callback) callback(70,"Formatting PureC system partition as ext2");
         if(ext2_format_at(data_start, data_sectors)!=0){
