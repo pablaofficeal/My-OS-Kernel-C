@@ -1,12 +1,12 @@
-#include "fat32.h"
+#include "./include/fat32.h"
 #include "vfs.h"
 
-#include "../drivers/storage/block_device.h"
-#include "../kernel/diagnostics/klog.h"
-#include "../kernel/process/scheduler.h"
-#include "../lib/string.h"
+#include "../../drivers/storage/block_device.h"
+#include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
+#include "../../lib/string.h"
 #include <stddef.h>
-#include "../boot/install_source.h"
+#include "../../boot/install_source.h"
 
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08

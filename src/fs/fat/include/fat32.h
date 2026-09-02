@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "fs_types.h"
+#include "../../../types/fs_types.h"
 
 typedef void (*fat32_progress_callback)(uint32_t progress,
                                         const char *stage);
