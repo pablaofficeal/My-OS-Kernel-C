@@ -1939,8 +1939,7 @@ static int32_t install_gui_development_payload(void){
     status=fat32_write_file("/lib/libpguiw.a",widget_library,
                             (uint32_t)widget_library_size);
     if(status<0) return status;
-    status=fat32_write_file("/lib/libpurefs.a",fs_library,
-                            (uint32_t)fs_library_size);
+    status=write_lfn_file("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library,(uint32_t)fs_library_size);
     if(status<0) return status;
     status=fat32_write_file("/include/puregui.h",core_header,
                             (uint32_t)core_header_size);
@@ -2258,8 +2257,7 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
     }
     if(status<0) return status;
-    status=fat32_write_file("/lib/libpurefs.a",fs_library_image,
-                            (uint32_t)fs_library_size);
+    status=write_lfn_file("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library_image,(uint32_t)fs_library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurefs %d",status);
     }
