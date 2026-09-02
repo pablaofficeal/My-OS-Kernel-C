@@ -19,6 +19,9 @@ const char *pf_strerror(int32_t error){
         case PF_ERROR_UNSUPPORTED: return "unsupported";
         case PF_ERROR_BUSY: return "busy";
         case PF_ERROR_READ_ONLY: return "read only";
+        case PF_ERROR_CONFIRMATION: return "confirmation failed";
+        case PF_ERROR_NOT_BLANK: return "not blank - already has data";
+        case PF_ERROR_TOO_SMALL: return "too small";
         default: return "unknown error";
     }
 }
@@ -75,4 +78,18 @@ int32_t pf_read_all(const char *path, void *buffer, uint32_t capacity){
     int32_t n = pc_file_read(fd, buffer, capacity);
     (void)pc_file_close(fd);
     return n;
+}
+
+int32_t pf_format_device(const char *device, const char *serial, uint8_t fs_type){
+    if(!device || !serial) return PF_ERROR_INVALID;
+    return (int32_t)pc_syscall(SYS_FORMAT_DEVICE_EX, (uint64_t)(uintptr_t)device, (uint64_t)(uintptr_t)serial, (uint64_t)fs_type);
+}
+
+const char *pf_fs_type_name(uint8_t fs_type){
+    if(fs_type == PF_FS_EXT2) return "ext2";
+    return "fat32";
+}
+
+bool pf_fs_supported(uint8_t fs_type){
+    return fs_type == PF_FS_FAT32 || fs_type == PF_FS_EXT2;
 }

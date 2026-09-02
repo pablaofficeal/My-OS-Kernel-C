@@ -1,4 +1,11 @@
 #include "./include/fat32.h"
+#include "../ext2/include/ext2_format.h"
+#include "../ext2/include/ext2_types.h"
+#include "../ext2/include/ext2_block.h"
+#include "../ext2/include/ext2_super.h"
+#include "../ext2/include/ext2_file.h"
+#include "../ext2/include/ext2_dir.h"
+#include "../ext2/include/ext2_inode.h"
 #include "../vfs.h"
 
 #include "../../drivers/storage/block_device.h"
@@ -787,6 +794,8 @@ static int32_t create_lfn_file_entry(uint32_t parent, const char *long_name,
     return create_lfn_file_entry_multi(parent,long_name,short_name);
 }
 
+static int32_t fat32_write_file_direct(const char *path, const void *buffer, uint32_t count);
+
 static int32_t write_lfn_file(const char *directory_path, const char *long_name,
                               const char *alias_path, const char *alias_name,
                               const void *buffer, uint32_t count){
@@ -797,7 +806,7 @@ static int32_t write_lfn_file(const char *directory_path, const char *long_name,
     if(!make_short_name(alias_name,short_name)) return FS_ERROR_INVALID;
     status=create_lfn_file_entry(parent,long_name,short_name);
     if(status<0 && status!=FS_ERROR_EXISTS) return status;
-    return fat32_write_file(alias_path,buffer,count);
+    return fat32_write_file_direct(alias_path,buffer,count);
 }
 
 static int32_t clear_cluster_chain(uint32_t first_cluster){
@@ -1228,7 +1237,7 @@ static int32_t write_file_chain(uint32_t first_cluster, const uint8_t *data,
     return 0;
 }
 
-int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
+static int32_t fat32_write_file_direct(const char *path, const void *buffer, uint32_t count){
     if(!path || !path[0] || (!buffer && count) || count>0x7FFFFFFF){
         return FS_ERROR_INVALID;
     }
@@ -1282,6 +1291,10 @@ int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
 
     (void)clear_cluster_chain(entry.first_cluster);
     return (int32_t)count;
+}
+
+int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
+    return fat32_write_file_direct(path, buffer, count);
 }
 
 int32_t fat32_append_file(const char *path, const void *buffer, uint32_t count){
@@ -1572,16 +1585,6 @@ int32_t fat32_format_device(const char *device_name,
         klogf(KLOG_ERROR,"fat32_format: INVALID args dev='%s'",device_name?device_name:"(null)");
         return FS_ERROR_INVALID;
     }
-    // Разрешаем форматировать другой диск даже когда примонтирован текущий том.
-    // BUSY только если цель совпадает с примонтированным.
-    if(volume.mounted){
-        const char *mounted=block_device_name();
-        if(mounted && strcmp(mounted,device_name)==0){
-            klogf(KLOG_WARN,"fat32_format: BUSY mounted='%s' target='%s'",mounted,device_name);
-            return FS_ERROR_BUSY;
-        }
-        klogf(KLOG_INFO,"fat32_format: volume mounted on '%s', formatting other dev '%s' (unmount not needed)",mounted?mounted:"?",device_name);
-    }
 
     int32_t device_index=block_device_find(device_name);
     if(device_index<0){
@@ -1839,6 +1842,47 @@ static int32_t create_directory_checked(const char *path){
     return status==FS_ERROR_EXISTS?0:status;
 }
 
+static bool install_target_is_ext2;
+
+static int32_t verify_installed_file(const char *path, uint32_t expected_size);
+
+static int32_t payload_mkdir(const char *path){
+    if(install_target_is_ext2){
+        int32_t status=ext2_create_directory(path);
+        return status==-5?0:status;
+    }
+    return create_directory_checked(path);
+}
+
+static int32_t payload_write_file(const char *path, const void *data, uint32_t size){
+    if(install_target_is_ext2) return ext2_write_file(path,data,size);
+    return fat32_write_file_direct(path,data,size);
+}
+
+static int32_t payload_write_alias(const char *directory, const char *long_name,
+                                   const char *alias_path, const char *alias_name,
+                                   const void *data, uint32_t size){
+    if(install_target_is_ext2){
+        (void)directory;
+        (void)alias_path;
+        (void)alias_name;
+        return ext2_write_file(long_name,data,size);
+    }
+    return write_lfn_file(directory,long_name,alias_path,alias_name,data,size);
+}
+
+static int32_t payload_verify_file(const char *path, uint32_t expected_size){
+    if(install_target_is_ext2){
+        uint32_t ino;
+        if(ext2_dir_resolve(path,&ino)<0) return FS_ERROR_IO;
+        uint8_t inode[256];
+        if(!ext2_inode_read(ino,inode)) return FS_ERROR_IO;
+        uint32_t size=ext2_read_u32(inode+4);
+        return size==expected_size?0:FS_ERROR_IO;
+    }
+    return verify_installed_file(path,expected_size);
+}
+
 static const char uefi_limine_config[]=
     "timeout: 10\n"
     "verbose: yes\n"
@@ -1936,18 +1980,18 @@ static int32_t install_gui_development_payload(void){
         core_library,(uint32_t)core_library_size
     );
     if(status<0) return status;
-    status=fat32_write_file("/lib/libpguiw.a",widget_library,
+    status=payload_write_file("/lib/libpguiw.a",widget_library,
                             (uint32_t)widget_library_size);
     if(status<0) return status;
     status=write_lfn_file("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library,(uint32_t)fs_library_size);
     if(status<0) return status;
-    status=fat32_write_file("/include/puregui.h",core_header,
+    status=payload_write_file("/include/puregui.h",core_header,
                             (uint32_t)core_header_size);
     if(status<0) return status;
-    status=fat32_write_file("/include/pguiw.h",widget_header,
+    status=payload_write_file("/include/pguiw.h",widget_header,
                             (uint32_t)widget_header_size);
     if(status<0) return status;
-    status=fat32_write_file("/include/purefs.h",fs_header,
+    status=payload_write_file("/include/purefs.h",fs_header,
                             (uint32_t)fs_header_size);
     if(status<0) return status;
     status=verify_installed_file("/lib/libpuregui.a",
@@ -2021,7 +2065,7 @@ static int32_t install_firmware_payload(void){
         if(st<0){
             klogf(KLOG_WARN, "install: write firmware %s -> %s failed %d, try fallback short", fw_table[i].long_name, fw_table[i].alias_path, st);
             // fallback: пробуем записать напрямую по короткому пути (без LFN)
-            st=fat32_write_file(fw_table[i].alias_path, data, sz);
+            st=payload_write_file(fw_table[i].alias_path, data, sz);
             if(st<0){
                 klogf(KLOG_ERROR, "install: firmware %s fallback also failed %d", fw_table[i].long_name, st);
                 // не фатально - продолжаем с остальными
@@ -2057,11 +2101,11 @@ static int32_t install_firmware_payload(void){
 }
 
 static int32_t install_program_payload(void){
-    if(create_directory_checked("/bin")<0
-       || create_directory_checked("/bin/program")<0
-       || create_directory_checked("/game")<0
-       || create_directory_checked("/lib")<0
-       || create_directory_checked("/include")<0) return FS_ERROR_IO;
+    if(payload_mkdir("/bin")<0
+       || payload_mkdir("/bin/program")<0
+       || payload_mkdir("/game")<0
+       || payload_mkdir("/lib")<0
+       || payload_mkdir("/include")<0) return FS_ERROR_IO;
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
@@ -2149,109 +2193,109 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
-    int32_t status=fat32_write_file("/bin/init",init_image,(uint32_t)init_size);
+    int32_t status=payload_write_file("/bin/init",init_image,(uint32_t)init_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write /bin/init %d",status);
         return status;
     }
-    status=write_lfn_file("/bin","installer","/bin/instal~1","instal~1",
+    status=payload_write_alias("/bin","installer","/bin/instal~1","instal~1",
                           installer_image,(uint32_t)installer_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write installer %d",status);
         return status;
     }
-    status=fat32_write_file("/bin/snake",snake_image,(uint32_t)snake_size);
+    status=payload_write_file("/bin/snake",snake_image,(uint32_t)snake_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write snake %d",status);
         return status;
     }
-    status=fat32_write_file("/game/snake",snake_image,(uint32_t)snake_size);
+    status=payload_write_file("/game/snake",snake_image,(uint32_t)snake_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write game/snake %d",status);
         return status;
     }
-    status=fat32_write_file("/bin/program/terminal",terminal_image,
+    status=payload_write_file("/bin/program/terminal",terminal_image,
                             (uint32_t)terminal_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write terminal %d",status);
         return status;
     }
-    status=fat32_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
+    status=payload_write_file("/bin/program/nano",nano_image,(uint32_t)nano_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write nano %d",status);
         return status;
     }
-    status=fat32_write_file("/bin/program/system",system_image,
+    status=payload_write_file("/bin/program/system",system_image,
                             (uint32_t)system_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write system %d",status);
         return status;
     }
-    status=fat32_write_file("/bin/program/files",files_image,
+    status=payload_write_file("/bin/program/files",files_image,
                             (uint32_t)files_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write files %d",status);
         return status;
     }
     if(settings_image && settings_size){
-        status=fat32_write_file("/bin/program/settings",settings_image,(uint32_t)settings_size);
+        status=payload_write_file("/bin/program/settings",settings_image,(uint32_t)settings_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write settings %d",status);
             return status;
         }
     }
     if(monitor_image && monitor_size){
-        status=fat32_write_file("/bin/program/monitor",monitor_image,(uint32_t)monitor_size);
+        status=payload_write_file("/bin/program/monitor",monitor_image,(uint32_t)monitor_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write monitor %d",status);
             return status;
         }
     }
     if(disks_image && disks_size){
-        status=fat32_write_file("/bin/program/disks",disks_image,(uint32_t)disks_size);
+        status=payload_write_file("/bin/program/disks",disks_image,(uint32_t)disks_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write disks %d",status);
             return status;
         }
     }
     if(logview_image && logview_size){
-        status=fat32_write_file("/bin/program/logview",logview_image,(uint32_t)logview_size);
+        status=payload_write_file("/bin/program/logview",logview_image,(uint32_t)logview_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write logview %d",status);
             return status;
         }
     }
     if(hexedit_image && hexedit_size){
-        status=fat32_write_file("/bin/program/hexedit",hexedit_image,(uint32_t)hexedit_size);
+        status=payload_write_file("/bin/program/hexedit",hexedit_image,(uint32_t)hexedit_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write hexedit %d",status);
             return status;
         }
     }
     if(tetris_image && tetris_size){
-        status=fat32_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
+        status=payload_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write tetris %d",status);
             return status;
         }
-        status=fat32_write_file("/bin/program/tetris",tetris_image,(uint32_t)tetris_size);
+        status=payload_write_file("/bin/program/tetris",tetris_image,(uint32_t)tetris_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write program/tetris %d",status);
             return status;
         }
-        status=fat32_write_file("/game/tetris",tetris_image,(uint32_t)tetris_size);
+        status=payload_write_file("/game/tetris",tetris_image,(uint32_t)tetris_size);
         if(status<0){
             klogf(KLOG_ERROR,"install: write game/tetris %d",status);
             return status;
         }
     }
-    status=fat32_write_file("/bin/gui-demo",gui_demo_image,
+    status=payload_write_file("/bin/gui-demo",gui_demo_image,
                             (uint32_t)gui_demo_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write gui-demo %d",status);
         return status;
     }
-    status=fat32_write_file("/lib/libpurec.a",library_image,
+    status=payload_write_file("/lib/libpurec.a",library_image,
                             (uint32_t)library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
@@ -2385,18 +2429,18 @@ static int32_t install_uefi_payload(void){
         return FS_ERROR_NOT_FOUND;
     }
 
-    int32_t status=fat32_write_file("/EFI/BOOT/BOOTX64.EFI",
+    int32_t status=payload_write_file("/EFI/BOOT/BOOTX64.EFI",
                                     efi_loader,efi_loader_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write BOOTX64 %d",status);
         return status;
     }
-    status=fat32_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
+    status=payload_write_file("/boot/kernel.elf",kernel_image,kernel_image_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write kernel %d",status);
         return status;
     }
-    status=fat32_write_file("/boot/kernel2.elf",fallback_kernel_image,
+    status=payload_write_file("/boot/kernel2.elf",fallback_kernel_image,
                             (uint32_t)fallback_kernel_image_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write fallback %d",status);
@@ -2460,9 +2504,10 @@ static int32_t install_uefi_payload(void){
 }
 
 // UEFI install: GPT, a 512 MiB ESP, and a separate system partition.
-int32_t fat32_format_uefi_device_progress(
+int32_t fat32_format_uefi_device_progress_ex(
     const char *device_name, const char *serial_confirmation,
-    fat32_progress_callback callback){
+    fat32_progress_callback callback, uint8_t fs_type){
+    bool use_ext2 = (fs_type == 1);
     if(callback) callback(2,"Validating target disk");
     if(!device_name || !serial_confirmation) return FS_ERROR_INVALID;
     int32_t idx=block_device_find(device_name);
@@ -2528,32 +2573,91 @@ int32_t fat32_format_uefi_device_progress(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
-    if(!write_format_metadata_at(
-            data_start,&data_layout,required_volume_label,
-            callback,70,85,"Formatting PureC system partition"
-        )){
-        klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
-        return FS_ERROR_IO;
-    }
-    memset(&volume,0,sizeof(volume));
-    memset(handles,0,sizeof(handles));
-    if(!mount_boot_sector(data_start)){
-        klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
-        return FS_ERROR_IO;
-    }
-    if(callback) callback(88,"Copying programs to /bin and /game");
-    status=install_program_payload();
-    if(status<0){
-        klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
-        return status;
-    }
-    if(!block_device_flush()){
-        klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
-        return FS_ERROR_IO;
+    if(use_ext2){
+        if(callback) callback(70,"Formatting PureC system partition as ext2");
+        if(ext2_format_at(data_start, data_sectors)!=0){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 system partition format failed");
+            return FS_ERROR_IO;
+        }
+        if(!block_device_flush()){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 format flush failed");
+            return FS_ERROR_IO;
+        }
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        extern struct ext2_volume *ext2_volume(void);
+        struct ext2_volume *ev = ext2_volume();
+        ev->mounted=false;
+        if(!ext2_super_mount_at(data_start)){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 system partition mount failed");
+            return FS_ERROR_IO;
+        }
+        if(callback) callback(88,"Copying programs to /bin and /game (ext2)");
+        // minimal ext2 payload via direct ext2 calls
+        {
+            int32_t st;
+            st = ext2_create_directory("/bin"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin %d",st); if(callback) callback(88,"Failed mkdir /bin"); return st;}
+            if(callback) callback(88,"Creating /bin/program");
+            st = ext2_create_directory("/bin/program"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin/program %d",st); if(callback) callback(88,"Failed mkdir /bin/program"); return st;}
+            st = ext2_create_directory("/game"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /game %d",st); return st;}
+            st = ext2_create_directory("/lib"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /lib %d",st); return st;}
+            st = ext2_create_directory("/include"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /include %d",st); return st;}
+            // helper to write file
+            #define EXT2_WRITE(path, data, sz) do{ int32_t _r=ext2_write_file(path,data,sz); if(_r<0){klogf(KLOG_ERROR,"ext2 write %s %d sz=%u",path,_r,(uint32_t)sz); if(callback) callback(88,path); return _r;} }while(0)
+            const void *p; uint64_t sz;
+            if(callback) callback(88,"Writing /bin/init");
+            if(!boot_get_module("/bin/init",&p,&sz)) {klogf(KLOG_ERROR,"ext2 missing /bin/init"); return FS_ERROR_NOT_FOUND;}
+            EXT2_WRITE("/bin/init",p,(uint32_t)sz);
+            if(boot_get_module("/bin/installer",&p,&sz)) { if(callback) callback(88,"Writing /bin/installer"); EXT2_WRITE("/bin/installer",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/snake",&p,&sz)) { if(callback) callback(88,"Writing /bin/snake"); EXT2_WRITE("/bin/snake",p,(uint32_t)sz); if(callback) callback(88,"Writing /game/snake"); EXT2_WRITE("/game/snake",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/terminal",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/terminal"); EXT2_WRITE("/bin/program/terminal",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/nano",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/nano"); EXT2_WRITE("/bin/program/nano",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/system",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/system"); EXT2_WRITE("/bin/program/system",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/files",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/files"); EXT2_WRITE("/bin/program/files",p,(uint32_t)sz); }
+            if(boot_get_module("/lib/libpurec.a",&p,&sz)) { if(callback) callback(88,"Writing /lib/libpurec.a"); EXT2_WRITE("/lib/libpurec.a",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/gui-demo",&p,&sz)) { if(callback) callback(88,"Writing /bin/gui-demo"); EXT2_WRITE("/bin/gui-demo",p,(uint32_t)sz); }
+            #undef EXT2_WRITE
+            if(!block_device_flush()) return FS_ERROR_IO;
+            klogf(KLOG_OK,"fat32_uefi: ext2 system payload installed");
+        }
+        // keep ext2 mounted as system, clear fat32 volume so VFS will detect ext2
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        // leave ext2 mounted
+    } else {
+        if(!write_format_metadata_at(
+                data_start,&data_layout,required_volume_label,
+                callback,70,85,"Formatting PureC system partition"
+            )){
+            klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
+            return FS_ERROR_IO;
+        }
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        if(!mount_boot_sector(data_start)){
+            klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
+            return FS_ERROR_IO;
+        }
+        if(callback) callback(88,"Copying programs to /bin and /game");
+        status=install_program_payload();
+        if(status<0){
+            klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
+            return status;
+        }
+        if(!block_device_flush()){
+            klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
+            return FS_ERROR_IO;
+        }
     }
     if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");
     return 0;
+}
+
+int32_t fat32_format_uefi_device_progress(
+    const char *device_name, const char *serial_confirmation,
+    fat32_progress_callback callback){
+    return fat32_format_uefi_device_progress_ex(device_name, serial_confirmation, callback, 0);
 }
 
 int32_t fat32_format_uefi_device(const char *device_name,

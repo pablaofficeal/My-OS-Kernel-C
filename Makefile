@@ -27,6 +27,7 @@ hexedit: libraries
 
 kernel:
 	$(MAKE) -C src/kernel
+	$(MAKE) -C src/fs/ext2
 
 iso: kernel programs
 	@set -eu; \
@@ -44,7 +45,7 @@ iso: kernel programs
 	fi; \
 	rm -rf "$(ISO_ROOT)"; \
 	mkdir -p "$(ISO_ROOT)/boot/limine" "$(ISO_ROOT)/EFI/BOOT" \
-		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include"; \
+		"$(ISO_ROOT)/bin/program" "$(ISO_ROOT)/bin/modules" "$(ISO_ROOT)/lib" "$(ISO_ROOT)/include"; \
 	cp "$(KERNEL_DIR)/kernel-limine.elf" "$(ISO_ROOT)/boot/kernel.elf"; \
 	cp "$(KERNEL_DIR)/kernel-fallback.elf" "$(ISO_ROOT)/boot/kernel-fallback.elf"; \
 	cp "$(PROGRAM_DIR)/init" "$(ISO_ROOT)/bin/init"; \
@@ -69,6 +70,8 @@ iso: kernel programs
 	cp "$(ROOT_DIR)/src/libgui/include/puregui.h" "$(ISO_ROOT)/include/puregui.h"; \
 	cp "$(ROOT_DIR)/src/libgui/include/pguiw.h" "$(ISO_ROOT)/include/pguiw.h"; \
 	cp "$(ROOT_DIR)/src/libfs/include/purefs.h" "$(ISO_ROOT)/include/purefs.h"; \
+	if [ -f "$(BIN_DIR)/modules/ext2.elf" ]; then cp "$(BIN_DIR)/modules/ext2.elf" "$(ISO_ROOT)/bin/modules/ext2.elf"; fi; \
+	if [ -f "$(BIN_DIR)/modules/ext2.ko" ]; then cp "$(BIN_DIR)/modules/ext2.ko" "$(ISO_ROOT)/bin/modules/ext2.ko"; fi; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/boot/limine/limine.conf"; \
 	cp "$(LIMINE_CONFIG)" "$(ISO_ROOT)/limine.conf"; \
 	cp "$$limine_share/limine-bios.sys" "$(ISO_ROOT)/boot/limine/limine-bios.sys"; \

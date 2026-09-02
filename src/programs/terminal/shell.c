@@ -52,6 +52,7 @@ static void build_prompt(char *prompt, uint32_t capacity){
 static void show_help(void){
     pc_write("Builtins: help clear cd pwd echo env set unset ping exit\n");
     pc_write("  ping [-c count] <ip|host|url>\n");
+    pc_write("EXT2 debug: stat <path> | inode <num> | super | blocks <path> | fsinfo | dumpi <num>\n");
     pc_write("System programs resolve through PATH=/bin/program:/bin:\n");
     pc_write("  ls [directory] | cat <file> | touch <file> | mkdir <directory>\n");
     pc_write("  nano <file> | hexedit <file> | disks | usbscan | dmesg | savelog\n");
@@ -189,6 +190,177 @@ static void set_variable(const char *assignment){
         pc_write("set: invalid variable or environment is full\n");
 }
 
+static bool resolve_arg_path(const char *arg, char out[SHELL_PATH_CAPACITY]){
+    char current[SHELL_PATH_CAPACITY];
+    if(pc_getenv("PWD",current,sizeof(current))<0) pc_copy(current,"/",sizeof(current));
+    if(!arg[0]) arg=".";
+    return shell_path_normalize(current,arg,out,sizeof(current));
+}
+
+static void print_mode(uint16_t mode){
+    pc_write("0x");
+    // hex
+    const char *hex="0123456789ABCDEF";
+    char buf[5];
+    buf[0]=hex[(mode>>12)&0xF];
+    buf[1]=hex[(mode>>8)&0xF];
+    buf[2]=hex[(mode>>4)&0xF];
+    buf[3]=hex[mode&0xF];
+    buf[4]=0;
+    pc_write(buf);
+    pc_write(" (");
+    if((mode & 0xF000)==0x4000) pc_write("dir");
+    else if((mode & 0xF000)==0x8000) pc_write("file");
+    else pc_write("other");
+    pc_write(")");
+}
+
+static bool parse_u32(const char *s, uint32_t *out){
+    if(!s||!*s) return false;
+    uint32_t v=0;
+    for(;*s;s++){
+        if(*s<'0'||*s>'9') return false;
+        uint32_t d=*s-'0';
+        if(v> (UINT32_MAX-d)/10) return false;
+        v=v*10+d;
+    }
+    *out=v;
+    return true;
+}
+
+static void dump_stat(const struct ext2_stat_info *st){
+    pc_write("inode "); pc_write_u64(st->ino); pc_write("\n");
+    pc_write(" mode: "); print_mode(st->mode); pc_write("\n");
+    pc_write(" links: "); pc_write_u64(st->links); pc_write("\n");
+    pc_write(" size: "); pc_write_u64(st->size); pc_write(" bytes\n");
+    pc_write(" blocks: "); pc_write_u64(st->blocks); pc_write(" (512b sectors) = "); pc_write_u64(st->blocks*512); pc_write(" bytes on disk\n");
+    pc_write(" uid: "); pc_write_u64(st->uid); pc_write(" gid: "); pc_write_u64(st->gid); pc_write("\n");
+    pc_write(" atime: "); pc_write_u64(st->atime); pc_write(" ctime: "); pc_write_u64(st->ctime); pc_write(" mtime: "); pc_write_u64(st->mtime); pc_write("\n");
+    pc_write(" flags: "); pc_write_u64(st->flags); pc_write(" gen: "); pc_write_u64(st->generation); pc_write("\n");
+    pc_write(" direct:");
+    for(int i=0;i<12;i++){ pc_write(" "); pc_write_u64(st->blocks_ptr[i]); }
+    pc_write("\n");
+    pc_write(" single: "); pc_write_u64(st->blocks_ptr[12]); pc_write(" double: "); pc_write_u64(st->blocks_ptr[13]); pc_write(" triple: "); pc_write_u64(st->blocks_ptr[14]); pc_write("\n");
+}
+
+static void command_stat(const char *arg){
+    char path[SHELL_PATH_CAPACITY];
+    if(!resolve_arg_path(skip_spaces(arg),path)){
+        pc_write("stat: invalid path\n"); return;
+    }
+    struct ext2_stat_info st;
+    int32_t r=pc_ext2_stat(path,&st);
+    if(r<0){
+        if(r==-8) pc_write("stat: not ext2 filesystem (use ext2 only)\n");
+        else if(r==-2) pc_write("stat: not found\n");
+        else { pc_write("stat: error "); pc_write_i64(r); pc_write("\n"); }
+        return;
+    }
+    pc_write("path: "); pc_write(path); pc_write("\n");
+    dump_stat(&st);
+}
+
+static void command_inode(const char *arg){
+    const char *s=skip_spaces(arg);
+    if(!*s){ pc_write("inode: number required\n"); return; }
+    uint32_t ino;
+    // allow single token, ignore extra spaces
+    char token[32]; uint32_t len=0;
+    while(s[len] && !space(s[len]) && len<31){ token[len]=s[len]; len++; }
+    token[len]=0;
+    if(*skip_spaces(s+len)){ pc_write("inode: too many arguments\n"); return; }
+    if(!parse_u32(token,&ino)){ pc_write("inode: invalid number\n"); return; }
+    struct ext2_stat_info st;
+    int32_t r=pc_ext2_inode(ino,&st);
+    if(r<0){ pc_write("inode: error "); pc_write_i64(r); pc_write("\n"); return; }
+    dump_stat(&st);
+}
+
+static void command_super(void){
+    struct ext2_super_info si;
+    int32_t r=pc_ext2_super(&si);
+    if(r<0){ pc_write("super: error "); pc_write_i64(r); pc_write("\n"); return; }
+    pc_write("EXT2 superblock:\n");
+    pc_write(" total inodes: "); pc_write_u64(si.total_inodes); pc_write("\n");
+    pc_write(" total blocks: "); pc_write_u64(si.total_blocks); pc_write("\n");
+    pc_write(" free inodes: "); pc_write_u64(si.free_inodes); pc_write("\n");
+    pc_write(" free blocks: "); pc_write_u64(si.free_blocks); pc_write("\n");
+    pc_write(" block size: "); pc_write_u64(si.block_size); pc_write("\n");
+    pc_write(" blocks per group: "); pc_write_u64(si.blocks_per_group); pc_write("\n");
+    pc_write(" inodes per group: "); pc_write_u64(si.inodes_per_group); pc_write("\n");
+    pc_write(" groups: "); pc_write_u64(si.groups_count); pc_write("\n");
+    pc_write(" first data block: "); pc_write_u64(si.first_data_block); pc_write("\n");
+    pc_write(" inodes per block: "); pc_write_u64(si.inodes_per_block); pc_write("\n");
+    pc_write(" inode size: "); pc_write_u64(si.inode_size); pc_write("\n");
+    pc_write(" magic: 0xEF53"); pc_write("\n");
+    pc_write(" partition lba: "); pc_write_u64(si.partition_lba); pc_write("\n");
+    pc_write(" used blocks: "); pc_write_u64(si.total_blocks - si.free_blocks); pc_write("\n");
+    pc_write(" used inodes: "); pc_write_u64(si.total_inodes - si.free_inodes); pc_write("\n");
+}
+
+static void command_blocks(const char *arg){
+    char path[SHELL_PATH_CAPACITY];
+    if(!resolve_arg_path(skip_spaces(arg),path)){
+        pc_write("blocks: invalid path\n"); return;
+    }
+    struct ext2_blocks_info bi;
+    int32_t r=pc_ext2_blocks(path,&bi);
+    if(r<0){ pc_write("blocks: error "); pc_write_i64(r); pc_write("\n"); return; }
+    pc_write("file: "); pc_write(path); pc_write(" ino "); pc_write_u64(bi.ino); pc_write("\n");
+    pc_write(" logical blocks: "); pc_write_u64(bi.logical_count); pc_write("\n");
+    for(uint32_t i=0;i<bi.logical_count;i++){
+        pc_write("  "); pc_write_u64(i); pc_write(" -> "); pc_write_u64(bi.blocks[i]); pc_write("\n");
+        if(i>=63){ pc_write("  ... truncated to 64\n"); break; }
+    }
+    if(!bi.logical_count) pc_write(" (empty file or directory)\n");
+}
+
+static void command_fsinfo(void){
+    char fstype[32];
+    char device[32];
+    if(pc_get_fs_type(fstype,sizeof(fstype))>=0){
+        pc_write("fs type: "); pc_write(fstype); pc_write("\n");
+    } else pc_write("fs type: unknown\n");
+    if(pc_get_root_device(device,sizeof(device))>=0){
+        pc_write("device: "); pc_write(device); pc_write("\n");
+    } else pc_write("device: unknown\n");
+    struct ext2_super_info si;
+    int32_t r=pc_ext2_super(&si);
+    if(r==0){
+        pc_write("--- ext2 super ---\n");
+        pc_write(" blocks: "); pc_write_u64(si.total_blocks); pc_write(" free "); pc_write_u64(si.free_blocks); pc_write("\n");
+        pc_write(" inodes: "); pc_write_u64(si.total_inodes); pc_write(" free "); pc_write_u64(si.free_inodes); pc_write("\n");
+        pc_write(" blocksize "); pc_write_u64(si.block_size); pc_write(" groups "); pc_write_u64(si.groups_count); pc_write("\n");
+    } else {
+        pc_write("ext2 super: not available (need ext2 mount)\n");
+    }
+}
+
+static void command_dumpi(const char *arg){
+    const char *s=skip_spaces(arg);
+    if(!*s){ pc_write("dumpi: inode number required\n"); return; }
+    uint32_t ino; char token[32]; uint32_t len=0;
+    while(s[len]&&!space(s[len])&&len<31){ token[len]=s[len]; len++; }
+    token[len]=0;
+    if(!parse_u32(token,&ino)){ pc_write("dumpi: invalid number\n"); return; }
+    struct ext2_stat_info st;
+    int32_t r=pc_ext2_inode(ino,&st);
+    if(r<0){ pc_write("dumpi: error "); pc_write_i64(r); pc_write("\n"); return; }
+    // hex dump raw-like
+    pc_write("Inode "); pc_write_u64(ino); pc_write(" raw dump:\n");
+    pc_write(" "); dump_stat(&st);
+    // also show hex of blocks ptr
+    pc_write(" blocks hex: ");
+    for(int i=0;i<15;i++){
+        const char *hex="0123456789ABCDEF";
+        uint32_t v=st.blocks_ptr[i];
+        char buf[9]; for(int k=7;k>=0;k--){ buf[k]=hex[v&0xF]; v>>=4; } buf[8]=0;
+        pc_write("0x"); pc_write(buf); pc_write(" ");
+        if((i+1)%4==0) pc_write("\n ");
+    }
+    pc_write("\n");
+}
+
 static int32_t start_program(struct terminal_window *terminal,
                              const char *path, const char *arguments){
     int32_t pid=pc_exec_with_args(path,arguments);
@@ -302,7 +474,13 @@ static bool execute_line(struct terminal_window *terminal, char *line){
     else if(pc_strcmp(command,"set")==0) set_variable(arguments);
     else if(pc_strcmp(command,"unset")==0){
         if(pc_unsetenv(arguments)<0) pc_write("unset: variable not found\n");
-    } else execute_program(terminal,command,arguments);
+    } else if(pc_strcmp(command,"stat")==0) command_stat(arguments);
+    else if(pc_strcmp(command,"inode")==0) command_inode(arguments);
+    else if(pc_strcmp(command,"super")==0) command_super();
+    else if(pc_strcmp(command,"blocks")==0) command_blocks(arguments);
+    else if(pc_strcmp(command,"fsinfo")==0) command_fsinfo();
+    else if(pc_strcmp(command,"dumpi")==0) command_dumpi(arguments);
+    else execute_program(terminal,command,arguments);
     return true;
 }
 

@@ -54,5 +54,13 @@ int32_t pf_append_file(const char *path, const void *buffer, uint32_t size);
 int32_t pf_list(const char *path, struct pf_entry *entries, uint32_t capacity);
 int32_t pf_create_dir(const char *path);
 
+#define PF_FS_FAT32 0
+#define PF_FS_EXT2 1
+#define PF_FS_AUTO 255
+
+int32_t pf_format_device(const char *device, const char *serial, uint8_t fs_type);
+const char *pf_fs_type_name(uint8_t fs_type);
+bool pf_fs_supported(uint8_t fs_type);
+
 // convenience: open+read+close за один вызов, возвращает кол-во байт или <0
 int32_t pf_read_all(const char *path, void *buffer, uint32_t capacity);

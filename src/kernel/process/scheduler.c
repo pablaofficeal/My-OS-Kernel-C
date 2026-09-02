@@ -25,13 +25,22 @@ static int create_thread(void (*entry)(void *arg), void *arg, const char *name,
 
 extern void scheduler_asm_switch(uint64_t *old_rsp, uint64_t *new_rsp);
 
+static bool thread_stack_return_valid(uint64_t rsp){
+    if(!rsp) return false;
+    uint64_t *slot=(uint64_t*)rsp;
+    uint64_t return_address=slot[6];
+    return return_address!=0;
+}
+
 static void thread_trampoline(void){
-    // This runs as new thread's first execution after ret
-    // Enable interrupts for thread
-    __asm__ volatile("sti":::"memory");
+    // This runs as new thread's first execution after ret.
     struct thread *self = current;
     if(self && self->entry){
         klogf(KLOG_DEBUG, "sched: thread %u (%s) started on core %u", self->id, self->name, 0);
+        /* User threads enter ring 3 via arch_enter_user(), which starts with
+           cli and does not return. Enabling interrupts here races the timer
+           against the first context switch and can corrupt saved RSP values. */
+        if(!self->user_mode) __asm__ volatile("sti":::"memory");
         self->entry(self->arg);
     }
     scheduler_exit();
@@ -213,6 +222,9 @@ void scheduler_yield(void){
     prev->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     next->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     activate_thread(next);
+    if(!thread_stack_return_valid(next->rsp)){
+        kernel_panic("scheduler context switch target has invalid stack");
+    }
     // klogf(KLOG_DEBUG, "sched: yield %u (%s) -> %u (%s)", prev->id, prev->name, next->id, next->name);
     scheduler_asm_switch(&prev->rsp, &next->rsp);
     if(flags & (1ULL<<9)) __asm__ volatile("sti":::"memory");
