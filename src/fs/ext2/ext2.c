@@ -136,27 +136,19 @@ int32_t ext2_list(const char *path, struct fs_directory_entry *entries, uint32_t
 }
 
 int32_t ext2_create_file(const char *path) {
-    (void)path;
-    return -10;
+    return ext2_file_create(path);
 }
 
 int32_t ext2_write_file(const char *path, const void *buffer, uint32_t count) {
-    (void)path;
-    (void)buffer;
-    (void)count;
-    return -10;
+    return ext2_file_write(path, buffer, count);
 }
 
 int32_t ext2_append_file(const char *path, const void *buffer, uint32_t count) {
-    (void)path;
-    (void)buffer;
-    (void)count;
-    return -10;
+    return ext2_file_append(path, buffer, count);
 }
 
 int32_t ext2_create_directory(const char *path) {
-    (void)path;
-    return -10;
+    return ext2_file_create_dir(path);
 }
 
 int32_t ext2_delete(const char *path) {

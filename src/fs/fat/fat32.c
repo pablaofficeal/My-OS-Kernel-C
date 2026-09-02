@@ -1,6 +1,10 @@
 #include "./include/fat32.h"
 #include "../ext2/include/ext2_format.h"
 #include "../ext2/include/ext2_types.h"
+#include "../ext2/include/ext2_block.h"
+#include "../ext2/include/ext2_super.h"
+#include "../ext2/include/ext2_file.h"
+#include "../ext2/include/ext2_dir.h"
 #include "../vfs.h"
 
 #include "../../drivers/storage/block_device.h"
@@ -2541,15 +2545,45 @@ int32_t fat32_format_uefi_device_progress_ex(
             klogf(KLOG_ERROR,"fat32_uefi: ext2 format flush failed");
             return FS_ERROR_IO;
         }
-        if(callback) callback(88,"Copying programs to ext2 (not yet - fallback to fat32)");
-        if(!write_format_metadata_at(
-                data_start,&data_layout,required_volume_label,
-                callback,70,85,"Formatting PureC system partition (ext2 fallback fat32)"
-            )){
-            klogf(KLOG_ERROR,"fat32_uefi: fallback system partition format failed");
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        extern struct ext2_volume *ext2_volume(void);
+        struct ext2_volume *ev = ext2_volume();
+        ev->mounted=false;
+        if(!ext2_super_mount_at(data_start)){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 system partition mount failed");
             return FS_ERROR_IO;
         }
-        klogf(KLOG_WARN,"fat32_uefi: ext2 system partition requested but payload still fat32 for boot compatibility");
+        if(callback) callback(88,"Copying programs to /bin and /game (ext2)");
+        // minimal ext2 payload via direct ext2 calls
+        {
+            int32_t st;
+            st = ext2_create_directory("/bin"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin %d",st); return st;}
+            st = ext2_create_directory("/bin/program"); if(st<0 && st!=-5) return st;
+            st = ext2_create_directory("/game"); if(st<0 && st!=-5) return st;
+            st = ext2_create_directory("/lib"); if(st<0 && st!=-5) return st;
+            st = ext2_create_directory("/include"); if(st<0 && st!=-5) return st;
+            // helper to write file
+            #define EXT2_WRITE(path, data, sz) do{ int32_t _r=ext2_write_file(path,data,sz); if(_r<0){klogf(KLOG_ERROR,"ext2 write %s %d",path,_r); return _r;} }while(0)
+            const void *p; uint64_t sz;
+            if(!boot_get_module("/bin/init",&p,&sz)) return FS_ERROR_NOT_FOUND;
+            EXT2_WRITE("/bin/init",p,(uint32_t)sz);
+            if(boot_get_module("/bin/installer",&p,&sz)) EXT2_WRITE("/bin/installer",p,(uint32_t)sz);
+            if(boot_get_module("/bin/snake",&p,&sz)) { EXT2_WRITE("/bin/snake",p,(uint32_t)sz); EXT2_WRITE("/game/snake",p,(uint32_t)sz); }
+            if(boot_get_module("/bin/program/terminal",&p,&sz)) EXT2_WRITE("/bin/program/terminal",p,(uint32_t)sz);
+            if(boot_get_module("/bin/program/nano",&p,&sz)) EXT2_WRITE("/bin/program/nano",p,(uint32_t)sz);
+            if(boot_get_module("/bin/program/system",&p,&sz)) EXT2_WRITE("/bin/program/system",p,(uint32_t)sz);
+            if(boot_get_module("/bin/program/files",&p,&sz)) EXT2_WRITE("/bin/program/files",p,(uint32_t)sz);
+            if(boot_get_module("/lib/libpurec.a",&p,&sz)) EXT2_WRITE("/lib/libpurec.a",p,(uint32_t)sz);
+            if(boot_get_module("/bin/gui-demo",&p,&sz)) EXT2_WRITE("/bin/gui-demo",p,(uint32_t)sz);
+            #undef EXT2_WRITE
+            if(!block_device_flush()) return FS_ERROR_IO;
+            klogf(KLOG_OK,"fat32_uefi: ext2 system payload installed");
+        }
+        // keep ext2 mounted as system, clear fat32 volume so VFS will detect ext2
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        // leave ext2 mounted
     } else {
         if(!write_format_metadata_at(
                 data_start,&data_layout,required_volume_label,
@@ -2558,22 +2592,22 @@ int32_t fat32_format_uefi_device_progress_ex(
             klogf(KLOG_ERROR,"fat32_uefi: system partition format failed");
             return FS_ERROR_IO;
         }
-    }
-    memset(&volume,0,sizeof(volume));
-    memset(handles,0,sizeof(handles));
-    if(!mount_boot_sector(data_start)){
-        klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
-        return FS_ERROR_IO;
-    }
-    if(callback) callback(88,"Copying programs to /bin and /game");
-    status=install_program_payload();
-    if(status<0){
-        klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
-        return status;
-    }
-    if(!block_device_flush()){
-        klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
-        return FS_ERROR_IO;
+        memset(&volume,0,sizeof(volume));
+        memset(handles,0,sizeof(handles));
+        if(!mount_boot_sector(data_start)){
+            klogf(KLOG_ERROR,"fat32_uefi: system partition mount failed");
+            return FS_ERROR_IO;
+        }
+        if(callback) callback(88,"Copying programs to /bin and /game");
+        status=install_program_payload();
+        if(status<0){
+            klogf(KLOG_ERROR,"fat32_uefi: system payload failed %d",status);
+            return status;
+        }
+        if(!block_device_flush()){
+            klogf(KLOG_ERROR,"fat32_uefi: system payload flush failed");
+            return FS_ERROR_IO;
+        }
     }
     if(callback) callback(90,"System partition mounted");
     klogf(KLOG_OK,"fat32_uefi: GPT, ESP payload and system partition ready");

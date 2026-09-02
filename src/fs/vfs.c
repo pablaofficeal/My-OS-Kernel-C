@@ -95,8 +95,8 @@ bool vfs_mount_root_with_fs(uint8_t fs_type) {
         if (ext2_init()) { vfs_active_fs = VFS_FS_EXT2; return true; }
         return false;
     }
-    if (fat32_init()) { vfs_active_fs = VFS_FS_FAT32; return true; }
     if (ext2_init()) { vfs_active_fs = VFS_FS_EXT2; return true; }
+    if (fat32_init()) { vfs_active_fs = VFS_FS_FAT32; return true; }
     return false;
 }
 
