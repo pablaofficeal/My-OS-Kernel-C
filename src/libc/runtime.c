@@ -398,6 +398,25 @@ int32_t pc_format_custom(const char *device, uint32_t partition_count, const uin
     for(uint32_t i=0;i<partition_count && i<4;i++) req.sizes_gb[i]=sizes_gb[i];
     return (int32_t)pc_syscall(SYS_FAT32_FORMAT_CUSTOM, (uint64_t)(uintptr_t)&req, 0, 0);
 }
+
+int32_t pc_format_device_ex(const char *device, const char *serial, uint8_t fs_type){
+    if(!device || !serial) return -1;
+    struct format_request req={0};
+    pc_copy(req.device, device, sizeof(req.device));
+    pc_copy(req.serial, serial, sizeof(req.serial));
+    pc_copy(req.erase, "ERASE", sizeof(req.erase));
+    req.fs_type = fs_type;
+    return (int32_t)pc_syscall(SYS_FORMAT_DEVICE_EX, (uint64_t)(uintptr_t)&req, 0, 0);
+}
+
+int32_t pc_install_start_ex(const char *device, const char *serial, uint8_t fs_type){
+    if(!device || !serial) return -1;
+    struct install_start_request req={0};
+    pc_copy(req.device, device, sizeof(req.device));
+    pc_copy(req.serial, serial, sizeof(req.serial));
+    req.fs_type = fs_type;
+    return (int32_t)pc_syscall(SYS_INSTALL_START_EX, (uint64_t)(uintptr_t)&req, 0, 0);
+}
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

@@ -86,6 +86,27 @@
 #define SYS_SAVE_KLOG 265
 #define SYS_GET_ROOT_DEVICE 266
 #define SYS_FAT32_FORMAT_CUSTOM 267
+#define SYS_FORMAT_DEVICE_EX 268
+#define SYS_INSTALL_START_EX 269
+
+#define FS_TYPE_FAT32 0
+#define FS_TYPE_EXT2 1
+#define FS_TYPE_AUTO 255
+
+struct format_request {
+    char device[32];
+    char serial[32];
+    char erase[8];
+    uint8_t fs_type;
+    uint8_t reserved[3];
+};
+
+struct install_start_request {
+    char device[32];
+    char serial[32];
+    uint8_t fs_type;
+    uint8_t reserved[3];
+};
 
 #define NETWORK_PING_TARGET_CAPACITY 128
 

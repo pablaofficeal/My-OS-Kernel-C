@@ -35,6 +35,7 @@ static struct install_status install_job;
 static struct install_log install_history;
 static char install_device[STORAGE_DEVICE_NAME_CAPACITY];
 static char install_serial[STORAGE_SERIAL_CAPACITY];
+static uint8_t install_fs_type;
 
 static bool readable(const void *buffer, uint64_t size){
     return process_user_buffer(buffer,size,false);
@@ -82,8 +83,13 @@ static void install_worker(void *argument){
     (void)argument;
     filesystem_syscall_lock();
     block_device_begin_exclusive_io();
-    int32_t result=vfs_format_uefi_device_progress(
-        install_device,install_serial,install_progress);
+    int32_t result;
+    if(install_fs_type == FS_TYPE_EXT2){
+        result = vfs_format_device_ex(install_device, install_serial, "ERASE", VFS_FS_EXT2);
+        if(result==0) install_progress(40, "ext2 formatted");
+    } else {
+        result=vfs_format_uefi_device_progress(install_device,install_serial,install_progress);
+    }
     block_device_end_exclusive_io();
     filesystem_syscall_unlock();
     install_job.result=result;
@@ -629,6 +635,7 @@ int64_t syscall_handler(struct syscall_regs *r){
                     sizeof(install_device)-1);
             strncpy(install_serial,(const char*)(uintptr_t)a2,
                     sizeof(install_serial)-1);
+            install_fs_type = FS_TYPE_FAT32;
             install_job.state=1;
             install_progress(1,"Starting installer worker");
             if(scheduler_create_thread(install_worker,0,"installer-io",
@@ -639,6 +646,25 @@ int64_t syscall_handler(struct syscall_regs *r){
                 return -1;
             }
             return 0;
+        case SYS_INSTALL_START_EX: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -10;
+            const struct install_start_request *req=(const struct install_start_request*)(uintptr_t)a1;
+            if(!readable(req,sizeof(*req))) return -11;
+            if(install_job.state==1) return -12;
+            memset(&install_job,0,sizeof(install_job));
+            memset(&install_history,0,sizeof(install_history));
+            strncpy(install_device,req->device,sizeof(install_device)-1);
+            strncpy(install_serial,req->serial,sizeof(install_serial)-1);
+            install_fs_type = req->fs_type <= FS_TYPE_EXT2 ? req->fs_type : FS_TYPE_FAT32;
+            install_job.state=1;
+            install_progress(1,"Starting installer worker");
+            if(scheduler_create_thread(install_worker,0,"installer-io",INSTALL_WORKER_PRIORITY,-1)<0){
+                install_job.state=3; install_job.result=-1;
+                install_progress(100,"Cannot start installer worker");
+                return -1;
+            }
+            return 0;
+        }
         case SYS_INSTALL_STATUS:
             if(!writable((void*)(uintptr_t)a1,sizeof(install_job))) return -1;
             *(struct install_status*)(uintptr_t)a1=install_job;
@@ -759,6 +785,17 @@ int64_t syscall_handler(struct syscall_regs *r){
             req.device[sizeof(req.device)-1]='\0';
             if(req.partition_count==0 || req.partition_count>4) return -1;
             return fat32_format_custom_device(req.device, req.partition_count, req.sizes_gb);
+        }
+        case SYS_FORMAT_DEVICE_EX: {
+            if(!process_has_capability(PROCESS_CAP_STORAGE_ADMIN)) return -1;
+            const struct format_request *req=(const struct format_request*)(uintptr_t)a1;
+            if(!readable(req,sizeof(*req))) return -1;
+            struct format_request r=*req;
+            r.device[sizeof(r.device)-1]='\0'; r.serial[sizeof(r.serial)-1]='\0'; r.erase[sizeof(r.erase)-1]='\0';
+            filesystem_syscall_lock();
+            int32_t res = vfs_format_device_ex(r.device, r.serial, r.erase, r.fs_type==FS_TYPE_EXT2 ? VFS_FS_EXT2 : VFS_FS_FAT32);
+            filesystem_syscall_unlock();
+            return res;
         }
         default:
             serial_write_string("[SYSCALL] unknown n="); print_hex(n); serial_write_string("\n");

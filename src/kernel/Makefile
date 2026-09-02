@@ -54,6 +54,13 @@ C_SOURCES := \
 	drivers/usb/xhci.c \
 	drivers/usb/ehci.c \
 	fs/fat/fat32.c \
+	fs/ext2/block.c \
+	fs/ext2/super.c \
+	fs/ext2/inode.c \
+	fs/ext2/dir.c \
+	fs/ext2/file.c \
+	fs/ext2/format.c \
+	fs/ext2/ext2.c \
 	fs/vfs.c \
 	userspace/display.c \
 	userspace/fs.c \

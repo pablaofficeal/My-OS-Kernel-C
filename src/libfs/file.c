@@ -76,3 +76,17 @@ int32_t pf_read_all(const char *path, void *buffer, uint32_t capacity){
     (void)pc_file_close(fd);
     return n;
 }
+
+int32_t pf_format_device(const char *device, const char *serial, uint8_t fs_type){
+    if(!device || !serial) return PF_ERROR_INVALID;
+    return (int32_t)pc_syscall(SYS_FORMAT_DEVICE_EX, (uint64_t)(uintptr_t)device, (uint64_t)(uintptr_t)serial, (uint64_t)fs_type);
+}
+
+const char *pf_fs_type_name(uint8_t fs_type){
+    if(fs_type == PF_FS_EXT2) return "ext2";
+    return "fat32";
+}
+
+bool pf_fs_supported(uint8_t fs_type){
+    return fs_type == PF_FS_FAT32 || fs_type == PF_FS_EXT2;
+}
