@@ -34,6 +34,8 @@ bool files_model_refresh(struct files_model *model){
     if(!model) return false;
     model->disk_count=pc_list_disks(model->disks,FILES_DISK_CAPACITY);
     if(model->disk_count<0) model->disk_count=0;
+    if(pc_get_fs_type(model->fs_type, sizeof(model->fs_type)) < 0) pc_copy(model->fs_type, "fat32", sizeof(model->fs_type));
+    if(pc_get_root_device(model->root_device, sizeof(model->root_device)) < 0) model->root_device[0]='\0';
     model->entry_count=pf_list(model->path,model->entries,
                                          FILES_ENTRY_CAPACITY);
     model->error=model->entry_count<0 ? model->entry_count : 0;

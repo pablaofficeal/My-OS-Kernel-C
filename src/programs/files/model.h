@@ -16,6 +16,8 @@ struct files_model {
     int32_t entry_count;
     int32_t disk_count;
     int32_t error;
+    char fs_type[16];
+    char root_device[32];
 };
 
 void files_model_init(struct files_model *model);

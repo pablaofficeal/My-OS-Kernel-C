@@ -780,6 +780,16 @@ int64_t syscall_handler(struct syscall_regs *r){
             memcpy(buffer,root,len+1);
             return (int64_t)len;
         }
+        case SYS_GET_FS_TYPE: {
+            char *buffer=(char*)(uintptr_t)a1;
+            uint32_t capacity=(uint32_t)a2;
+            if(!writable(buffer,capacity)) return -1;
+            const char *name=vfs_fs_type_name(vfs_root_fs_type());
+            uint32_t len=(uint32_t)strlen(name);
+            if(len+1>capacity) return -1;
+            memcpy(buffer,name,len+1);
+            return (int64_t)len;
+        }
         case SYS_FAT32_FORMAT_CUSTOM: {
             const struct fat32_custom_format_request *user_req=(const struct fat32_custom_format_request*)(uintptr_t)a1;
             if(!readable(user_req,sizeof(*user_req))) return -1;

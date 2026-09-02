@@ -417,6 +417,11 @@ int32_t pc_install_start_ex(const char *device, const char *serial, uint8_t fs_t
     req.fs_type = fs_type;
     return (int32_t)pc_syscall(SYS_INSTALL_START_EX, (uint64_t)(uintptr_t)&req, 0, 0);
 }
+
+int32_t pc_get_fs_type(char *buffer, uint32_t capacity){
+    if(!buffer || !capacity) return -1;
+    return (int32_t)pc_syscall(SYS_GET_FS_TYPE, (uint64_t)(uintptr_t)buffer, capacity, 0);
+}
 void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");

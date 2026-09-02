@@ -102,4 +102,5 @@ int32_t pc_get_root_device(char *buffer, uint32_t capacity);
 int32_t pc_format_custom(const char *device, uint32_t partition_count, const uint64_t *sizes_gb);
 int32_t pc_format_device_ex(const char *device, const char *serial, uint8_t fs_type);
 int32_t pc_install_start_ex(const char *device, const char *serial, uint8_t fs_type);
+int32_t pc_get_fs_type(char *buffer, uint32_t capacity);
 void pc_exit(int32_t status) __attribute__((noreturn));

@@ -362,6 +362,8 @@ struct fat32_custom_format_request {
     uint32_t reserved;
 };
 
+#define SYS_GET_FS_TYPE 270
+
 struct syscall_regs {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax;
     uint64_t vector, err;
