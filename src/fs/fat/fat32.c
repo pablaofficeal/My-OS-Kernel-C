@@ -794,6 +794,8 @@ static int32_t create_lfn_file_entry(uint32_t parent, const char *long_name,
     return create_lfn_file_entry_multi(parent,long_name,short_name);
 }
 
+static int32_t fat32_write_file_direct(const char *path, const void *buffer, uint32_t count);
+
 static int32_t write_lfn_file(const char *directory_path, const char *long_name,
                               const char *alias_path, const char *alias_name,
                               const void *buffer, uint32_t count){
@@ -805,6 +807,7 @@ static int32_t write_lfn_file(const char *directory_path, const char *long_name,
     status=create_lfn_file_entry(parent,long_name,short_name);
     if(status<0 && status!=FS_ERROR_EXISTS) return status;
     return payload_write_file(alias_path,buffer,count);
+    return fat32_write_file_direct(alias_path,buffer,count);
 }
 
 static int32_t clear_cluster_chain(uint32_t first_cluster){
@@ -1236,6 +1239,7 @@ static int32_t write_file_chain(uint32_t first_cluster, const uint8_t *data,
 }
 
 int32_t payload_write_file(const char *path, const void *buffer, uint32_t count){
+static int32_t fat32_write_file_direct(const char *path, const void *buffer, uint32_t count){
     if(!path || !path[0] || (!buffer && count) || count>0x7FFFFFFF){
         return FS_ERROR_INVALID;
     }
@@ -1289,6 +1293,10 @@ int32_t payload_write_file(const char *path, const void *buffer, uint32_t count)
 
     (void)clear_cluster_chain(entry.first_cluster);
     return (int32_t)count;
+}
+
+int32_t fat32_write_file(const char *path, const void *buffer, uint32_t count){
+    return fat32_write_file_direct(path, buffer, count);
 }
 
 int32_t fat32_append_file(const char *path, const void *buffer, uint32_t count){
@@ -1851,6 +1859,7 @@ static int32_t payload_mkdir(const char *path){
 static int32_t payload_write_file(const char *path, const void *data, uint32_t size){
     if(install_target_is_ext2) return ext2_write_file(path,data,size);
     return payload_write_file(path,data,size);
+    return fat32_write_file_direct(path,data,size);
 }
 
 static int32_t payload_write_alias(const char *directory, const char *long_name,
