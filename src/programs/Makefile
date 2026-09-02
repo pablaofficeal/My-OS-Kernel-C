@@ -43,9 +43,13 @@ GENERAL_SOURCES := \
 	disks/main.c \
 	logview/main.c
 GENERAL_CPP_SOURCES := \
-	hexedit/main.cpp \
-	hexedit/editor.cpp \
-	hexedit/window.cpp
+	hexedit/src/main/main.cpp \
+	hexedit/src/buffer/buffer.cpp \
+	hexedit/src/tree/tree.cpp \
+	hexedit/src/view/view.cpp \
+	hexedit/src/input/input.cpp \
+	hexedit/src/editor/editor.cpp \
+	hexedit/src/window/window.cpp
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_CPP_OBJECTS := $(GENERAL_CPP_SOURCES:%.cpp=$(OBJ_DIR)/%.o)
@@ -66,8 +70,9 @@ TARGETS := \
 	$(PROGRAM_DIR)/hexedit
 
 .NOTPARALLEL:
-.PHONY: all
+.PHONY: all hexedit
 all: $(TARGETS)
+hexedit: $(PROGRAM_DIR)/hexedit
 
 -include $(PLAIN_OBJECTS:.o=.d) $(GENERAL_OBJECTS:.o=.d) $(GENERAL_CPP_OBJECTS:.o=.d)
 
@@ -86,7 +91,7 @@ $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
 
 $(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
+	$(CXX) $(CPPFLAGS) -I$(ROOT_DIR)/src/programs/settings/include -I$(ROOT_DIR)/src/programs/hexedit/include $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
 
 $(PROGRAM_DIR)/init: $(OBJ_DIR)/init/main.o $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)

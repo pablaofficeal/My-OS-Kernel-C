@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../fs/fs_types.h"
+#include "../../fs/types/fs_types.h"
 #include "../../drivers/mouse/ps2_mouse.h"
 #include "../../drivers/input/keyboard.h"
 #include "../../drivers/storage/storage_types.h"

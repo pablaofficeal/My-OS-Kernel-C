@@ -1,4 +1,4 @@
-#include "gdt.h"
+#include "../include/gdt.h"
 #include <stdint.h>
 
 struct gdt_entry {

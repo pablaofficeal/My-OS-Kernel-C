@@ -17,7 +17,7 @@ C_SOURCES := \
 	kernel/process/elf.c \
 	mm/pmm.c \
 	mm/vmm.c \
-	arch/x86_64/gdt.c \
+	arch/x86_64/gdt/c/gdt.c \
 	arch/x86_64/idt.c \
 	arch/x86_64/mmio.c \
 	kernel/syscall/syscall.c \
@@ -53,7 +53,7 @@ C_SOURCES := \
 	drivers/storage/storage_probe.c \
 	drivers/usb/xhci.c \
 	drivers/usb/ehci.c \
-	fs/fat32.c \
+	fs/fat/fat32.c \
 	fs/vfs.c \
 	userspace/display.c \
 	userspace/fs.c \
@@ -72,7 +72,7 @@ C_SOURCES := \
 	drivers/audio/audio.c
 CPP_SOURCES := userspace/apps/audio_panel.cpp
 ASM_SOURCES := \
-	arch/x86_64/gdt.asm \
+	arch/x86_64/gdt/asm/gdt.asm \
 	arch/x86_64/idt.asm \
 	arch/x86_64/scheduler.asm \
 	arch/x86_64/user.asm

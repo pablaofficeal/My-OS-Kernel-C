@@ -2,8 +2,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "fs_types.h"
-#include "fat32.h"
+#include "types/fs_types.h"
+#include "./fat/include/fat32.h"
 
 #define VFS_FD_STDIN  0
 #define VFS_FD_STDOUT 1

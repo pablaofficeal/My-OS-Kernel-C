@@ -1,12 +1,12 @@
-#include "fat32.h"
-#include "vfs.h"
+#include "./include/fat32.h"
+#include "../vfs.h"
 
-#include "../drivers/storage/block_device.h"
-#include "../kernel/diagnostics/klog.h"
-#include "../kernel/process/scheduler.h"
-#include "../lib/string.h"
+#include "../../drivers/storage/block_device.h"
+#include "../../kernel/diagnostics/klog.h"
+#include "../../kernel/process/scheduler.h"
+#include "../../lib/string.h"
 #include <stddef.h>
-#include "../boot/install_source.h"
+#include "../../boot/install_source.h"
 
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08
@@ -1858,6 +1858,8 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/settings\n"
     "    module_path: boot():/bin/program/monitor\n"
     "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/logview\n"
+    "    module_path: boot():/bin/program/hexedit\n"
     "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
@@ -1880,6 +1882,8 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/bin/program/settings\n"
     "    module_path: boot():/bin/program/monitor\n"
     "    module_path: boot():/bin/program/disks\n"
+    "    module_path: boot():/bin/program/logview\n"
+    "    module_path: boot():/bin/program/hexedit\n"
     "    module_path: boot():/bin/program/tetris\n"
     "    module_path: boot():/bin/gui-demo\n"
     "    module_path: boot():/lib/libpurec.a\n"
@@ -2042,11 +2046,11 @@ static int32_t install_program_payload(void){
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
-    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image,*hexedit_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
-    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size,hexedit_size;
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -2103,6 +2107,11 @@ static int32_t install_program_payload(void){
         logview_image=0;
         logview_size=0;
     }
+    if(!boot_get_module("/bin/program/hexedit",&hexedit_image,&hexedit_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/hexedit (non-fatal)");
+        hexedit_image=0;
+        hexedit_size=0;
+    }
     if(!boot_get_module("/bin/gui-demo",&gui_demo_image,&gui_demo_size)){
         klog(KLOG_ERROR,"install: missing /bin/gui-demo");
         return FS_ERROR_NOT_FOUND;
@@ -2111,7 +2120,7 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX){
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX || hexedit_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -2187,6 +2196,13 @@ static int32_t install_program_payload(void){
             return status;
         }
     }
+    if(hexedit_image && hexedit_size){
+        status=fat32_write_file("/bin/program/hexedit",hexedit_image,(uint32_t)hexedit_size);
+        if(status<0){
+            klogf(KLOG_ERROR,"install: write hexedit %d",status);
+            return status;
+        }
+    }
     if(tetris_image && tetris_size){
         status=fat32_write_file("/bin/tetris",tetris_image,(uint32_t)tetris_size);
         if(status<0){
@@ -2234,6 +2250,10 @@ static int32_t install_program_payload(void){
     }
     if(logview_image && logview_size){
         status=verify_installed_file("/bin/program/logview",(uint32_t)logview_size);
+        if(status<0) return status;
+    }
+    if(hexedit_image && hexedit_size){
+        status=verify_installed_file("/bin/program/hexedit",(uint32_t)hexedit_size);
         if(status<0) return status;
     }
     if(tetris_image && tetris_size){

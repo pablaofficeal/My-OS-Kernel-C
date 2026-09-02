@@ -2,7 +2,7 @@
 #include "../../drivers/interrupts/timer.h"
 #include "../diagnostics/klog.h"
 #include "../diagnostics/panic.h"
-#include "../../arch/x86_64/gdt.h"
+#include "../../arch/x86_64/gdt/include/gdt.h"
 #include "../../mm/vmm.h"
 #include "../../lib/string.h"
 
