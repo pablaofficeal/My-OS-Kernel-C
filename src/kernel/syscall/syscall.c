@@ -85,8 +85,10 @@ static void install_worker(void *argument){
     block_device_begin_exclusive_io();
     int32_t result;
     if(install_fs_type == FS_TYPE_EXT2){
-        result = vfs_format_device_ex(install_device, install_serial, "ERASE", VFS_FS_EXT2);
-        if(result==0) install_progress(40, "ext2 formatted");
+        klogf(KLOG_WARN, "install: ext2 boot not yet implemented, falling back to FAT32 UEFI for bootable disk");
+        install_progress(5, "ext2 boot fallback: creating FAT32 ESP");
+        result=vfs_format_uefi_device_progress(install_device,install_serial,install_progress);
+        if(result==0) install_progress(40, "ESP FAT32 ready (ext2 data requires manual Disks format)");
     } else {
         result=vfs_format_uefi_device_progress(install_device,install_serial,install_progress);
     }
