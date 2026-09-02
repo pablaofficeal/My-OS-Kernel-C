@@ -2362,8 +2362,9 @@ static int32_t install_program_payload(void){
         (void)payload_write_file("/src/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
         (void)payload_write_file("/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
     }
-    if(boot_get_module("/src/demo/screenshot.png",&demo_png,&demo_png_sz) && demo_png && demo_png_sz<=UINT32_MAX){
-        (void)payload_write_file("/src/demo/screenshot.png",demo_png,(uint32_t)demo_png_sz);
+    if(boot_get_module("/src/demo/image.png",&demo_png,&demo_png_sz) && demo_png && demo_png_sz<=UINT32_MAX){
+        (void)payload_write_file("/src/demo/image.png",demo_png,(uint32_t)demo_png_sz);
+        (void)payload_write_file("/demo/image.png",demo_png,(uint32_t)demo_png_sz);
     }
     if(tetris_image && tetris_size){
         status=payload_verify_file("/bin/tetris",(uint32_t)tetris_size);
