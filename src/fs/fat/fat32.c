@@ -1865,8 +1865,10 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
     "    module_path: boot():/lib/libpguiw.a\n"
+    "    module_path: boot():/lib/libpurefs.a\n"
     "    module_path: boot():/include/puregui.h\n"
     "    module_path: boot():/include/pguiw.h\n"
+    "    module_path: boot():/include/purefs.h\n"
     "/PureC OS (UEFI fallback previous image)\n"
     "    protocol: limine\n"
     "    kernel_path: boot():/boot/kernel2.elf\n"
@@ -1889,8 +1891,10 @@ static const char uefi_limine_config[]=
     "    module_path: boot():/lib/libpurec.a\n"
     "    module_path: boot():/lib/libpuregui.a\n"
     "    module_path: boot():/lib/libpguiw.a\n"
+    "    module_path: boot():/lib/libpurefs.a\n"
     "    module_path: boot():/include/puregui.h\n"
-    "    module_path: boot():/include/pguiw.h\n";
+    "    module_path: boot():/include/pguiw.h\n"
+    "    module_path: boot():/include/purefs.h\n";
 
 static int32_t write_uefi_config(const char *directory,
                                  const char *alias_path){
@@ -1906,22 +1910,26 @@ static int32_t verify_installed_file(const char *path, uint32_t expected_size){
 }
 
 static int32_t install_gui_development_payload(void){
-    const void *core_library,*widget_library,*core_header,*widget_header;
-    uint64_t core_library_size,widget_library_size;
-    uint64_t core_header_size,widget_header_size;
+    const void *core_library,*widget_library,*fs_library,*core_header,*widget_header,*fs_header;
+    uint64_t core_library_size,widget_library_size,fs_library_size;
+    uint64_t core_header_size,widget_header_size,fs_header_size;
     if(!boot_get_module("/lib/libpuregui.a",&core_library,
                         &core_library_size)
        || !boot_get_module("/lib/libpguiw.a",&widget_library,
                            &widget_library_size)
+       || !boot_get_module("/lib/libpurefs.a",&fs_library,
+                           &fs_library_size)
        || !boot_get_module("/include/puregui.h",&core_header,
                            &core_header_size)
        || !boot_get_module("/include/pguiw.h",&widget_header,
-                           &widget_header_size)){
-        klog(KLOG_ERROR,"install: missing PureGUI development module");
+                           &widget_header_size)
+       || !boot_get_module("/include/purefs.h",&fs_header,
+                           &fs_header_size)){
+        klog(KLOG_ERROR,"install: missing PureGUI/PureFS development module");
         return FS_ERROR_NOT_FOUND;
     }
-    if(core_library_size>UINT32_MAX || widget_library_size>UINT32_MAX
-       || core_header_size>UINT32_MAX || widget_header_size>UINT32_MAX)
+    if(core_library_size>UINT32_MAX || widget_library_size>UINT32_MAX || fs_library_size>UINT32_MAX
+       || core_header_size>UINT32_MAX || widget_header_size>UINT32_MAX || fs_header_size>UINT32_MAX)
         return FS_ERROR_UNSUPPORTED;
     int32_t status=write_lfn_file(
         "/lib","libpuregui.a","/lib/libpur~1.a","libpur~1.a",
@@ -1931,11 +1939,17 @@ static int32_t install_gui_development_payload(void){
     status=fat32_write_file("/lib/libpguiw.a",widget_library,
                             (uint32_t)widget_library_size);
     if(status<0) return status;
+    status=fat32_write_file("/lib/libpurefs.a",fs_library,
+                            (uint32_t)fs_library_size);
+    if(status<0) return status;
     status=fat32_write_file("/include/puregui.h",core_header,
                             (uint32_t)core_header_size);
     if(status<0) return status;
     status=fat32_write_file("/include/pguiw.h",widget_header,
                             (uint32_t)widget_header_size);
+    if(status<0) return status;
+    status=fat32_write_file("/include/purefs.h",fs_header,
+                            (uint32_t)fs_header_size);
     if(status<0) return status;
     status=verify_installed_file("/lib/libpuregui.a",
                                  (uint32_t)core_library_size);
@@ -1943,11 +1957,17 @@ static int32_t install_gui_development_payload(void){
     status=verify_installed_file("/lib/libpguiw.a",
                                  (uint32_t)widget_library_size);
     if(status<0) return status;
+    status=verify_installed_file("/lib/libpurefs.a",
+                                 (uint32_t)fs_library_size);
+    if(status<0) return status;
     status=verify_installed_file("/include/puregui.h",
                                  (uint32_t)core_header_size);
     if(status<0) return status;
-    return verify_installed_file("/include/pguiw.h",
+    status=verify_installed_file("/include/pguiw.h",
                                  (uint32_t)widget_header_size);
+    if(status<0) return status;
+    return verify_installed_file("/include/purefs.h",
+                                 (uint32_t)fs_header_size);
 }
 
 static int32_t install_firmware_payload(void){
@@ -2120,7 +2140,13 @@ static int32_t install_program_payload(void){
         klog(KLOG_ERROR,"install: missing /lib/libpurec.a");
         return FS_ERROR_NOT_FOUND;
     }
-    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX || hexedit_size>UINT32_MAX){
+    const void *fs_library_image; uint64_t fs_library_size;
+    bool has_fs_lib = boot_get_module("/lib/libpurefs.a",&fs_library_image,&fs_library_size);
+    if(!has_fs_lib){
+        klog(KLOG_ERROR,"install: missing /lib/libpurefs.a");
+        return FS_ERROR_NOT_FOUND;
+    }
+    if(init_size>UINT32_MAX || installer_size>UINT32_MAX || snake_size>UINT32_MAX || terminal_size>UINT32_MAX || nano_size>UINT32_MAX || system_size>UINT32_MAX || files_size>UINT32_MAX || gui_demo_size>UINT32_MAX || library_size>UINT32_MAX || fs_library_size>UINT32_MAX || settings_size>UINT32_MAX || monitor_size>UINT32_MAX || disks_size>UINT32_MAX || tetris_size>UINT32_MAX || logview_size>UINT32_MAX || hexedit_size>UINT32_MAX){
         klog(KLOG_ERROR,"install: module too large");
         return FS_ERROR_NOT_FOUND;
     }
@@ -2230,6 +2256,12 @@ static int32_t install_program_payload(void){
                             (uint32_t)library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
+    }
+    if(status<0) return status;
+    status=fat32_write_file("/lib/libpurefs.a",fs_library_image,
+                            (uint32_t)fs_library_size);
+    if(status<0){
+        klogf(KLOG_ERROR,"install: write libpurefs %d",status);
     }
     if(status<0) return status;
     status=verify_installed_file("/bin/gui-demo",(uint32_t)gui_demo_size);
