@@ -43,6 +43,9 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
     uint32_t total_blocks = part_sectors / (1024 / BLOCK_SECTOR_SIZE);
     if (total_blocks < 128) return -13;
     if (total_blocks > 0x7FFFFFFF) total_blocks = 0x7FFFFFFF;
+    uint32_t max_groups = 32;
+    uint32_t max_blocks = 8192 * max_groups;
+    if (total_blocks > max_blocks) total_blocks = max_blocks;
     uint32_t blocks_per_group = 8192;
     uint32_t inodes_per_group = 1024;
     uint32_t groups = (total_blocks + blocks_per_group - 1) / blocks_per_group;
@@ -158,6 +161,38 @@ int32_t ext2_format_at(uint32_t part_lba, uint32_t part_sectors) {
     memcpy(sec, blk + 512, 512);
     if (!block_device_write(root_lba + 1, sec)) {
         return -1;
+    }
+    for (uint32_t g = 1; g < groups && g < 32; g++) {
+        uint32_t bmb = part_lba + g * 8192 * 2;
+        memset(blk, 0, 1024);
+        memcpy(sec, blk, 512);
+        if (!block_device_write(bmb, sec)) return -1;
+        memcpy(sec, blk + 512, 512);
+        if (!block_device_write(bmb + 1, sec)) return -1;
+        uint32_t imb = bmb + 2;
+        memset(blk, 0, 1024);
+        memcpy(sec, blk, 512);
+        if (!block_device_write(imb, sec)) return -1;
+        memcpy(sec, blk + 512, 512);
+        if (!block_device_write(imb + 1, sec)) return -1;
+        uint32_t itb = imb + 2;
+        for (uint32_t b = 0; b < 32; b++) {
+            memset(blk, 0, 1024);
+            memcpy(sec, blk, 512);
+            if (!block_device_write(itb + b * 2, sec)) return -1;
+            memcpy(sec, blk + 512, 512);
+            if (!block_device_write(itb + b * 2 + 1, sec)) return -1;
+        }
+        uint8_t gd2[32] = {0};
+        ext2_write_u32(gd2, bmb / 2);
+        ext2_write_u32(gd2 + 4, imb / 2);
+        ext2_write_u32(gd2 + 8, itb / 2);
+        ext2_write_u16(gd2 + 12, 8192);
+        ext2_write_u16(gd2 + 14, 1024);
+        uint8_t gdblk[1024];
+        if (!ext2_read_block(2, gdblk)) {}
+        memcpy(gdblk + g * 32, gd2, 32);
+        ext2_write_block(2, gdblk);
     }
     if (!block_device_flush()) {
         return -1;

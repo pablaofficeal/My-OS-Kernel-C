@@ -96,48 +96,65 @@ bool ext2_write_inode(uint32_t ino, const uint8_t *in) {
 }
 
 uint32_t ext2_alloc_block(void) {
-    uint32_t gd_block = (g_vol.block_size == 1024) ? 2 : 1;
-    uint32_t per = g_vol.block_size / 32;
-    if (!ext2_read_block(3, g_block)) return 0;
-    uint32_t total = g_vol.total_blocks;
-    for (uint32_t b = 135; b < total; b++) {
-        uint32_t byte = b / 8;
-        uint32_t bit = b % 8;
-        if (byte >= g_vol.block_size) break;
-        if ((g_block[byte] & (1u << bit)) == 0) {
-            g_block[byte] |= (1u << bit);
-            if (!ext2_write_block(3, g_block)) return 0;
-            uint8_t gd[32];
-            if (!ext2_read_block(gd_block, g_block)) return 0;
-            for (int i = 0; i < 32; i++) gd[i] = g_block[i];
-            uint32_t free = ext2_read_u16(gd + 12);
-            if (free) ext2_write_u16(gd + 12, free - 1);
-            g_block[0] = gd[0]; g_block[1]=gd[1]; g_block[2]=gd[2]; g_block[3]=gd[3];
-            ext2_group_write(0, gd);
-            uint8_t zero[4096] = {0};
-            ext2_write_block(b, zero);
-            return b;
+    uint32_t groups = g_vol.groups_count;
+    if (groups == 0) groups = 1;
+    for (uint32_t g = 0; g < groups; g++) {
+        uint8_t gd[32];
+        if (!ext2_group_desc_read(g, gd)) continue;
+        uint32_t bmb = ext2_read_u32(gd);
+        if (!bmb) continue;
+        uint8_t bmp[4096];
+        if (!ext2_read_block(bmb, bmp)) continue;
+        uint32_t start = (g == 0) ? 135 : 0;
+        uint32_t end = g_vol.blocks_per_group;
+        if (g == groups - 1) {
+            uint32_t rem = g_vol.total_blocks % g_vol.blocks_per_group;
+            if (rem) end = rem;
+        }
+        for (uint32_t b = start; b < end; b++) {
+            uint32_t byte = b / 8;
+            uint32_t bit = b % 8;
+            if (byte >= g_vol.block_size) break;
+            if ((bmp[byte] & (1u << bit)) == 0) {
+                bmp[byte] |= (1u << bit);
+                if (!ext2_write_block(bmb, bmp)) return 0;
+                uint16_t free = ext2_read_u16(gd + 12);
+                if (free) ext2_write_u16(gd + 12, free - 1);
+                ext2_group_write(g, gd);
+                uint32_t abs = g * g_vol.blocks_per_group + b;
+                if (g == 0) abs = b;
+                else abs = g * g_vol.blocks_per_group + b;
+                uint8_t zero[4096] = {0};
+                ext2_write_block(abs, zero);
+                return abs;
+            }
         }
     }
     return 0;
 }
 
 uint32_t ext2_alloc_inode(void) {
-    if (!ext2_read_block(4, g_block)) return 0;
-    for (uint32_t i = 12; i < g_vol.inodes_per_group; i++) {
-        uint32_t byte = i / 8;
-        uint32_t bit = i % 8;
-        if ((g_block[byte] & (1u << bit)) == 0) {
-            g_block[byte] |= (1u << bit);
-            if (!ext2_write_block(4, g_block)) return 0;
-            uint8_t gd[32];
-            uint32_t gd_block = (g_vol.block_size == 1024) ? 2 : 1;
-            if (!ext2_read_block(gd_block, g_block)) return 0;
-            for (int j = 0; j < 32; j++) gd[j] = g_block[j];
-            uint32_t free = ext2_read_u16(gd + 14);
-            if (free) ext2_write_u16(gd + 14, free - 1);
-            ext2_group_write(0, gd);
-            return i + 1;
+    uint32_t groups = g_vol.groups_count;
+    if (groups == 0) groups = 1;
+    for (uint32_t g = 0; g < groups; g++) {
+        uint8_t gd[32];
+        if (!ext2_group_desc_read(g, gd)) continue;
+        uint32_t imb = ext2_read_u32(gd + 4);
+        if (!imb) continue;
+        uint8_t bmp[4096];
+        if (!ext2_read_block(imb, bmp)) continue;
+        uint32_t start = (g == 0) ? 12 : 0;
+        for (uint32_t i = start; i < g_vol.inodes_per_group; i++) {
+            uint32_t byte = i / 8;
+            uint32_t bit = i % 8;
+            if ((bmp[byte] & (1u << bit)) == 0) {
+                bmp[byte] |= (1u << bit);
+                if (!ext2_write_block(imb, bmp)) return 0;
+                uint16_t free = ext2_read_u16(gd + 14);
+                if (free) ext2_write_u16(gd + 14, free - 1);
+                ext2_group_write(g, gd);
+                return g * g_vol.inodes_per_group + i + 1;
+            }
         }
     }
     return 0;

@@ -63,11 +63,14 @@ int32_t ext2_file_read(int32_t descriptor, void *buffer, uint32_t count) {
     return got;
 }
 
+static uint32_t g_blocks[8192];
+
 static int32_t ext2_write_data(uint32_t ino, const uint8_t *data, uint32_t size) {
     uint8_t ib[256];
     if (!ext2_inode_read(ino, ib)) return -1;
     uint32_t bcnt = (size + 1023) / 1024;
-    uint32_t *blocks = (uint32_t*)ext2_scratch_sector();
+    if (bcnt > 8192) return -4;
+    uint32_t *blocks = g_blocks;
     for (uint32_t i=0;i<bcnt;i++) { blocks[i]=ext2_alloc_block(); if(!blocks[i]) return -4; }
     for (uint32_t i=0;i<bcnt;i++) {
         uint8_t tmp[1024]={0};
