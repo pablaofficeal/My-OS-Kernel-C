@@ -2,6 +2,7 @@
 #include "include/ext2_block.h"
 #include "include/ext2_inode.h"
 #include "../../drivers/storage/block_device.h"
+#include "../../kernel/diagnostics/klog.h"
 
 static struct ext2_volume g_vol;
 static uint8_t g_sector[BLOCK_SECTOR_SIZE] __attribute__((aligned(2)));
@@ -131,6 +132,7 @@ uint32_t ext2_alloc_block(void) {
             }
         }
     }
+    klogf(KLOG_ERROR,"ext2_alloc_block: no free block groups=%u total=%u",g_vol.groups_count,g_vol.total_blocks);
     return 0;
 }
 
@@ -158,5 +160,6 @@ uint32_t ext2_alloc_inode(void) {
             }
         }
     }
+    klogf(KLOG_ERROR,"ext2_alloc_inode: no free inode groups=%u",g_vol.groups_count);
     return 0;
 }
