@@ -634,7 +634,6 @@ void userspace_log_thread(void *arg){
 }
 
 void userspace_run(void){
-    // Fallback single-threaded loop (when scheduler not available)
     for(;;){
         ps2_mouse_poll();
         block_device_poll_usb_hotplug();

@@ -32,6 +32,13 @@ static bool thread_stack_return_valid(uint64_t rsp){
     return return_address!=0;
 }
 
+static void idle_thread_func(void *arg){
+    (void)arg;
+    for(;;){
+        __asm__ volatile("hlt");
+    }
+}
+
 static void thread_trampoline(void){
     // This runs as new thread's first execution after ret.
     struct thread *self = current;
@@ -42,6 +49,9 @@ static void thread_trampoline(void){
            against the first context switch and can corrupt saved RSP values. */
         if(!self->user_mode) __asm__ volatile("sti":::"memory");
         self->entry(self->arg);
+    }
+    if(self && self->id == 0){
+        for(;;) __asm__ volatile("hlt");
     }
     scheduler_exit();
     for(;;) __asm__ volatile("hlt");
@@ -62,8 +72,9 @@ void scheduler_init(void){
     idle->affinity = -1;
     idle->ticks_remaining = SCHEDULER_TIME_SLICE_MS;
     strncpy(idle->name, "idle", sizeof(idle->name)-1);
-    idle->entry = NULL;
+    idle->entry = idle_thread_func;
     idle->address_space=vmm_kernel_address_space();
+    idle->rsp=create_initial_stack(idle);
     current = idle;
     initialized = true;
     klogf(KLOG_OK, "sched: initialized, cores=%u max_threads=%u stack=%u", core_count, SCHEDULER_MAX_THREADS, SCHEDULER_STACK_SIZE);
@@ -193,10 +204,11 @@ static struct thread *pick_next(void){
        CPU-bound higher-priority task stayed runnable. */
     for(int iter=1; iter<SCHEDULER_MAX_THREADS; iter++){
         int idx = (start+iter)%SCHEDULER_MAX_THREADS;
-        if(threads[idx].state==THREAD_READY) return &threads[idx];
+        if(idx != 0 && threads[idx].state==THREAD_READY) return &threads[idx];
     }
-    if(current->state==THREAD_RUNNING) return current;
-    if(threads[0].state!=THREAD_FREE) return &threads[0];
+    if(current && current->id != 0 && current->state==THREAD_RUNNING) return current;
+    threads[0].state = THREAD_RUNNING;
+    return &threads[0];
     return NULL;
 }
 

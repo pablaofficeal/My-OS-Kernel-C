@@ -21,6 +21,7 @@ bool vfs_mount_root_with_fs(uint8_t fs_type);
 bool vfs_is_root_mounted(void);
 const char *vfs_root_device_name(void);
 uint8_t vfs_root_fs_type(void);
+void vfs_set_active_fs(uint8_t fs_type);
 const char *vfs_fs_type_name(uint8_t fs_type);
 int32_t vfs_open(const char *path);
 int32_t vfs_read(int32_t descriptor, void *buffer, uint32_t count);

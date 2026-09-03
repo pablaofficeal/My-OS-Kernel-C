@@ -1863,12 +1863,22 @@ static int32_t payload_write_alias(const char *directory, const char *long_name,
                                    const char *alias_path, const char *alias_name,
                                    const void *data, uint32_t size){
     if(install_target_is_ext2){
-        (void)directory;
         (void)alias_path;
         (void)alias_name;
-        return ext2_write_file(long_name,data,size);
+        char full_path[256];
+        uint32_t dlen = (uint32_t)strlen(directory);
+        uint32_t nlen = (uint32_t)strlen(long_name);
+        if(dlen + 1 + nlen >= sizeof(full_path)) return FS_ERROR_INVALID;
+        memcpy(full_path, directory, dlen);
+        if(dlen == 0 || full_path[dlen-1] != '/') {
+            full_path[dlen] = '/';
+            dlen++;
+        }
+        memcpy(full_path + dlen, long_name, nlen);
+        full_path[dlen + nlen] = '\0';
+        return ext2_write_file(full_path, data, size);
     }
-    return write_lfn_file(directory,long_name,alias_path,alias_name,data,size);
+    return write_lfn_file(directory, long_name, alias_path, alias_name, data, size);
 }
 
 static int32_t payload_verify_file(const char *path, uint32_t expected_size){
@@ -1975,7 +1985,7 @@ static int32_t install_gui_development_payload(void){
     if(core_library_size>UINT32_MAX || widget_library_size>UINT32_MAX || fs_library_size>UINT32_MAX
        || core_header_size>UINT32_MAX || widget_header_size>UINT32_MAX || fs_header_size>UINT32_MAX)
         return FS_ERROR_UNSUPPORTED;
-    int32_t status=write_lfn_file(
+    int32_t status=payload_write_alias(
         "/lib","libpuregui.a","/lib/libpur~1.a","libpur~1.a",
         core_library,(uint32_t)core_library_size
     );
@@ -1983,7 +1993,7 @@ static int32_t install_gui_development_payload(void){
     status=payload_write_file("/lib/libpguiw.a",widget_library,
                             (uint32_t)widget_library_size);
     if(status<0) return status;
-    status=write_lfn_file("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library,(uint32_t)fs_library_size);
+    status=payload_write_alias("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library,(uint32_t)fs_library_size);
     if(status<0) return status;
     status=payload_write_file("/include/puregui.h",core_header,
                             (uint32_t)core_header_size);
@@ -1994,30 +2004,51 @@ static int32_t install_gui_development_payload(void){
     status=payload_write_file("/include/purefs.h",fs_header,
                             (uint32_t)fs_header_size);
     if(status<0) return status;
-    status=verify_installed_file("/lib/libpuregui.a",
-                                 (uint32_t)core_library_size);
+    status=payload_verify_file("/lib/libpuregui.a",
+                                (uint32_t)core_library_size);
     if(status<0) return status;
-    status=verify_installed_file("/lib/libpguiw.a",
-                                 (uint32_t)widget_library_size);
+    status=payload_verify_file("/lib/libpguiw.a",
+                                (uint32_t)widget_library_size);
     if(status<0) return status;
-    status=verify_installed_file("/lib/libpurefs.a",
-                                 (uint32_t)fs_library_size);
+    status=payload_verify_file("/lib/libpurefs.a",
+                                (uint32_t)fs_library_size);
     if(status<0) return status;
-    status=verify_installed_file("/include/puregui.h",
-                                 (uint32_t)core_header_size);
+    status=payload_verify_file("/include/puregui.h",
+                                (uint32_t)core_header_size);
     if(status<0) return status;
-    status=verify_installed_file("/include/pguiw.h",
-                                 (uint32_t)widget_header_size);
+    status=payload_verify_file("/include/pguiw.h",
+                                (uint32_t)widget_header_size);
     if(status<0) return status;
-    return verify_installed_file("/include/purefs.h",
-                                 (uint32_t)fs_header_size);
+    status=payload_verify_file("/include/purefs.h",
+                                (uint32_t)fs_header_size);
+    if(status<0) return status;
+
+    const void *audio_library, *audio_header;
+    uint64_t audio_library_size, audio_header_size;
+    if(boot_get_module("/lib/libpureaudio.a", &audio_library, &audio_library_size)
+       && boot_get_module("/include/pureaudio.h", &audio_header, &audio_header_size)){
+        if(audio_library_size<=UINT32_MAX && audio_header_size<=UINT32_MAX){
+            int32_t st=payload_write_alias(
+                "/lib","libpureaudio.a","/lib/libpur~3.a","libpur~3.a",
+                audio_library,(uint32_t)audio_library_size
+            );
+            if(st>=0){
+                st=payload_write_file("/include/pureaudio.h",audio_header,(uint32_t)audio_header_size);
+            }
+            if(st>=0){
+                (void)payload_verify_file("/lib/libpureaudio.a",(uint32_t)audio_library_size);
+                (void)payload_verify_file("/include/pureaudio.h",(uint32_t)audio_header_size);
+            }
+        }
+    }
+    return 0;
 }
 
 static int32_t install_firmware_payload(void){
     // создаём /bin/firmware/Intel/wifi с учётом FAT32 8.3, прошивки храним с LFN
-    if(create_directory_checked("/bin/firmware")<0) return FS_ERROR_IO;
-    if(create_directory_checked("/bin/firmware/Intel")<0) return FS_ERROR_IO;
-    if(create_directory_checked("/bin/firmware/Intel/wifi")<0) return FS_ERROR_IO;
+    if(payload_mkdir("/bin/firmware")<0) return FS_ERROR_IO;
+    if(payload_mkdir("/bin/firmware/Intel")<0) return FS_ERROR_IO;
+    if(payload_mkdir("/bin/firmware/Intel/wifi")<0) return FS_ERROR_IO;
 
     struct fw_entry {
         const char *module_path; // Limine module путь (/firmware/...)
@@ -2055,26 +2086,21 @@ static int32_t install_firmware_payload(void){
         // проверка magic для .ucode
         if(size>=8){
             uint32_t magic=((uint32_t)((const uint8_t*)data)[4]) | ((uint32_t)((const uint8_t*)data)[5]<<8) | ((uint32_t)((const uint8_t*)data)[6]<<16) | ((uint32_t)((const uint8_t*)data)[7]<<24);
-            // 0x0A4C5749 little-endian 'IWL*'?
             if(magic!=0x0A4C5749U){
                 klogf(KLOG_WARN, "install: firmware %s bad magic 0x%08x, still copying", fw_table[i].long_name, magic);
             }
         }
-        // используем LFN: long_name + alias
-        int32_t st=write_lfn_file("/bin/firmware/Intel/wifi", fw_table[i].long_name, fw_table[i].alias_path, fw_table[i].alias_name, data, sz);
+        int32_t st=payload_write_alias("/bin/firmware/Intel/wifi", fw_table[i].long_name, fw_table[i].alias_path, fw_table[i].alias_name, data, sz);
         if(st<0){
             klogf(KLOG_WARN, "install: write firmware %s -> %s failed %d, try fallback short", fw_table[i].long_name, fw_table[i].alias_path, st);
-            // fallback: пробуем записать напрямую по короткому пути (без LFN)
             st=payload_write_file(fw_table[i].alias_path, data, sz);
             if(st<0){
                 klogf(KLOG_ERROR, "install: firmware %s fallback also failed %d", fw_table[i].long_name, st);
-                // не фатально - продолжаем с остальными
                 continue;
             }
         }
         klogf(KLOG_OK, "install: firmware %s (%u KB) -> %s [alias %s]", fw_table[i].long_name, sz/1024U, fw_table[i].alias_path, fw_table[i].alias_name);
-        // верификация по короткому пути (LFN чтение через длинное тоже проверим)
-        int32_t v=verify_installed_file(fw_table[i].alias_path, sz);
+        int32_t v=payload_verify_file(fw_table[i].alias_path, sz);
         if(v<0){
             klogf(KLOG_WARN, "install: verify firmware %s alias failed %d", fw_table[i].alias_path, v);
         } else {
@@ -2106,14 +2132,21 @@ static int32_t install_program_payload(void){
        || payload_mkdir("/game")<0
        || payload_mkdir("/lib")<0
        || payload_mkdir("/include")<0) return FS_ERROR_IO;
+    (void)payload_mkdir("/src");
+    (void)payload_mkdir("/src/demo");
+    (void)payload_mkdir("/demo");
     const void *init_image,*installer_image,*snake_image,*terminal_image;
     const void *gui_demo_image;
     const void *nano_image,*system_image,*files_image,*library_image;
-    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image,*hexedit_image;
+    const void *settings_image,*monitor_image,*disks_image,*tetris_image,*logview_image,*hexedit_image,*imgview_image;
     uint64_t init_size,installer_size,snake_size,terminal_size,nano_size;
     uint64_t system_size,files_size;
     uint64_t library_size,gui_demo_size;
-    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size,hexedit_size;
+    uint64_t settings_size,monitor_size,disks_size,tetris_size,logview_size,hexedit_size,imgview_size;
+    if(!boot_get_module("/bin/program/imgview",&imgview_image,&imgview_size)){
+        klog(KLOG_WARN,"install: missing /bin/program/imgview (non-fatal)");
+        imgview_image=0; imgview_size=0;
+    }
     if(!boot_get_module("/bin/init",&init_image,&init_size)){
         klog(KLOG_ERROR,"install: missing /bin/init");
         return FS_ERROR_NOT_FOUND;
@@ -2301,41 +2334,54 @@ static int32_t install_program_payload(void){
         klogf(KLOG_ERROR,"install: write libpurec %d",status);
     }
     if(status<0) return status;
-    status=write_lfn_file("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library_image,(uint32_t)fs_library_size);
+    status=payload_write_alias("/lib","libpurefs.a","/lib/libpur~2.a","libpur~2.a",fs_library_image,(uint32_t)fs_library_size);
     if(status<0){
         klogf(KLOG_ERROR,"install: write libpurefs %d",status);
     }
     if(status<0) return status;
-    status=verify_installed_file("/bin/gui-demo",(uint32_t)gui_demo_size);
+    status=payload_verify_file("/bin/gui-demo",(uint32_t)gui_demo_size);
     if(status<0) return status;
-    status=verify_installed_file("/bin/program/files",(uint32_t)files_size);
+    status=payload_verify_file("/bin/program/files",(uint32_t)files_size);
     if(status<0) return status;
     if(settings_image && settings_size){
-        status=verify_installed_file("/bin/program/settings",(uint32_t)settings_size);
+        status=payload_verify_file("/bin/program/settings",(uint32_t)settings_size);
         if(status<0) return status;
     }
     if(monitor_image && monitor_size){
-        status=verify_installed_file("/bin/program/monitor",(uint32_t)monitor_size);
+        status=payload_verify_file("/bin/program/monitor",(uint32_t)monitor_size);
         if(status<0) return status;
     }
     if(disks_image && disks_size){
-        status=verify_installed_file("/bin/program/disks",(uint32_t)disks_size);
+        status=payload_verify_file("/bin/program/disks",(uint32_t)disks_size);
         if(status<0) return status;
     }
     if(logview_image && logview_size){
-        status=verify_installed_file("/bin/program/logview",(uint32_t)logview_size);
+        status=payload_verify_file("/bin/program/logview",(uint32_t)logview_size);
         if(status<0) return status;
     }
     if(hexedit_image && hexedit_size){
-        status=verify_installed_file("/bin/program/hexedit",(uint32_t)hexedit_size);
+        status=payload_verify_file("/bin/program/hexedit",(uint32_t)hexedit_size);
         if(status<0) return status;
     }
+    if(imgview_image && imgview_size){
+        status=payload_write_file("/bin/program/imgview",imgview_image,(uint32_t)imgview_size);
+        if(status>=0) (void)payload_verify_file("/bin/program/imgview",(uint32_t)imgview_size);
+    }
+    const void *demo_bmp=NULL, *demo_png=NULL; uint64_t demo_bmp_sz=0, demo_png_sz=0;
+    if(boot_get_module("/src/demo/screenshot.bmp",&demo_bmp,&demo_bmp_sz) && demo_bmp && demo_bmp_sz<=UINT32_MAX){
+        (void)payload_write_file("/src/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
+        (void)payload_write_file("/demo/screenshot.bmp",demo_bmp,(uint32_t)demo_bmp_sz);
+    }
+    if(boot_get_module("/src/demo/image.png",&demo_png,&demo_png_sz) && demo_png && demo_png_sz<=UINT32_MAX){
+        (void)payload_write_file("/src/demo/image.png",demo_png,(uint32_t)demo_png_sz);
+        (void)payload_write_file("/demo/image.png",demo_png,(uint32_t)demo_png_sz);
+    }
     if(tetris_image && tetris_size){
-        status=verify_installed_file("/bin/tetris",(uint32_t)tetris_size);
+        status=payload_verify_file("/bin/tetris",(uint32_t)tetris_size);
         if(status<0) return status;
-        status=verify_installed_file("/bin/program/tetris",(uint32_t)tetris_size);
+        status=payload_verify_file("/bin/program/tetris",(uint32_t)tetris_size);
         if(status<0) return status;
-        status=verify_installed_file("/game/tetris",(uint32_t)tetris_size);
+        status=payload_verify_file("/game/tetris",(uint32_t)tetris_size);
         if(status<0) return status;
     }
     // firmware в /bin/firmware/Intel/wifi (LFN, 8.3 алиасы FW0000XX.UCO)
@@ -2370,8 +2416,9 @@ static int32_t install_uefi_payload(void){
                         &fallback_kernel_image_size)){
         if(!boot_get_module("/boot/kernel-fallback.elf",&fallback_kernel_image,
                             &fallback_kernel_image_size)){
-            klog(KLOG_ERROR,"install: missing fallback");
-            return FS_ERROR_NOT_FOUND;
+            klog(KLOG_WARN,"install: fallback kernel missing, using primary kernel.elf");
+            fallback_kernel_image = kernel_image;
+            fallback_kernel_image_size = (uint64_t)kernel_image_size;
         }
     }
     if(fallback_kernel_image_size>UINT32_MAX){
@@ -2573,6 +2620,7 @@ int32_t fat32_format_uefi_device_progress_ex(
     }
 
     if(callback) callback(70,"Formatting PureC system partition");
+    install_target_is_ext2 = use_ext2;
     if(use_ext2){
         if(callback) callback(70,"Formatting PureC system partition as ext2");
         if(ext2_format_at(data_start, data_sectors)!=0){
@@ -2592,35 +2640,15 @@ int32_t fat32_format_uefi_device_progress_ex(
             klogf(KLOG_ERROR,"fat32_uefi: ext2 system partition mount failed");
             return FS_ERROR_IO;
         }
-        if(callback) callback(88,"Copying programs to /bin and /game (ext2)");
-        // minimal ext2 payload via direct ext2 calls
-        {
-            int32_t st;
-            st = ext2_create_directory("/bin"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin %d",st); if(callback) callback(88,"Failed mkdir /bin"); return st;}
-            if(callback) callback(88,"Creating /bin/program");
-            st = ext2_create_directory("/bin/program"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /bin/program %d",st); if(callback) callback(88,"Failed mkdir /bin/program"); return st;}
-            st = ext2_create_directory("/game"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /game %d",st); return st;}
-            st = ext2_create_directory("/lib"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /lib %d",st); return st;}
-            st = ext2_create_directory("/include"); if(st<0 && st!=-5) {klogf(KLOG_ERROR,"ext2 mkdir /include %d",st); return st;}
-            // helper to write file
-            #define EXT2_WRITE(path, data, sz) do{ int32_t _r=ext2_write_file(path,data,sz); if(_r<0){klogf(KLOG_ERROR,"ext2 write %s %d sz=%u",path,_r,(uint32_t)sz); if(callback) callback(88,path); return _r;} }while(0)
-            const void *p; uint64_t sz;
-            if(callback) callback(88,"Writing /bin/init");
-            if(!boot_get_module("/bin/init",&p,&sz)) {klogf(KLOG_ERROR,"ext2 missing /bin/init"); return FS_ERROR_NOT_FOUND;}
-            EXT2_WRITE("/bin/init",p,(uint32_t)sz);
-            if(boot_get_module("/bin/installer",&p,&sz)) { if(callback) callback(88,"Writing /bin/installer"); EXT2_WRITE("/bin/installer",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/snake",&p,&sz)) { if(callback) callback(88,"Writing /bin/snake"); EXT2_WRITE("/bin/snake",p,(uint32_t)sz); if(callback) callback(88,"Writing /game/snake"); EXT2_WRITE("/game/snake",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/program/terminal",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/terminal"); EXT2_WRITE("/bin/program/terminal",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/program/nano",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/nano"); EXT2_WRITE("/bin/program/nano",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/program/system",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/system"); EXT2_WRITE("/bin/program/system",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/program/files",&p,&sz)) { if(callback) callback(88,"Writing /bin/program/files"); EXT2_WRITE("/bin/program/files",p,(uint32_t)sz); }
-            if(boot_get_module("/lib/libpurec.a",&p,&sz)) { if(callback) callback(88,"Writing /lib/libpurec.a"); EXT2_WRITE("/lib/libpurec.a",p,(uint32_t)sz); }
-            if(boot_get_module("/bin/gui-demo",&p,&sz)) { if(callback) callback(88,"Writing /bin/gui-demo"); EXT2_WRITE("/bin/gui-demo",p,(uint32_t)sz); }
-            #undef EXT2_WRITE
-            if(!block_device_flush()) return FS_ERROR_IO;
-            klogf(KLOG_OK,"fat32_uefi: ext2 system payload installed");
+        vfs_set_active_fs(VFS_FS_EXT2);
+        if(callback) callback(88,"Copying programs and libraries (ext2)");
+        status = install_program_payload();
+        if(status < 0){
+            klogf(KLOG_ERROR,"fat32_uefi: ext2 system payload failed %d", status);
+            return status;
         }
-        // keep ext2 mounted as system, clear fat32 volume so VFS will detect ext2
+        if(!block_device_flush()) return FS_ERROR_IO;
+        klogf(KLOG_OK,"fat32_uefi: ext2 system payload installed");
         memset(&volume,0,sizeof(volume));
         memset(handles,0,sizeof(handles));
         // leave ext2 mounted

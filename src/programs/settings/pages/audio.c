@@ -1,6 +1,7 @@
 #include "settings/audio_page.h"
 #include "../../../libgui/include/pguiw.h"
 #include "../../../libc/include/purec.h"
+#include "../../../libaudio/include/pureaudio.h"
 
 #define PAGE_LEFT 198
 #define PAGE_TOP 80
@@ -57,17 +58,16 @@ void audio_page_draw(struct pg_window *window,struct settings_model *model,
         model->muted=!model->muted; commit(model);
     }
     if(pg_button(window,(struct pg_rect){PAGE_LEFT+118,PAGE_TOP+100,92,28},
-                 "Test sound",event)) pc_audio_play_test();
+                 "Test sound",event)) pa_play_test_sound();
 
-    struct audio_status status={0};
-    (void)pc_audio_get_status(&status);
+    struct pa_status status={0};
+    (void)pa_get_status(&status);
     uint32_t output_top=PAGE_TOP+158;
     pg_window_rect(window,(struct pg_rect){PAGE_LEFT,output_top,width,126},
                    0x2B2D40);
     pg_window_text(window,PAGE_LEFT+18,output_top+20,"Output device",
                    window->theme.text);
-    const char *backend=status.backend==AUDIO_BACKEND_HDA
-        ? "High Definition Audio" : "Legacy PC speaker";
+    const char *backend=pa_backend_name(status.backend);
     pg_window_text(window,PAGE_LEFT+18,output_top+44,backend,
                    window->theme.muted_text);
     char position[32]="Device ";

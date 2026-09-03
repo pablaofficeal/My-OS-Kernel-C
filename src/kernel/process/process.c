@@ -174,19 +174,47 @@ int32_t process_spawn_elf(const void *image, uint64_t image_size,
 }
 
 int32_t process_spawn_module(const char *path, const char *command_line){
-    const void *image;
-    uint64_t size;
+    const void *image=NULL;
+    uint64_t size=0;
     const char *module_path=path;
     if(!path) return -1;
-    if(!boot_get_module(module_path,&image,&size)){
-        if(!program_alias_resolve(path,&module_path)
-           || !boot_get_module(module_path,&image,&size)) return -1;
-    }
+
     const char *name=path;
     for(const char *cursor=path;*cursor;cursor++){
         if(*cursor=='/' && cursor[1]) name=cursor+1;
     }
-    return process_spawn_elf(image,size,name,command_line);
+
+    if(boot_get_module(module_path,&image,&size)){
+        return process_spawn_elf(image,size,name,command_line);
+    }
+    if(program_alias_resolve(path,&module_path)
+       && boot_get_module(module_path,&image,&size)){
+        return process_spawn_elf(image,size,name,command_line);
+    }
+
+    // Fallback: load executable binary from VFS
+    int32_t fd=vfs_open(path);
+    if(fd<0 && module_path && module_path!=path){
+        fd=vfs_open(module_path);
+    }
+    if(fd>=0){
+        uint64_t pages=2048; // 8MB buffer
+        uint64_t phys=pmm_allocate_contiguous(pages);
+        if(phys){
+            void *vbuf=pmm_physical_to_virtual(phys);
+            int32_t read_bytes=vfs_read(fd,vbuf,8*1024*1024);
+            vfs_close(fd);
+            if(read_bytes>0){
+                int32_t pid=process_spawn_elf(vbuf,(uint64_t)read_bytes,name,command_line);
+                pmm_free_contiguous(phys,pages);
+                return pid;
+            }
+            pmm_free_contiguous(phys,pages);
+            return -1;
+        }
+        vfs_close(fd);
+    }
+    return -1;
 }
 
 int32_t process_wait(uint32_t pid, int32_t *status, bool nohang){

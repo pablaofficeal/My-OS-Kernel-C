@@ -264,9 +264,13 @@ static int32_t ext2_create_file_internal(const char *path) {
         pardir[0]='/'; pardir[1]='\0';
     }
     if(slash) {
-        // strip trailing?
         int32_t st=ext2_dir_resolve(pardir,&par_ino);
-        if(st<0) return st;
+        if(st<0) {
+            st=ext2_file_create_dir(pardir);
+            if(st<0 && st!=-5) return st;
+            st=ext2_dir_resolve(pardir,&par_ino);
+            if(st<0) return st;
+        }
     } else par_ino=2;
     uint32_t exist;
     if(ext2_dir_find(par_ino, base, &exist, 0)==0) return -5;
@@ -297,9 +301,9 @@ int32_t ext2_file_create(const char *path) {
 int32_t ext2_file_write(const char *path, const void *buffer, uint32_t count) {
     uint32_t ino;
     int32_t st = ext2_dir_resolve(path, &ino);
-    if (st == -2) {
+    if (st < 0) {
         st = ext2_create_file_internal(path);
-        if (st < 0) return st;
+        if (st < 0 && st != -5) return st;
         st = ext2_dir_resolve(path, &ino);
     }
     if (st < 0) return st;
