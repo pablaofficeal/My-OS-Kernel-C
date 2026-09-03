@@ -180,9 +180,37 @@ static void draw_image_view(struct pg_window *window, const struct image_data *i
     pg_window_clear(window, 0x001B2028); // Dark studio background
 
     if (!img->loaded || !img->pixels) {
-        pg_window_text(window, 20, 20, "Cannot load image format.", 0x00FF6B6B);
-        pg_window_text(window, 20, 44, "Supported: BMP (24-bit/32-bit), PPM (P6)", 0x00CCCCCC);
-        pg_window_text(window, 20, 68, img->path, 0x00888888);
+        const char *basename = img->path;
+        for (const char *p = img->path; *p; p++) {
+            if (*p == '/') basename = p + 1;
+        }
+
+        // Check if it's likely a compressed format
+        uint32_t nlen = pc_strlen(basename);
+        bool is_png = nlen >= 4 && (pc_strcmp(basename + nlen - 4, ".png") == 0 ||
+                                     pc_strcmp(basename + nlen - 4, ".PNG") == 0);
+        bool is_jpg = nlen >= 4 && (pc_strcmp(basename + nlen - 4, ".jpg") == 0 ||
+                                     pc_strcmp(basename + nlen - 4, ".JPG") == 0);
+
+        pg_window_rect(window, (struct pg_rect){0, 0, client.width, client.height}, 0x001B2028);
+        pg_window_rect(window, (struct pg_rect){0, 0, client.width, 48}, 0x00242B35);
+        pg_window_text(window, 8, 14, "Image Viewer", 0x00E0E0E0);
+
+        if (is_png || is_jpg) {
+            pg_window_text(window, 20, 72, "Cannot display compressed image.", 0x00FF6B6B);
+            if (is_png)
+                pg_window_text(window, 20, 96, "PNG format uses zlib compression - not supported.", 0x00CCAA44);
+            else
+                pg_window_text(window, 20, 96, "JPEG format uses lossy compression - not supported.", 0x00CCAA44);
+            pg_window_text(window, 20, 120, "Convert your image to BMP (24-bit) using:", 0x00AAAAAA);
+            pg_window_text(window, 20, 144, "  convert image.png image.bmp", 0x0066CCFF);
+            pg_window_text(window, 20, 168, "Supported formats: BMP 24-bit, BMP 32-bit, PPM P6", 0x00888888);
+        } else {
+            pg_window_text(window, 20, 72, "Cannot load image file.", 0x00FF6B6B);
+            pg_window_text(window, 20, 96, "Supported: BMP (24-bit, 32-bit, 8-bit), PPM (P6 binary)", 0x00CCCCCC);
+            pg_window_text(window, 20, 120, "File:", 0x00888888);
+            pg_window_text(window, 68, 120, img->path, 0x00AAAAAA);
+        }
         return;
     }
 
@@ -224,13 +252,19 @@ int main(void) {
     char cmdline[128];
     char path[128] = "/src/demo/screenshot.bmp";
 
-    if (pc_get_command_line(cmdline, sizeof(cmdline)) > 0) {
-        // Parse first argument if provided
-        uint32_t idx = 0;
-        while (cmdline[idx] && cmdline[idx] != ' ') idx++;
-        while (cmdline[idx] == ' ') idx++;
-        if (cmdline[idx] != '\0') {
-            pc_copy(path, cmdline + idx, sizeof(path));
+    int32_t cmdlen = pc_get_command_line(cmdline, sizeof(cmdline));
+    if (cmdlen > 0) {
+        // command_line is passed directly as the file path argument
+        // strip leading spaces
+        uint32_t start = 0;
+        while (cmdline[start] == ' ' || cmdline[start] == '\t') start++;
+        // strip trailing whitespace/newlines
+        uint32_t end = (uint32_t)cmdlen;
+        while (end > start && (cmdline[end-1] == ' ' || cmdline[end-1] == '\n' ||
+                                cmdline[end-1] == '\r' || cmdline[end-1] == '\t')) end--;
+        if (end > start) {
+            cmdline[end] = '\0';
+            pc_copy(path, cmdline + start, sizeof(path));
         }
     }
 
@@ -251,7 +285,12 @@ int main(void) {
     char title[64];
     pc_copy(title, "Image Viewer - ", sizeof(title));
     uint32_t tlen = pc_strlen(title);
-    pc_copy(title + tlen, path, sizeof(title) - tlen);
+    // Show only filename, not full path in title
+    const char *basename = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') basename = p + 1;
+    }
+    pc_copy(title + tlen, basename, sizeof(title) - tlen);
 
     if (!pg_window_center(&window, title, win_w, win_h)) return 1;
 
